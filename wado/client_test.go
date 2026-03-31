@@ -1,0 +1,193 @@
+package wado_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+
+	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/wado"
+)
+
+func newWADOTestServer(t *testing.T) (*httptest.Server, *mockStore) {
+	t.Helper()
+	h, store := newTestHandler(t)
+	return httptest.NewServer(h), store
+}
+
+func TestClient_RetrieveStudy_OK(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	objects, err := client.RetrieveStudy(context.Background(), "1.2.3")
+	if err != nil {
+		t.Fatalf("RetrieveStudy() error: %v", err)
+	}
+	if len(objects) == 0 {
+		t.Fatal("want at least one object")
+	}
+}
+
+func TestClient_RetrieveStudy_NotFound(t *testing.T) {
+	srv, _ := newWADOTestServer(t)
+	defer srv.Close()
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	_, err := client.RetrieveStudy(context.Background(), "0.0.0.missing")
+	if err == nil {
+		t.Fatal("want error for missing study")
+	}
+}
+
+func TestClient_RetrieveSeries_OK(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	objects, err := client.RetrieveSeries(context.Background(), "1.2.3", "1.2.3.1")
+	if err != nil {
+		t.Fatalf("RetrieveSeries() error: %v", err)
+	}
+	if len(objects) == 0 {
+		t.Fatal("want at least one object")
+	}
+}
+
+func TestClient_RetrieveInstance_OK(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	obj, err := client.RetrieveInstance(context.Background(), "1.2.3", "1.2.3.1", "1.2.3.1.1")
+	if err != nil {
+		t.Fatalf("RetrieveInstance() error: %v", err)
+	}
+	if obj == nil {
+		t.Fatal("want non-nil object")
+	}
+}
+
+func TestClient_RetrieveMetadata_OK(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	meta, err := client.RetrieveMetadata(context.Background(), "1.2.3", "1.2.3.1", "1.2.3.1.1")
+	if err != nil {
+		t.Fatalf("RetrieveMetadata() error: %v", err)
+	}
+	if len(meta) == 0 {
+		t.Fatal("want non-empty metadata map")
+	}
+}
+
+func TestClient_StoreInstances_OK(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	obj := loadSampleDICOM(t)
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	err := client.StoreInstances(context.Background(), "", []media.DICOMObject{obj})
+	if err != nil {
+		t.Fatalf("StoreInstances() error: %v", err)
+	}
+	if len(store.stored) != 1 {
+		t.Fatalf("want 1 stored, got %d", len(store.stored))
+	}
+}
+
+func TestClient_StoreInstances_WithStudyUID(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	obj := loadSampleDICOM(t)
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	err := client.StoreInstances(context.Background(), "1.2.3", []media.DICOMObject{obj})
+	if err != nil {
+		t.Fatalf("StoreInstances() error: %v", err)
+	}
+	if len(store.stored) != 1 {
+		t.Fatalf("want 1 stored, got %d", len(store.stored))
+	}
+}
+
+func TestClient_StoreInstances_NilSlice(t *testing.T) {
+	srv, _ := newWADOTestServer(t)
+	defer srv.Close()
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	err := client.StoreInstances(context.Background(), "", nil)
+	if err != nil {
+		t.Fatalf("StoreInstances(nil) error: %v", err)
+	}
+}
+
+func TestClient_SearchStudies_OK(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	results, err := client.SearchStudies(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("SearchStudies() error: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("want at least one result")
+	}
+}
+
+func TestClient_SearchStudies_WithParams(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	params := url.Values{"PatientName": []string{"TEST"}}
+	_, err := client.SearchStudies(context.Background(), params)
+	if err != nil {
+		t.Fatalf("SearchStudies() error: %v", err)
+	}
+}
+
+func TestClient_SearchSeries_OK(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	_, err := client.SearchSeries(context.Background(), "1.2.3", nil)
+	if err != nil {
+		t.Fatalf("SearchSeries() error: %v", err)
+	}
+}
+
+func TestClient_SearchInstances_OK(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	_, err := client.SearchInstances(context.Background(), "1.2.3", "1.2.3.1", nil)
+	if err != nil {
+		t.Fatalf("SearchInstances() error: %v", err)
+	}
+}
+
+func TestClient_UnreachableServer(t *testing.T) {
+	client := wado.NewClient(wado.ClientParams{BaseURL: "http://127.0.0.1:1"})
+	_, err := client.RetrieveStudy(context.Background(), "1.2.3")
+	if err == nil {
+		t.Fatal("want error for unreachable server")
+	}
+}
+
+// ensure http and httptest imports are referenced
+var _ = http.StatusOK
+var _ *httptest.Server

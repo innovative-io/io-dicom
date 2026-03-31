@@ -1,48 +1,51 @@
 # Innovative IO Dicom
 
+Main CLI binary for SCU/SCP DICOM network operations and file utilities.
+The server (`-scp`) responds to SIGINT/SIGTERM for graceful shutdown.
+
 ## Usage
 
   -calledae string
-    	AE of the destination (default "DICOM_SCP")
+    	AE title expected by the destination (default "DICOM_SCP")
 
   -callingae string
-    	AE of the client (default "DICOM_SCU")
+    	AE title presented by this client (default "DICOM_SCU")
 
   -cecho
-    	Send C-Echo to the destination
+    	Send a C-ECHO request to the destination
 
   -cfind
-    	Send C-Find request to the destination
+    	Send a C-FIND request to the destination
 
   -cmove
-    	Send C-Move request to the destination
+    	Send a C-MOVE request to the destination
 
   -cstore
-    	Sends a C-Store request to the destination
+    	Send a C-STORE request to the destination (requires -file)
 
   -datastore string
-    	Directory to use as SCP storage
+    	Root directory for SCP storage (required with -scp)
 
   -destinationae string
-    	AE of the destination for a C-Move request
+    	Move-destination AE title (required with -cmove)
 
   -dump
-    	Dump contents of DICOM file to stdout
+    	Dump all tags of a DICOM file to stdout (requires -file)
 
   -file string
-    	DICOM file to be sent
+    	Path to a DICOM file (used with -cstore and -dump)
 
   -host string
-    	Destination host name or IP (default "localhost")
+    	Destination hostname or IP address (default "localhost")
 
   -port int
-    	Port of the destination system (default 1040)
+    	Destination TCP port (default 1040)
 
   -query string
-    	Comma seperated query to be sent with request ex: 00080020=test
+    	Comma-separated tag=value pairs added to the request, e.g. 00080020=20260101
 
   -scp
-    	Start a SCP
-      
+    	Start an SCP server; blocks until SIGINT/SIGTERM
+
   -studyuid string
-    	Study UID to be added to request
+    	Study Instance UID added to the request (used with -cfind, -cmove)

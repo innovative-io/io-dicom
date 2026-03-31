@@ -23,6 +23,7 @@ Innovative IO DICOM Golang Library
 - `codecs/jpeg2000/`: JPEG2000 codec interface and pure-Go fallback behavior
 - `transcoder/`: RLE and transfer pixel data transcoding helpers
 - `database/`: sqlite-backed data access layer
+- `wado/`: DICOMweb server and client (WADO-RS, STOW-RS, QIDO-RS)
 - `utils/`, `uuids/`, `clients/`, `implementation/`: shared utilities and implementation metadata
 - `samples/`: sample DICOM files used by tests and local validation
 
@@ -37,8 +38,6 @@ See `docs/project-structure.md` for package boundaries and maintenance conventio
 ## Breaking Changes
 
 Latest architecture cleanup includes package path renames.
-
-See `docs/migration-vNext.md` for full upgrade steps and bulk rewrite examples.
 
 ## No-CGO Codec Support
 
@@ -413,10 +412,78 @@ scp.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObj
   return dicomstatus.Success
 })
 
-err := scp.Start()
-if err != nil {
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+if err := scp.Start(ctx); err != nil {
   log.Fatal(err)
 }
+```
+
+### Start a DICOMweb (WADO-RS / STOW-RS / QIDO-RS) Server
+
+```golang
+// Implement wado.Store with your storage backend.
+type myStore struct{}
+
+func (s *myStore) RetrieveStudy(ctx context.Context, studyUID string) ([]media.DICOMObject, error) { ... }
+func (s *myStore) RetrieveSeries(ctx context.Context, studyUID, seriesUID string) ([]media.DICOMObject, error) { ... }
+func (s *myStore) RetrieveInstance(ctx context.Context, studyUID, seriesUID, sopUID string) (media.DICOMObject, error) { ... }
+func (s *myStore) StoreInstances(ctx context.Context, objs []media.DICOMObject) error { ... }
+func (s *myStore) SearchStudies(ctx context.Context, q url.Values) ([]media.DICOMObject, error) { ... }
+func (s *myStore) SearchSeries(ctx context.Context, studyUID string, q url.Values) ([]media.DICOMObject, error) { ... }
+func (s *myStore) SearchInstances(ctx context.Context, studyUID, seriesUID string, q url.Values) ([]media.DICOMObject, error) { ... }
+
+srv := wado.NewServer(wado.ServerParams{
+  Port:  8080,
+  Store: &myStore{},
+})
+
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+if err := srv.Start(ctx); err != nil {
+  log.Fatal(err)
+}
+```
+
+**Routes registered:**
+
+| Method | Path | Service |
+|--------|------|---------|
+| `GET` | `/wado/rs/studies/{studyUID}` | WADO-RS retrieve study |
+| `GET` | `/wado/rs/studies/{studyUID}/series/{seriesUID}` | WADO-RS retrieve series |
+| `GET` | `/wado/rs/studies/{studyUID}/series/{seriesUID}/instances/{sopInstanceUID}` | WADO-RS retrieve instance |
+| `GET` | `/wado/rs/studies/{studyUID}/metadata` | WADO-RS study metadata (JSON) |
+| `GET` | `/wado/rs/studies/{studyUID}/series/{seriesUID}/metadata` | WADO-RS series metadata (JSON) |
+| `GET` | `/wado/rs/studies/{studyUID}/series/{seriesUID}/instances/{sopInstanceUID}/metadata` | WADO-RS instance metadata (JSON) |
+| `GET` | `/wado/rs/studies/{studyUID}/series/{seriesUID}/instances/{sopInstanceUID}/frames/{frames}` | WADO-RS frame retrieval |
+| `POST` | `/stow/rs/studies` | STOW-RS store instances |
+| `POST` | `/stow/rs/studies/{studyUID}` | STOW-RS store into study |
+| `GET` | `/qido/rs/studies` | QIDO-RS search studies |
+| `GET` | `/qido/rs/studies/{studyUID}/series` | QIDO-RS search series |
+| `GET` | `/qido/rs/studies/{studyUID}/series/{seriesUID}/instances` | QIDO-RS search instances |
+
+### Use the DICOMweb Client
+
+```golang
+client := wado.NewClient(wado.ClientParams{
+  BaseURL: "https://dicom.example.com",
+  Timeout: 30 * time.Second,
+})
+
+// WADO-RS: retrieve all instances in a study
+objects, err := client.RetrieveStudy(ctx, studyUID)
+
+// WADO-RS: retrieve a single instance
+obj, err := client.RetrieveInstance(ctx, studyUID, seriesUID, sopInstanceUID)
+
+// WADO-RS: retrieve instance metadata as DICOMweb JSON
+meta, err := client.RetrieveMetadata(ctx, studyUID, seriesUID, sopInstanceUID)
+
+// STOW-RS: send instances to the server
+err = client.StoreInstances(ctx, studyUID, []media.DICOMObject{obj})
+
+// QIDO-RS: search for studies
+results, err := client.SearchStudies(ctx, url.Values{"PatientName": []string{"SMITH"}})
 ```
 
 ## Test
