@@ -59,7 +59,8 @@ build_charls() {
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_INSTALL_LIBDIR=lib \
-    -DBUILD_SHARED_LIBS=ON
+    -DBUILD_SHARED_LIBS=ON \
+    -DBUILD_TESTING=OFF
   cmake --build "$build" --parallel "$JOBS"
   cmake --install "$build"
 }
@@ -78,6 +79,7 @@ build_openjpeg() {
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_INSTALL_LIBDIR=lib \
     -DBUILD_SHARED_LIBS=ON \
+    -DBUILD_TESTING=OFF \
     -DBUILD_CODEC=ON
   cmake --build "$build" --parallel "$JOBS"
   cmake --install "$build"
@@ -97,6 +99,9 @@ build_jpegxl() {
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_INSTALL_LIBDIR=lib \
     -DBUILD_SHARED_LIBS=ON \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_DISABLE_FIND_PACKAGE_GTest=ON \
+    -DJPEGXL_ENABLE_TESTS=OFF \
     -DJPEGXL_ENABLE_TOOLS=ON \
     -DJPEGXL_ENABLE_DEVTOOLS=OFF \
     -DJPEGXL_ENABLE_BENCHMARK=OFF \
@@ -122,7 +127,8 @@ build_libjpeg_turbo() {
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_INSTALL_LIBDIR=lib \
     -DENABLE_SHARED=ON \
-    -DENABLE_STATIC=OFF
+    -DENABLE_STATIC=OFF \
+    -DBUILD_TESTING=OFF
   cmake --build "$build" --parallel "$JOBS"
   cmake --install "$build"
 }

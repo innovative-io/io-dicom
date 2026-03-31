@@ -41,14 +41,30 @@ jobs:
             yasm \
             zlib1g-dev
 
+      - name: Cache source-built codec dependencies
+        id: codec-deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.local/codec-deps
+            ${{ github.workspace }}/.build/codec-deps
+          key: ${{ runner.os }}-codec-deps-${{ hashFiles('tools/build_codec_deps_from_source.sh') }}
+
       - name: Build codec dependencies from source
+        if: steps.codec-deps-cache.outputs.cache-hit != 'true'
         env:
           PREFIX: ${{ github.workspace }}/.local/codec-deps
+          WORK_DIR: ${{ github.workspace }}/.build/codec-deps
           JOBS: 4
+        run: ./tools/build_codec_deps_from_source.sh
+
+      - name: Load codec dependency environment
+        env:
+          PREFIX: ${{ github.workspace }}/.local/codec-deps
         run: |
-          ./tools/build_codec_deps_from_source.sh
-          echo "${{ github.workspace }}/.local/codec-deps/bin" >> "$GITHUB_PATH"
-          source "${{ github.workspace }}/.local/codec-deps/env.sh"
+          test -f "$PREFIX/env.sh"
+          echo "$PREFIX/bin" >> "$GITHUB_PATH"
+          source "$PREFIX/env.sh"
           {
             echo "CODEC_DEPS_PREFIX=$CODEC_DEPS_PREFIX"
             echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
@@ -57,8 +73,5 @@ jobs:
             echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
           } >> "$GITHUB_ENV"
 
-      - name: Run untagged test suite
-        run: go test ./...
-
-      - name: Run tagged codec backend suite
-        run: ./tools/test_codec_tags.sh
+      - name: Run transfer syntax/media contract checks
+        run: make contract-check

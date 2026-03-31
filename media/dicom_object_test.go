@@ -3,6 +3,7 @@ package media
 import (
 	"testing"
 
+	"github.com/innovative-io/io-dicom/codecs"
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 )
@@ -441,6 +442,218 @@ func TestRGBRoundTripViaEncapsulatedCodecs(t *testing.T) {
 					t.Fatalf("pixel[%d]=%d want=%d full=%v", i, out[i], want[i], out[:len(want)])
 				}
 			}
+		})
+	}
+}
+
+func forcePassthroughCodecBackends(t *testing.T) {
+	forceCodecBackends(t, codecs.BackendConfig{
+		JPEG:      "passthrough",
+		JPEGLS:    "passthrough",
+		JPEG2000:  "passthrough",
+		JPEGXL:    "passthrough",
+		MPEG:      "passthrough",
+		JPIP:      "passthrough",
+		SMPTE2110: "passthrough",
+	})
+}
+
+func forceCodecBackends(t *testing.T, cfg codecs.BackendConfig) {
+	t.Helper()
+
+	err := codecs.UseBackends(cfg)
+	if err != nil {
+		t.Fatalf("failed to configure codec backends: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if err := codecs.UseBackends(codecs.BackendConfig{
+			JPEG:      "passthrough",
+			JPEGLS:    "passthrough",
+			JPEG2000:  "passthrough",
+			JPEGXL:    "passthrough",
+			MPEG:      "passthrough",
+			JPIP:      "passthrough",
+			SMPTE2110: "passthrough",
+		}); err != nil {
+			t.Fatalf("failed to restore passthrough codec backends: %v", err)
+		}
+	})
+}
+
+func newMonoRoundTripObject(transferSyntax *transfersyntax.TransferSyntax) DICOMObject {
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transferSyntax)
+	obj.SetExplicitVR(transferSyntax.UID != transfersyntax.ImplicitVRLittleEndian.UID)
+	obj.SetBigEndian(transferSyntax.UID == transfersyntax.ExplicitVRBigEndian.UID)
+
+	obj.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
+	obj.WriteString(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.4")
+	obj.WriteString(tags.PatientName, "ROUNDTRIP^MONO")
+	obj.WriteString(tags.PatientID, "MONO-01")
+	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
+	obj.WriteUint16GE(0x0028, 0x0006, "US", 0)
+	obj.WriteStringGE(0x0028, 0x0008, "IS", "1")
+	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
+	obj.WriteUint16GE(0x0028, 0x0011, "US", 4)
+	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
+	obj.WriteUint16GE(0x0028, 0x0101, "US", 8)
+	obj.WriteUint16GE(0x0028, 0x0103, "US", 0)
+
+	pixel := &DICOMTag{
+		Group:     0x7FE0,
+		Element:   0x0010,
+		Length:    4,
+		VR:        "OB",
+		Data:      []byte{7, 17, 27, 37},
+		BigEndian: false,
+	}
+	FillTag(pixel)
+	obj.Add(pixel)
+	return obj
+}
+
+func newMono12BitRoundTripObject() DICOMObject {
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+
+	obj.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
+	obj.WriteString(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.5")
+	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
+	obj.WriteUint16GE(0x0028, 0x0006, "US", 0)
+	obj.WriteStringGE(0x0028, 0x0008, "IS", "1")
+	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
+	obj.WriteUint16GE(0x0028, 0x0011, "US", 2)
+	obj.WriteUint16GE(0x0028, 0x0100, "US", 16)
+	obj.WriteUint16GE(0x0028, 0x0101, "US", 12)
+	obj.WriteUint16GE(0x0028, 0x0103, "US", 0)
+
+	pixel := &DICOMTag{
+		Group:     0x7FE0,
+		Element:   0x0010,
+		Length:    4,
+		VR:        "OW",
+		Data:      []byte{0x34, 0x02, 0xAB, 0x03},
+		BigEndian: false,
+	}
+	FillTag(pixel)
+	obj.Add(pixel)
+	return obj
+}
+
+func assertPixelPrefix(t *testing.T, obj DICOMObject, want []byte) {
+	t.Helper()
+
+	out, err := obj.GetPixelData(0)
+	if err != nil {
+		t.Fatalf("GetPixelData failed: %v", err)
+	}
+	if len(out) < len(want) {
+		t.Fatalf("expected at least %d bytes of pixel data, got %d", len(want), len(out))
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Fatalf("pixel[%d]=%d want=%d full=%v", i, out[i], want[i], out[:len(want)])
+		}
+	}
+}
+
+func assertPixelPrefixWithinDelta(t *testing.T, obj DICOMObject, want []byte, maxDelta byte) {
+	t.Helper()
+
+	out, err := obj.GetPixelData(0)
+	if err != nil {
+		t.Fatalf("GetPixelData failed: %v", err)
+	}
+	if len(out) < len(want) {
+		t.Fatalf("expected at least %d bytes of pixel data, got %d", len(want), len(out))
+	}
+	for i := range want {
+		got := out[i]
+		expected := want[i]
+		var delta byte
+		if got > expected {
+			delta = got - expected
+		} else {
+			delta = expected - got
+		}
+		if delta > maxDelta {
+			t.Fatalf("pixel[%d]=%d want=%d delta=%d full=%v", i, got, expected, delta, out[:len(want)])
+		}
+	}
+}
+
+func TestDatasetTransferSyntaxRoundTripMatrix(t *testing.T) {
+	InitDict()
+
+	tests := []struct {
+		name string
+		ts   *transfersyntax.TransferSyntax
+	}{
+		{name: "ImplicitVRLittleEndian", ts: transfersyntax.ImplicitVRLittleEndian},
+		{name: "ExplicitVRLittleEndian", ts: transfersyntax.ExplicitVRLittleEndian},
+		{name: "DeflatedExplicitVRLittleEndian", ts: transfersyntax.DeflatedExplicitVRLittleEndian},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := newMonoRoundTripObject(tt.ts)
+
+			data := obj.WriteToBytes()
+			if len(data) == 0 {
+				t.Fatal("expected non-empty serialized bytes")
+			}
+
+			parsed, err := NewDCMObjFromBytes(data)
+			if err != nil {
+				t.Fatalf("NewDCMObjFromBytes failed: %v", err)
+			}
+
+			if parsed.GetTransferSyntax() == nil || parsed.GetTransferSyntax().UID != tt.ts.UID {
+				t.Fatalf("unexpected transfer syntax: %v", parsed.GetTransferSyntax())
+			}
+			if got := parsed.GetString(tags.PatientName); got != "ROUNDTRIP^MONO" {
+				t.Fatalf("PatientName mismatch: got=%q", got)
+			}
+			if got := parsed.GetString(tags.PatientID); got != "MONO-01" {
+				t.Fatalf("PatientID mismatch: got=%q", got)
+			}
+			assertPixelPrefix(t, parsed, []byte{7, 17, 27, 37})
+		})
+	}
+}
+
+func TestRepresentativePixelTransferSyntaxRoundTrips(t *testing.T) {
+	forcePassthroughCodecBackends(t)
+
+	for _, tt := range representativePixelRoundTripCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := tt.newObj()
+
+			if err := obj.ChangeTransferSyntax(tt.ts); err != nil {
+				t.Fatalf("ChangeTransferSyntax to %s failed: %v", tt.ts.Name, err)
+			}
+
+			frameItemCount := 0
+			for i := 0; i < obj.TagCount(); i++ {
+				tag := obj.GetTagAt(i)
+				if tag != nil && tag.Group == 0xFFFE && tag.Element == 0xE000 && tag.Length > 0 {
+					frameItemCount++
+				}
+			}
+			if frameItemCount == 0 {
+				t.Fatalf("expected non-empty encapsulated frame items after converting to %s", tt.ts.Name)
+			}
+
+			if err := obj.ChangeTransferSyntax(transfersyntax.ExplicitVRLittleEndian); err != nil {
+				t.Fatalf("ChangeTransferSyntax back to ExplicitVRLittleEndian failed: %v", err)
+			}
+			if obj.GetTransferSyntax() == nil || obj.GetTransferSyntax().UID != transfersyntax.ExplicitVRLittleEndian.UID {
+				t.Fatalf("unexpected transfer syntax after roundtrip: %v", obj.GetTransferSyntax())
+			}
+			assertRoundTripByMode(t, obj, tt.want, tt.passthroughMode)
 		})
 	}
 }

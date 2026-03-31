@@ -55,7 +55,9 @@ that are wired to implemented codec/transcode paths.
 See `docs/transfer-syntax-support-matrix.md` for the current support contract,
 including which syntaxes are native, shared-family, or intentionally unsupported.
 The support contract is enforced by conformance tests in both
-`dictionary/transfersyntax` and `media`.
+`dictionary/transfersyntax` and `media`, and representative behavioral
+roundtrip tests in `media` validate dataset and pixel-data routing through
+the supported syntax families.
 
 - JPEG family:
   - `1.2.840.10008.1.2.4.50` (JPEG Baseline)
@@ -207,12 +209,23 @@ The support contract is enforced by conformance tests in both
 ./tools/test_codec_tags.sh
 ```
 
+- Run only the media native-backend representative roundtrip check for a specific tag:
+
+```bash
+go test -tags openjpeg ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
+```
+
 - Equivalent Make targets:
 
 ```bash
 make deps-from-source
 make test-tags
+make transfer-syntax-matrix
+make contract-check
 ```
+
+- `make contract-check` runs transfer syntax doc generation, targeted conformance/media tests,
+  tagged codec backend tests, and the full untagged suite in one command.
 
 - Build codec dependencies from source for the current target system (installs to
   `$HOME/.local/codec-deps` by default):
@@ -242,6 +255,11 @@ PREFIX=$PWD/.local/codec-deps JOBS=8 ./tools/build_codec_deps_from_source.sh
 - CI workflow is provided at `.github/workflows/codec-tagged-tests.yml` and
   now builds codec dependencies from source before running untagged and tagged
   codec suites on each push/PR.
+- CI caches both `$GITHUB_WORKSPACE/.local/codec-deps` and
+  `$GITHUB_WORKSPACE/.build/codec-deps` keyed from `tools/build_codec_deps_from_source.sh`
+  to avoid unnecessary source rebuilds when dependency definitions do not change.
+- Source dependency builds explicitly disable CMake tests (including GTest lookup)
+  to keep CI deterministic and avoid test-only third-party requirements.
 
 ## Install
 
@@ -389,5 +407,22 @@ Regenerate both files with:
 ```bash
 /usr/bin/python3 tools/update_dictionaries.py
 gofmt -w dictionary/tags/dicom_tags.go dictionary/transfersyntax/transfer_syntaxes.go
+go test ./...
+```
+
+## Refresh Transfer Syntax Support Docs
+
+The transfer syntax support docs are generated from
+`dictionary/transfersyntax.ConformanceMatrix`.
+
+This regenerates:
+
+- `docs/transfer-syntax-support-matrix.md`
+- `docs/transfer-syntax-behavioral-summary.md`
+
+Regenerate it with:
+
+```bash
+make transfer-syntax-matrix
 go test ./...
 ```
