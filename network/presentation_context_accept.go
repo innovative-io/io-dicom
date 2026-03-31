@@ -18,8 +18,8 @@ type PresentationContextAccept interface {
 	GetTrnSyntax() UIDItem
 	Size() uint16
 	GetAbstractSyntax() UIDItem
-	SetAbstractSyntax(Abst string)
-	SetTransferSyntax(Tran string)
+	SetAbstractSyntax(abstractSyntaxUID string)
+	SetTransferSyntax(transferSyntaxUID string)
 	Write(rw *bufio.ReadWriter) (err error)
 	Read(ms media.MemoryStream) (err error)
 	ReadDynamic(ms media.MemoryStream) (err error)
@@ -77,18 +77,18 @@ func (pc *presentationContextAccept) GetAbstractSyntax() UIDItem {
 	return &pc.AbsSyntax
 }
 
-func (pc *presentationContextAccept) SetAbstractSyntax(Abst string) {
+func (pc *presentationContextAccept) SetAbstractSyntax(abstractSyntaxUID string) {
 	pc.AbsSyntax.SetType(0x30)
 	pc.AbsSyntax.SetReserved(0x00)
-	pc.AbsSyntax.SetUID(Abst)
-	pc.AbsSyntax.SetLength(uint16(len(Abst)))
+	pc.AbsSyntax.SetUID(abstractSyntaxUID)
+	pc.AbsSyntax.SetLength(uint16(len(abstractSyntaxUID)))
 }
 
-func (pc *presentationContextAccept) SetTransferSyntax(Tran string) {
+func (pc *presentationContextAccept) SetTransferSyntax(transferSyntaxUID string) {
 	pc.TrnSyntax.SetType(0x40)
 	pc.TrnSyntax.SetReserved(0)
-	pc.TrnSyntax.SetUID(Tran)
-	pc.TrnSyntax.SetLength(uint16(len(Tran)))
+	pc.TrnSyntax.SetUID(transferSyntaxUID)
+	pc.TrnSyntax.SetLength(uint16(len(transferSyntaxUID)))
 }
 
 func (pc *presentationContextAccept) Write(rw *bufio.ReadWriter) (err error) {
@@ -114,7 +114,7 @@ func (pc *presentationContextAccept) Write(rw *bufio.ReadWriter) (err error) {
 	}
 
 	slog.Info("ASSOC-AC: \tAccepted AbstractContext:", "UID", pc.GetAbstractSyntax().GetUID(), "Description", sopName)
-	slog.Info("ASSOC-AC: \tAccepted TransferSynxtax:", "UID", pc.GetTrnSyntax().GetUID(), "Description", tsName)
+	slog.Info("ASSOC-AC: \tAccepted TransferSyntax:", "UID", pc.GetTrnSyntax().GetUID(), "Description", tsName)
 
 	if err = bd.Send(rw); err == nil {
 		return pc.TrnSyntax.Write(rw)

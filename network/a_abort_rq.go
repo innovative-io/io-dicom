@@ -6,8 +6,8 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 )
 
-// AAbortRQ - AAbortRQ
-type AAbortRQ interface {
+// AbortRequest - AbortRequest
+type AbortRequest interface {
 	GetReason() string
 	Size() uint32
 	Write(rw *bufio.ReadWriter) error
@@ -15,7 +15,7 @@ type AAbortRQ interface {
 	ReadDynamic(ms media.MemoryStream) (err error)
 }
 
-type aabortRQ struct {
+type abortRequest struct {
 	ItemType  byte // 0x07
 	Reserved1 byte
 	Length    uint32
@@ -25,9 +25,9 @@ type aabortRQ struct {
 	Reason    byte
 }
 
-// NewAAbortRQ - NewAAbortRQ
-func NewAAbortRQ() AAbortRQ {
-	return &aabortRQ{
+// NewAbortRequest - NewAbortRequest
+func NewAbortRequest() AbortRequest {
+	return &abortRequest{
 		ItemType:  0x07,
 		Reserved1: 0x00,
 		Reserved2: 0x00,
@@ -37,16 +37,16 @@ func NewAAbortRQ() AAbortRQ {
 	}
 }
 
-func (aarq *aabortRQ) GetReason() string {
+func (aarq *abortRequest) GetReason() string {
 	return PermanentRejectReasons[aarq.Reason]
 }
 
-func (aarq *aabortRQ) Size() uint32 {
+func (aarq *abortRequest) Size() uint32 {
 	aarq.Length = 4
 	return aarq.Length + 6
 }
 
-func (aarq *aabortRQ) Write(rw *bufio.ReadWriter) error {
+func (aarq *abortRequest) Write(rw *bufio.ReadWriter) error {
 	bd := media.NewEmptyBufData()
 
 	bd.SetBigEndian(true)
@@ -62,14 +62,14 @@ func (aarq *aabortRQ) Write(rw *bufio.ReadWriter) error {
 	return bd.Send(rw)
 }
 
-func (aarq *aabortRQ) Read(ms media.MemoryStream) (err error) {
+func (aarq *abortRequest) Read(ms media.MemoryStream) (err error) {
 	if aarq.ItemType, err = ms.GetByte(); err != nil {
 		return err
 	}
 	return aarq.ReadDynamic(ms)
 }
 
-func (aarq *aabortRQ) ReadDynamic(ms media.MemoryStream) (err error) {
+func (aarq *abortRequest) ReadDynamic(ms media.MemoryStream) (err error) {
 	if aarq.Reserved1, err = ms.GetByte(); err != nil {
 		return err
 	}

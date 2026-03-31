@@ -4,7 +4,7 @@ import (
 	"hash/fnv"
 	"strconv"
 
-	"github.com/innovative-io/io-dicom/imp"
+	"github.com/innovative-io/io-dicom/implementation"
 )
 
 func hash32(text string) uint32 {
@@ -14,10 +14,14 @@ func hash32(text string) uint32 {
 }
 
 func CreateStudyUID(patName string, patID string, accNum string, stDate string) string {
-	StudyUID := imp.GetImpClassUID()
+	StudyUID := implementation.GetImplementationClassUID()
 	value := int(hash32(patName + patID + accNum + stDate))
-	StudyUID = StudyUID + "." + strconv.Itoa(value) // 25 bytes + 11 bytes
-	return StudyUID
+	uid := StudyUID + "." + strconv.Itoa(value)
+	// DICOM UIDs must not exceed 64 characters
+	if len(uid) > 64 {
+		uid = uid[:64]
+	}
+	return uid
 }
 
 func CreateSeriesUID(RootUID string, Modality string, SeriesNumber string) string {

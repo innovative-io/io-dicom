@@ -6,8 +6,8 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 )
 
-// MaximumSubLength - MaximumSubLength
-type MaximumSubLength interface {
+// MaximumPDULength - MaximumPDULength
+type MaximumPDULength interface {
 	GetMaximumLength() uint32
 	SetMaximumLength(length uint32)
 	Size() uint16
@@ -16,34 +16,34 @@ type MaximumSubLength interface {
 	ReadDynamic(ms media.MemoryStream) (err error)
 }
 
-type maximumSubLength struct {
+type maximumPDULength struct {
 	ItemType      byte //0x51
 	Reserved1     byte
 	Length        uint16
 	MaximumLength uint32
 }
 
-// NewMaximumSubLength - NewMaximumSubLength
-func NewMaximumSubLength() MaximumSubLength {
-	return &maximumSubLength{
+// NewMaximumPDULength - NewMaximumPDULength
+func NewMaximumPDULength() MaximumPDULength {
+	return &maximumPDULength{
 		ItemType: 0x51,
 		Length:   4,
 	}
 }
 
-func (maxim *maximumSubLength) GetMaximumLength() uint32 {
+func (maxim *maximumPDULength) GetMaximumLength() uint32 {
 	return maxim.MaximumLength
 }
 
-func (maxim *maximumSubLength) SetMaximumLength(length uint32) {
+func (maxim *maximumPDULength) SetMaximumLength(length uint32) {
 	maxim.MaximumLength = length
 }
 
-func (maxim *maximumSubLength) Size() uint16 {
+func (maxim *maximumPDULength) Size() uint16 {
 	return maxim.Length + 4
 }
 
-func (maxim *maximumSubLength) Write(rw *bufio.ReadWriter) bool {
+func (maxim *maximumPDULength) Write(rw *bufio.ReadWriter) bool {
 	bd := media.NewEmptyBufData()
 
 	bd.SetBigEndian(true)
@@ -58,14 +58,14 @@ func (maxim *maximumSubLength) Write(rw *bufio.ReadWriter) bool {
 	return true
 }
 
-func (maxim *maximumSubLength) Read(ms media.MemoryStream) (err error) {
+func (maxim *maximumPDULength) Read(ms media.MemoryStream) (err error) {
 	if maxim.ItemType, err = ms.GetByte(); err != nil {
 		return err
 	}
 	return maxim.ReadDynamic(ms)
 }
 
-func (maxim *maximumSubLength) ReadDynamic(ms media.MemoryStream) (err error) {
+func (maxim *maximumPDULength) ReadDynamic(ms media.MemoryStream) (err error) {
 	if maxim.Reserved1, err = ms.GetByte(); err != nil {
 		return err
 	}

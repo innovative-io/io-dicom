@@ -1,98 +1,258 @@
 package transcoder
 
 import (
+	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"math"
 	"strings"
 )
 
-func GetUint32(in []byte, length int) uint32 {
-	c := make([]byte, length)
-	copy(c, in)
-	return binary.LittleEndian.Uint32(c)
+const rleMaxSegments = 15
+
+func encodeLiteralRuns(data []byte) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+
+	out := make([]byte, 0, len(data)+(len(data)/128)+1)
+	for i := 0; i < len(data); {
+		run := len(data) - i
+		if run > 128 {
+			run = 128
+		}
+		out = append(out, byte(run-1))
+		out = append(out, data[i:i+run]...)
+		i += run
+	}
+	return out
 }
 
-func ReadSegment(in []byte, out []byte, seg_offset uint32, seg_size uint32, i uint32, rawSize uint32) error {
-	var count int8
-	out_offset := i * rawSize
-	in_offset := seg_offset
+func RLEencode(in []byte, rows uint16, cols uint16, bitsAllocated uint16, samplesPerPixel uint16) ([]byte, error) {
+	pixelCount := int(rows) * int(cols)
+	if pixelCount <= 0 {
+		return nil, fmt.Errorf("ERROR, format not supported")
+	}
 
-	for (out_offset - i*rawSize) < rawSize {
-		count = int8(in[in_offset])
-		in_offset++
-		if count >= 0 {
-			copy(out[out_offset:out_offset+uint32(count+1)], in[in_offset:in_offset+uint32(count+1)])
-			in_offset += uint32(count + 1)
-			out_offset += uint32(count + 1)
-		} else {
-			if (count <= -1) && (count >= -127) {
-				newByte := in[in_offset]
-				in_offset++
-				for j := uint32(0); j < uint32(-count+1); j++ {
-					out[j+out_offset] = newByte
-				}
-				out_offset += uint32(-count + 1)
-				if in_offset-seg_offset > seg_size {
-					return fmt.Errorf("ERROR, overflow decoding RLE")
-				}
+	if bitsAllocated != 8 && bitsAllocated != 16 {
+		return nil, fmt.Errorf("ERROR, format not supported")
+	}
+
+	if samplesPerPixel != 1 && samplesPerPixel != 3 {
+		return nil, fmt.Errorf("ERROR, format not supported")
+	}
+
+	bytesPerSample := int(bitsAllocated / 8)
+	expectedSize := pixelCount * int(samplesPerPixel) * bytesPerSample
+	if len(in) < expectedSize {
+		return nil, fmt.Errorf("ERROR, overflow decoding RLE")
+	}
+
+	totalSegments := int(samplesPerPixel) * bytesPerSample
+	if totalSegments > rleMaxSegments {
+		return nil, fmt.Errorf("ERROR, format not supported")
+	}
+
+	rawSegments := make([][]byte, 0, totalSegments)
+	for sample := 0; sample < int(samplesPerPixel); sample++ {
+		for bytePlane := bytesPerSample - 1; bytePlane >= 0; bytePlane-- {
+			segment := make([]byte, pixelCount)
+			for pixel := 0; pixel < pixelCount; pixel++ {
+				base := (pixel*int(samplesPerPixel) + sample) * bytesPerSample
+				segment[pixel] = in[base+bytePlane]
 			}
+			rawSegments = append(rawSegments, segment)
 		}
 	}
+
+	encodedSegments := make([][]byte, 0, totalSegments)
+	for _, segment := range rawSegments {
+		encodedSegments = append(encodedSegments, encodeLiteralRuns(segment))
+	}
+
+	headerSize := 64
+	offsets := make([]uint32, rleMaxSegments)
+	cursor := uint32(headerSize)
+	for i, segment := range encodedSegments {
+		offsets[i] = cursor
+		cursor += uint32(len(segment))
+	}
+
+	out := make([]byte, 0, int(cursor))
+	header := make([]byte, headerSize)
+	binary.LittleEndian.PutUint32(header[0:4], uint32(totalSegments))
+	for i := 0; i < rleMaxSegments; i++ {
+		binary.LittleEndian.PutUint32(header[4+i*4:8+i*4], offsets[i])
+	}
+	out = append(out, header...)
+	for _, segment := range encodedSegments {
+		out = append(out, segment...)
+	}
+
+	return out, nil
+}
+
+func DeflateFrame(in []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	zw := zlib.NewWriter(&buf)
+	if _, err := zw.Write(in); err != nil {
+		_ = zw.Close()
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func InflateFrame(in []byte, expectedSize int) ([]byte, error) {
+	zr, err := zlib.NewReader(bytes.NewReader(in))
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+
+	out, err := io.ReadAll(zr)
+	if err != nil {
+		return nil, err
+	}
+	if expectedSize >= 0 && len(out) != expectedSize {
+		return nil, fmt.Errorf("ERROR, invalid deflated frame size")
+	}
+	return out, nil
+}
+
+func getUint32LE(in []byte) (uint32, error) {
+	if len(in) < 4 {
+		return 0, fmt.Errorf("ERROR, invalid RLE header")
+	}
+	return binary.LittleEndian.Uint32(in[:4]), nil
+}
+
+func readSegment(in []byte, out []byte, segmentOffset uint32, segmentSize uint32, segmentIndex uint32, rawSize uint32) error {
+	outOffset := segmentIndex * rawSize
+	inOffset := segmentOffset
+
+	for (outOffset - segmentIndex*rawSize) < rawSize {
+		if int(inOffset) >= len(in) || inOffset-segmentOffset >= segmentSize {
+			return fmt.Errorf("ERROR, overflow decoding RLE")
+		}
+
+		count := int8(in[inOffset])
+		inOffset++
+
+		switch {
+		case count >= 0:
+			run := uint32(count) + 1
+			if int(inOffset+run) > len(in) || inOffset+run-segmentOffset > segmentSize {
+				return fmt.Errorf("ERROR, overflow decoding RLE")
+			}
+			if outOffset+run > uint32(len(out)) {
+				return fmt.Errorf("ERROR, overflow decoding RLE")
+			}
+			copy(out[outOffset:outOffset+run], in[inOffset:inOffset+run])
+			inOffset += run
+			outOffset += run
+		case count >= -127:
+			if int(inOffset) >= len(in) || inOffset-segmentOffset > segmentSize {
+				return fmt.Errorf("ERROR, overflow decoding RLE")
+			}
+			run := uint32(-count) + 1
+			if outOffset+run > uint32(len(out)) {
+				return fmt.Errorf("ERROR, overflow decoding RLE")
+			}
+			value := in[inOffset]
+			inOffset++
+			for j := uint32(0); j < run; j++ {
+				out[outOffset+j] = value
+			}
+			outOffset += run
+		default:
+			// count == -128 is a no-op in PackBits.
+		}
+	}
+
 	return nil
 }
 
-func RLEdecode(in []byte, out []byte, length uint32, size uint32, PhotoInt string) error {
-	var segment_count, offset, i uint32
-	var segment_offset [15]uint32
-	var segment_length [15]uint32
+func clampByte(v float32) byte {
+	if v <= 0 {
+		return 0
+	}
+	if v >= 255 {
+		return 255
+	}
+	return byte(math.Round(float64(v)))
+}
 
-	offset = 0
-	for i := 0; i < 15; i++ {
-		segment_offset[i] = 0
-		segment_length[i] = 0
+func RLEdecode(in []byte, out []byte, length uint32, size uint32, photoInt string) error {
+	if len(in) < 64 || len(out) < int(size) || length == 0 || length > uint32(len(in)) {
+		return fmt.Errorf("ERROR, overflow decoding RLE")
 	}
 
-	segment_count = GetUint32(in, 4)
-	for i := 0; i < 15; i++ {
-		offset = offset + 4
-		segment_offset[i] = GetUint32(in[offset:], 4)
+	segmentCount, err := getUint32LE(in)
+	if err != nil {
+		return err
+	}
+	if segmentCount == 0 || segmentCount > rleMaxSegments {
+		return fmt.Errorf("ERROR, format not supported")
+	}
+	if size%segmentCount != 0 {
+		return fmt.Errorf("ERROR, format not supported")
 	}
 
-	segment_offset[segment_count] = length
+	segmentOffset := make([]uint32, rleMaxSegments+1)
+	for i := uint32(0); i < rleMaxSegments; i++ {
+		off, err := getUint32LE(in[4+i*4:])
+		if err != nil {
+			return err
+		}
+		segmentOffset[i] = off
+	}
+	segmentOffset[segmentCount] = length
+
 	temp := make([]byte, size)
-	for i = 0; i < segment_count; i++ {
-		segment_length[i] = segment_offset[i+1] - segment_offset[i]
-		ReadSegment(in, temp, segment_offset[i], segment_length[i], i, size/segment_count)
+	decodedPlaneSize := size / segmentCount
+
+	for i := uint32(0); i < segmentCount; i++ {
+		if segmentOffset[i] > segmentOffset[i+1] || segmentOffset[i+1] > length {
+			return fmt.Errorf("ERROR, overflow decoding RLE")
+		}
+		segmentLength := segmentOffset[i+1] - segmentOffset[i]
+		if err := readSegment(in, temp, segmentOffset[i], segmentLength, i, decodedPlaneSize); err != nil {
+			return err
+		}
 	}
 
-	offset = size / segment_count
-	if (strings.Contains(PhotoInt, "MONO")) && (segment_count == 2) {
-		for i = 0; i < size/segment_count; i++ {
+	offset := decodedPlaneSize
+	switch {
+	case strings.Contains(photoInt, "MONO") && segmentCount == 2:
+		for i := uint32(0); i < decodedPlaneSize; i++ {
 			out[2*i] = temp[i+offset]
 			out[2*i+1] = temp[i]
 		}
-	} else if (strings.Contains(PhotoInt, "MONO")) && (segment_count == 1) {
-		for i = 0; i < size; i++ {
-			out[i] = temp[i]
+	case strings.Contains(photoInt, "MONO") && segmentCount == 1:
+		copy(out[:size], temp)
+	case photoInt == "YBR_FULL" && segmentCount == 3:
+		for i := uint32(0); i < decodedPlaneSize; i++ {
+			y := float32(temp[i])
+			cb := float32(temp[i+offset])
+			cr := float32(temp[i+2*offset])
+			out[3*i] = clampByte(y + 1.402*(cr-128.0))
+			out[3*i+1] = clampByte(y - 0.344136*(cb-128.0) - 0.714136*(cr-128.0))
+			out[3*i+2] = clampByte(y + 1.772*(cb-128.0))
 		}
-	} else if (PhotoInt == "YBR_FULL") && (segment_count == 3) {
-		var Y, Cb, Cr float32
-		for i = 0; i < size/segment_count; i++ {
-			Y = float32(temp[i])
-			Cb = float32(temp[i+offset])
-			Cr = float32(temp[i+2*offset])
-			out[3*i] = byte(Y + 1.402*(Cr-128.0))
-			out[3*i+1] = byte(Y - 0.344136*(Cb-128.0) - 0.714136*(Cr-128.0))
-			out[3*i+2] = byte(Y + 1.772*(Cb-128.0))
-		}
-	} else if (PhotoInt == "RGB") && (segment_count == 3) {
-		for i = 0; i < size/segment_count; i++ {
+	case photoInt == "RGB" && segmentCount == 3:
+		for i := uint32(0); i < decodedPlaneSize; i++ {
 			out[3*i] = temp[i]
 			out[3*i+1] = temp[i+offset]
 			out[3*i+2] = temp[i+2*offset]
 		}
-	} else {
+	default:
 		return fmt.Errorf("ERROR, format not supported")
 	}
+
 	return nil
 }

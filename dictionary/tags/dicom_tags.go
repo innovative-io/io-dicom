@@ -10,6 +10,16 @@ var CommandGroupLength = &Tag{
 	Description: "Command Group Length",
 }
 
+// CommandLengthToEnd - (0000,0001) Command Length to End
+var CommandLengthToEnd = &Tag{
+	Group:       0x0000,
+	Element:     0x0001,
+	VR:          "UL",
+	VM:          "1",
+	Name:        "CommandLengthToEnd",
+	Description: "Command Length to End",
+}
+
 // AffectedSOPClassUID - (0000,0002) Affected SOP Class UID
 var AffectedSOPClassUID = &Tag{
 	Group:       0x0000,
@@ -28,6 +38,16 @@ var RequestedSOPClassUID = &Tag{
 	VM:          "1",
 	Name:        "RequestedSOPClassUID",
 	Description: "Requested SOP Class UID",
+}
+
+// CommandRecognitionCode - (0000,0010) Command Recognition Code
+var CommandRecognitionCode = &Tag{
+	Group:       0x0000,
+	Element:     0x0010,
+	VR:          "SH",
+	VM:          "1",
+	Name:        "CommandRecognitionCode",
+	Description: "Command Recognition Code",
 }
 
 // CommandField - (0000,0100) Command Field
@@ -60,6 +80,36 @@ var MessageIDBeingRespondedTo = &Tag{
 	Description: "Message ID Being Responded To",
 }
 
+// Initiator - (0000,0200) Initiator
+var Initiator = &Tag{
+	Group:       0x0000,
+	Element:     0x0200,
+	VR:          "AE",
+	VM:          "1",
+	Name:        "Initiator",
+	Description: "Initiator",
+}
+
+// Receiver - (0000,0300) Receiver
+var Receiver = &Tag{
+	Group:       0x0000,
+	Element:     0x0300,
+	VR:          "AE",
+	VM:          "1",
+	Name:        "Receiver",
+	Description: "Receiver",
+}
+
+// FindLocation - (0000,0400) Find Location
+var FindLocation = &Tag{
+	Group:       0x0000,
+	Element:     0x0400,
+	VR:          "AE",
+	VM:          "1",
+	Name:        "FindLocation",
+	Description: "Find Location",
+}
+
 // MoveDestination - (0000,0600) Move Destination
 var MoveDestination = &Tag{
 	Group:       0x0000,
@@ -88,6 +138,26 @@ var CommandDataSetType = &Tag{
 	VM:          "1",
 	Name:        "CommandDataSetType",
 	Description: "Command Data Set Type",
+}
+
+// NumberOfMatches - (0000,0850) Number of Matches
+var NumberOfMatches = &Tag{
+	Group:       0x0000,
+	Element:     0x0850,
+	VR:          "US",
+	VM:          "1",
+	Name:        "NumberOfMatches",
+	Description: "Number of Matches",
+}
+
+// ResponseSequenceNumber - (0000,0860) Response Sequence Number
+var ResponseSequenceNumber = &Tag{
+	Group:       0x0000,
+	Element:     0x0860,
+	VR:          "US",
+	VM:          "1",
+	Name:        "ResponseSequenceNumber",
+	Description: "Response Sequence Number",
 }
 
 // Status - (0000,0900) Status
@@ -238,76 +308,6 @@ var MoveOriginatorMessageID = &Tag{
 	VM:          "1",
 	Name:        "MoveOriginatorMessageID",
 	Description: "Move Originator Message ID",
-}
-
-// CommandLengthToEnd - (0000,0001) Command Length to End
-var CommandLengthToEnd = &Tag{
-	Group:       0x0000,
-	Element:     0x0001,
-	VR:          "UL",
-	VM:          "1",
-	Name:        "CommandLengthToEnd",
-	Description: "Command Length to End",
-}
-
-// CommandRecognitionCode - (0000,0010) Command Recognition Code
-var CommandRecognitionCode = &Tag{
-	Group:       0x0000,
-	Element:     0x0010,
-	VR:          "SH",
-	VM:          "1",
-	Name:        "CommandRecognitionCode",
-	Description: "Command Recognition Code",
-}
-
-// Initiator - (0000,0200) Initiator
-var Initiator = &Tag{
-	Group:       0x0000,
-	Element:     0x0200,
-	VR:          "AE",
-	VM:          "1",
-	Name:        "Initiator",
-	Description: "Initiator",
-}
-
-// Receiver - (0000,0300) Receiver
-var Receiver = &Tag{
-	Group:       0x0000,
-	Element:     0x0300,
-	VR:          "AE",
-	VM:          "1",
-	Name:        "Receiver",
-	Description: "Receiver",
-}
-
-// FindLocation - (0000,0400) Find Location
-var FindLocation = &Tag{
-	Group:       0x0000,
-	Element:     0x0400,
-	VR:          "AE",
-	VM:          "1",
-	Name:        "FindLocation",
-	Description: "Find Location",
-}
-
-// NumberOfMatches - (0000,0850) Number of Matches
-var NumberOfMatches = &Tag{
-	Group:       0x0000,
-	Element:     0x0850,
-	VR:          "US",
-	VM:          "1",
-	Name:        "NumberOfMatches",
-	Description: "Number of Matches",
-}
-
-// ResponseSequenceNumber - (0000,0860) Response Sequence Number
-var ResponseSequenceNumber = &Tag{
-	Group:       0x0000,
-	Element:     0x0860,
-	VR:          "US",
-	VM:          "1",
-	Name:        "ResponseSequenceNumber",
-	Description: "Response Sequence Number",
 }
 
 // DialogReceiver - (0000,4000) Dialog Receiver
@@ -1020,6 +1020,16 @@ var OriginalSpecializedSOPClassUID = &Tag{
 	Description: "Original Specialized SOP Class UID",
 }
 
+// SyntheticData - (0008,001C) Synthetic Data
+var SyntheticData = &Tag{
+	Group:       0x0008,
+	Element:     0x001C,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "SyntheticData",
+	Description: "Synthetic Data",
+}
+
 // StudyDate - (0008,0020) Study Date
 var StudyDate = &Tag{
 	Group:       0x0008,
@@ -1720,6 +1730,16 @@ var TimezoneOffsetFromUTC = &Tag{
 	Description: "Timezone Offset From UTC",
 }
 
+// Retiredblank - (0008,0202) Retired-blank
+var Retiredblank = &Tag{
+	Group:       0x0008,
+	Element:     0x0202,
+	VR:          "OB",
+	VM:          "1",
+	Name:        "Retiredblank",
+	Description: "Retired-blank",
+}
+
 // ResponsibleGroupCodeSequence - (0008,0220) Responsible Group Code Sequence
 var ResponsibleGroupCodeSequence = &Tag{
 	Group:       0x0008,
@@ -1800,16 +1820,6 @@ var NonidentifyingPrivateElements = &Tag{
 	Description: "Nonidentifying Private Elements",
 }
 
-// IdentifyingPrivateElements - (0008,0306) Identifying Private Elements
-var IdentifyingPrivateElements = &Tag{
-	Group:       0x0008,
-	Element:     0x0306,
-	VR:          "US",
-	VM:          "1-n",
-	Name:        "IdentifyingPrivateElements",
-	Description: "Identifying Private Elements",
-}
-
 // DeidentificationActionSequence - (0008,0305) Deidentification Action Sequence
 var DeidentificationActionSequence = &Tag{
 	Group:       0x0008,
@@ -1818,6 +1828,16 @@ var DeidentificationActionSequence = &Tag{
 	VM:          "1",
 	Name:        "DeidentificationActionSequence",
 	Description: "Deidentification Action Sequence",
+}
+
+// IdentifyingPrivateElements - (0008,0306) Identifying Private Elements
+var IdentifyingPrivateElements = &Tag{
+	Group:       0x0008,
+	Element:     0x0306,
+	VR:          "US",
+	VM:          "1-n",
+	Name:        "IdentifyingPrivateElements",
+	Description: "Identifying Private Elements",
 }
 
 // DeidentificationAction - (0008,0307) Deidentification Action
@@ -2570,6 +2590,16 @@ var ReferencedPerformedProcedureStepSequence = &Tag{
 	Description: "Referenced Performed Procedure Step Sequence",
 }
 
+// ReferencedInstancesBySOPClassSequence - (0008,1112) Referenced Instances by SOP Class Sequence
+var ReferencedInstancesBySOPClassSequence = &Tag{
+	Group:       0x0008,
+	Element:     0x1112,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ReferencedInstancesBySOPClassSequence",
+	Description: "Referenced Instances by SOP Class Sequence",
+}
+
 // ReferencedSeriesSequence - (0008,1115) Referenced Series Sequence
 var ReferencedSeriesSequence = &Tag{
 	Group:       0x0008,
@@ -2668,6 +2698,16 @@ var ReferencedRealWorldValueMappingInstanceSequence = &Tag{
 	VM:          "1",
 	Name:        "ReferencedRealWorldValueMappingInstanceSequence",
 	Description: "Referenced Real World Value Mapping Instance Sequence",
+}
+
+// ReferencedSegmentationSequence - (0008,114C) Referenced Segmentation Sequence
+var ReferencedSegmentationSequence = &Tag{
+	Group:       0x0008,
+	Element:     0x114C,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ReferencedSegmentationSequence",
+	Description: "Referenced Segmentation Sequence",
 }
 
 // ReferencedSOPClassUID - (0008,1150) Referenced SOP Class UID
@@ -2840,6 +2880,16 @@ var OtherFailuresSequence = &Tag{
 	Description: "Other Failures Sequence",
 }
 
+// FailedStudySequence - (0008,119B) Failed Study Sequence
+var FailedStudySequence = &Tag{
+	Group:       0x0008,
+	Element:     0x119B,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "FailedStudySequence",
+	Description: "Failed Study Sequence",
+}
+
 // StudiesContainingOtherReferencedInstancesSequence - (0008,1200) Studies Containing Other Referenced Instances Sequence
 var StudiesContainingOtherReferencedInstancesSequence = &Tag{
 	Group:       0x0008,
@@ -2867,7 +2917,7 @@ var LossyImageCompressionRetired = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "LossyImageCompressionRetired",
-	Description: "Lossy Image Compression",
+	Description: "Lossy Image Compression (Retired)",
 }
 
 // DerivationDescription - (0008,2111) Derivation Description
@@ -3167,7 +3217,7 @@ var AnatomicStructureSpaceOrRegionCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "AnatomicStructureSpaceOrRegionCodeSequenceTrial",
-	Description: "Anatomic Structure Space Or Region Code Sequence",
+	Description: "Anatomic Structure Space Or Region Code Sequence (Trial)",
 }
 
 // AnatomicPortalOfEntranceCodeSequenceTrial - (0008,2253) Anatomic Portal Of Entrance Code Sequence (Trial)
@@ -3177,7 +3227,7 @@ var AnatomicPortalOfEntranceCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "AnatomicPortalOfEntranceCodeSequenceTrial",
-	Description: "Anatomic Portal Of Entrance Code Sequence",
+	Description: "Anatomic Portal Of Entrance Code Sequence (Trial)",
 }
 
 // AnatomicApproachDirectionCodeSequenceTrial - (0008,2255) Anatomic Approach Direction Code Sequence (Trial)
@@ -3187,7 +3237,7 @@ var AnatomicApproachDirectionCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "AnatomicApproachDirectionCodeSequenceTrial",
-	Description: "Anatomic Approach Direction Code Sequence",
+	Description: "Anatomic Approach Direction Code Sequence (Trial)",
 }
 
 // AnatomicPerspectiveDescriptionTrial - (0008,2256) Anatomic Perspective Description (Trial)
@@ -3197,7 +3247,7 @@ var AnatomicPerspectiveDescriptionTrial = &Tag{
 	VR:          "ST",
 	VM:          "1",
 	Name:        "AnatomicPerspectiveDescriptionTrial",
-	Description: "Anatomic Perspective Description",
+	Description: "Anatomic Perspective Description (Trial)",
 }
 
 // AnatomicPerspectiveCodeSequenceTrial - (0008,2257) Anatomic Perspective Code Sequence (Trial)
@@ -3207,7 +3257,7 @@ var AnatomicPerspectiveCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "AnatomicPerspectiveCodeSequenceTrial",
-	Description: "Anatomic Perspective Code Sequence",
+	Description: "Anatomic Perspective Code Sequence (Trial)",
 }
 
 // AnatomicLocationOfExaminingInstrumentDescriptionTrial - (0008,2258) Anatomic Location Of Examining Instrument Description (Trial)
@@ -3217,7 +3267,7 @@ var AnatomicLocationOfExaminingInstrumentDescriptionTrial = &Tag{
 	VR:          "ST",
 	VM:          "1",
 	Name:        "AnatomicLocationOfExaminingInstrumentDescriptionTrial",
-	Description: "Anatomic Location Of Examining Instrument Description",
+	Description: "Anatomic Location Of Examining Instrument Description (Trial)",
 }
 
 // AnatomicLocationOfExaminingInstrumentCodeSequenceTrial - (0008,2259) Anatomic Location Of Examining Instrument Code Sequence (Trial)
@@ -3227,7 +3277,7 @@ var AnatomicLocationOfExaminingInstrumentCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "AnatomicLocationOfExaminingInstrumentCodeSequenceTrial",
-	Description: "Anatomic Location Of Examining Instrument Code Sequence",
+	Description: "Anatomic Location Of Examining Instrument Code Sequence (Trial)",
 }
 
 // AnatomicStructureSpaceOrRegionModifierCodeSequenceTrial - (0008,225A) Anatomic Structure Space Or Region Modifier Code Sequence (Trial)
@@ -3237,7 +3287,7 @@ var AnatomicStructureSpaceOrRegionModifierCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "AnatomicStructureSpaceOrRegionModifierCodeSequenceTrial",
-	Description: "Anatomic Structure Space Or Region Modifier Code Sequence",
+	Description: "Anatomic Structure Space Or Region Modifier Code Sequence (Trial)",
 }
 
 // OnAxisBackgroundAnatomicStructureCodeSequenceTrial - (0008,225C) On Axis Background Anatomic Structure Code Sequence (Trial)
@@ -3247,7 +3297,7 @@ var OnAxisBackgroundAnatomicStructureCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "OnAxisBackgroundAnatomicStructureCodeSequenceTrial",
-	Description: "On Axis Background Anatomic Structure Code Sequence",
+	Description: "On Axis Background Anatomic Structure Code Sequence (Trial)",
 }
 
 // AlternateRepresentationSequence - (0008,3001) Alternate Representation Sequence
@@ -4040,6 +4090,16 @@ var EthnicGroup = &Tag{
 	Description: "Ethnic Group",
 }
 
+// EthnicGroupCodeSequence - (0010,2161) Ethnic Group Code Sequence
+var EthnicGroupCodeSequence = &Tag{
+	Group:       0x0010,
+	Element:     0x2161,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "EthnicGroupCodeSequence",
+	Description: "Ethnic Group Code Sequence",
+}
+
 // Occupation - (0010,2180) Occupation
 var Occupation = &Tag{
 	Group:       0x0010,
@@ -4270,6 +4330,26 @@ var ClinicalTrialProtocolName = &Tag{
 	Description: "Clinical Trial Protocol Name",
 }
 
+// IssuerOfClinicalTrialProtocolID - (0012,0022) Issuer of Clinical Trial Protocol ID
+var IssuerOfClinicalTrialProtocolID = &Tag{
+	Group:       0x0012,
+	Element:     0x0022,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "IssuerOfClinicalTrialProtocolID",
+	Description: "Issuer of Clinical Trial Protocol ID",
+}
+
+// OtherClinicalTrialProtocolIDsSequence - (0012,0023) Other Clinical Trial Protocol IDs Sequence
+var OtherClinicalTrialProtocolIDsSequence = &Tag{
+	Group:       0x0012,
+	Element:     0x0023,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "OtherClinicalTrialProtocolIDsSequence",
+	Description: "Other Clinical Trial Protocol IDs Sequence",
+}
+
 // ClinicalTrialSiteID - (0012,0030) Clinical Trial Site ID
 var ClinicalTrialSiteID = &Tag{
 	Group:       0x0012,
@@ -4290,6 +4370,16 @@ var ClinicalTrialSiteName = &Tag{
 	Description: "Clinical Trial Site Name",
 }
 
+// IssuerOfClinicalTrialSiteID - (0012,0032) Issuer of Clinical Trial Site ID
+var IssuerOfClinicalTrialSiteID = &Tag{
+	Group:       0x0012,
+	Element:     0x0032,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "IssuerOfClinicalTrialSiteID",
+	Description: "Issuer of Clinical Trial Site ID",
+}
+
 // ClinicalTrialSubjectID - (0012,0040) Clinical Trial Subject ID
 var ClinicalTrialSubjectID = &Tag{
 	Group:       0x0012,
@@ -4300,6 +4390,16 @@ var ClinicalTrialSubjectID = &Tag{
 	Description: "Clinical Trial Subject ID",
 }
 
+// IssuerOfClinicalTrialSubjectID - (0012,0041) Issuer of Clinical Trial Subject ID
+var IssuerOfClinicalTrialSubjectID = &Tag{
+	Group:       0x0012,
+	Element:     0x0041,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "IssuerOfClinicalTrialSubjectID",
+	Description: "Issuer of Clinical Trial Subject ID",
+}
+
 // ClinicalTrialSubjectReadingID - (0012,0042) Clinical Trial Subject Reading ID
 var ClinicalTrialSubjectReadingID = &Tag{
 	Group:       0x0012,
@@ -4308,6 +4408,16 @@ var ClinicalTrialSubjectReadingID = &Tag{
 	VM:          "1",
 	Name:        "ClinicalTrialSubjectReadingID",
 	Description: "Clinical Trial Subject Reading ID",
+}
+
+// IssuerOfClinicalTrialSubjectReadingID - (0012,0043) Issuer of Clinical Trial Subject Reading ID
+var IssuerOfClinicalTrialSubjectReadingID = &Tag{
+	Group:       0x0012,
+	Element:     0x0043,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "IssuerOfClinicalTrialSubjectReadingID",
+	Description: "Issuer of Clinical Trial Subject Reading ID",
 }
 
 // ClinicalTrialTimePointID - (0012,0050) Clinical Trial Time Point ID
@@ -4358,6 +4468,16 @@ var ClinicalTrialTimePointTypeCodeSequence = &Tag{
 	VM:          "1",
 	Name:        "ClinicalTrialTimePointTypeCodeSequence",
 	Description: "Clinical Trial Time Point Type Code Sequence",
+}
+
+// IssuerOfClinicalTrialTimePointID - (0012,0055) Issuer of Clinical Trial Time Point ID
+var IssuerOfClinicalTrialTimePointID = &Tag{
+	Group:       0x0012,
+	Element:     0x0055,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "IssuerOfClinicalTrialTimePointID",
+	Description: "Issuer of Clinical Trial Time Point ID",
 }
 
 // ClinicalTrialCoordinatingCenterName - (0012,0060) Clinical Trial Coordinating Center Name
@@ -4418,6 +4538,16 @@ var ClinicalTrialSeriesDescription = &Tag{
 	VM:          "1",
 	Name:        "ClinicalTrialSeriesDescription",
 	Description: "Clinical Trial Series Description",
+}
+
+// IssuerOfClinicalTrialSeriesID - (0012,0073) Issuer of Clinical Trial Series ID
+var IssuerOfClinicalTrialSeriesID = &Tag{
+	Group:       0x0012,
+	Element:     0x0073,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "IssuerOfClinicalTrialSeriesID",
+	Description: "Issuer of Clinical Trial Series ID",
 }
 
 // ClinicalTrialProtocolEthicsCommitteeName - (0012,0081) Clinical Trial Protocol Ethics Committee Name
@@ -4587,7 +4717,7 @@ var MaterialPropertiesFileFormatRetired = &Tag{
 	VR:          "ST",
 	VM:          "1",
 	Name:        "MaterialPropertiesFileFormatRetired",
-	Description: "Material Properties File Format",
+	Description: "Material Properties File Format (Retired)",
 }
 
 // MaterialNotes - (0014,0046) Material Notes
@@ -5204,7 +5334,7 @@ var DarkCurrentSequence = &Tag{
 var DarkCurrentCounts = &Tag{
 	Group:       0x0014,
 	Element:     0x3050,
-	VR:          "OB/OW",
+	VR:          "OB or OW",
 	VM:          "1",
 	Name:        "DarkCurrentCounts",
 	Description: "Dark Current Counts",
@@ -5224,7 +5354,7 @@ var GainCorrectionReferenceSequence = &Tag{
 var AirCounts = &Tag{
 	Group:       0x0014,
 	Element:     0x3070,
-	VR:          "OB/OW",
+	VR:          "OB or OW",
 	VM:          "1",
 	Name:        "AirCounts",
 	Description: "Air Counts",
@@ -6508,6 +6638,926 @@ var RadiusAlongWedge = &Tag{
 	VM:          "1",
 	Name:        "RadiusAlongWedge",
 	Description: "Radius Along the Wedge",
+}
+
+// ThermalCameraSettingsSequence - (0014,6001) Thermal Camera Settings Sequence
+var ThermalCameraSettingsSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x6001,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ThermalCameraSettingsSequence",
+	Description: "Thermal Camera Settings Sequence",
+}
+
+// AcquisitionFrameRate - (0014,6002) Acquisition Frame Rate
+var AcquisitionFrameRate = &Tag{
+	Group:       0x0014,
+	Element:     0x6002,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "AcquisitionFrameRate",
+	Description: "Acquisition Frame Rate",
+}
+
+// IntegrationTime - (0014,6003) Integration Time
+var IntegrationTime = &Tag{
+	Group:       0x0014,
+	Element:     0x6003,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "IntegrationTime",
+	Description: "Integration Time",
+}
+
+// NumberOfCalibrationFrames - (0014,6004) Number of Calibration Frames
+var NumberOfCalibrationFrames = &Tag{
+	Group:       0x0014,
+	Element:     0x6004,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "NumberOfCalibrationFrames",
+	Description: "Number of Calibration Frames",
+}
+
+// NumberOfRowsInFullAcquisitionImage - (0014,6005) Number of Rows in Full Acquisition Image
+var NumberOfRowsInFullAcquisitionImage = &Tag{
+	Group:       0x0014,
+	Element:     0x6005,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "NumberOfRowsInFullAcquisitionImage",
+	Description: "Number of Rows in Full Acquisition Image",
+}
+
+// NumberOfColumnsInFullAcquisitionImage - (0014,6006) Number Of Columns in Full Acquisition Image
+var NumberOfColumnsInFullAcquisitionImage = &Tag{
+	Group:       0x0014,
+	Element:     0x6006,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "NumberOfColumnsInFullAcquisitionImage",
+	Description: "Number Of Columns in Full Acquisition Image",
+}
+
+// ThermalSourceSettingsSequence - (0014,6007) Thermal Source Settings Sequence
+var ThermalSourceSettingsSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x6007,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ThermalSourceSettingsSequence",
+	Description: "Thermal Source Settings Sequence",
+}
+
+// SourceHorizontalPitch - (0014,6008) Source Horizontal Pitch
+var SourceHorizontalPitch = &Tag{
+	Group:       0x0014,
+	Element:     0x6008,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "SourceHorizontalPitch",
+	Description: "Source Horizontal Pitch",
+}
+
+// SourceVerticalPitch - (0014,6009) Source Vertical Pitch
+var SourceVerticalPitch = &Tag{
+	Group:       0x0014,
+	Element:     0x6009,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "SourceVerticalPitch",
+	Description: "Source Vertical Pitch",
+}
+
+// SourceHorizontalScanSpeed - (0014,600A) Source Horizontal Scan Speed
+var SourceHorizontalScanSpeed = &Tag{
+	Group:       0x0014,
+	Element:     0x600A,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "SourceHorizontalScanSpeed",
+	Description: "Source Horizontal Scan Speed",
+}
+
+// ThermalSourceModulationFrequency - (0014,600B) Thermal Source Modulation Frequency
+var ThermalSourceModulationFrequency = &Tag{
+	Group:       0x0014,
+	Element:     0x600B,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "ThermalSourceModulationFrequency",
+	Description: "Thermal Source Modulation Frequency",
+}
+
+// InductionSourceSettingSequence - (0014,600C) Induction Source Setting Sequence
+var InductionSourceSettingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x600C,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "InductionSourceSettingSequence",
+	Description: "Induction Source Setting Sequence",
+}
+
+// CoilFrequency - (0014,600D) Coil Frequency
+var CoilFrequency = &Tag{
+	Group:       0x0014,
+	Element:     0x600D,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "CoilFrequency",
+	Description: "Coil Frequency",
+}
+
+// CurrentAmplitudeAcrossCoil - (0014,600E) Current Amplitude Across Coil
+var CurrentAmplitudeAcrossCoil = &Tag{
+	Group:       0x0014,
+	Element:     0x600E,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "CurrentAmplitudeAcrossCoil",
+	Description: "Current Amplitude Across Coil",
+}
+
+// FlashSourceSettingSequence - (0014,600F) Flash Source Setting Sequence
+var FlashSourceSettingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x600F,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "FlashSourceSettingSequence",
+	Description: "Flash Source Setting Sequence",
+}
+
+// FlashDuration - (0014,6010) Flash Duration
+var FlashDuration = &Tag{
+	Group:       0x0014,
+	Element:     0x6010,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "FlashDuration",
+	Description: "Flash Duration",
+}
+
+// FlashFrameNumber - (0014,6011) Flash Frame Number
+var FlashFrameNumber = &Tag{
+	Group:       0x0014,
+	Element:     0x6011,
+	VR:          "DS",
+	VM:          "1-n",
+	Name:        "FlashFrameNumber",
+	Description: "Flash Frame Number",
+}
+
+// LaserSourceSettingSequence - (0014,6012) Laser Source Setting Sequence
+var LaserSourceSettingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x6012,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "LaserSourceSettingSequence",
+	Description: "Laser Source Setting Sequence",
+}
+
+// HorizontalLaserSpotDimension - (0014,6013) Horizontal Laser Spot Dimension
+var HorizontalLaserSpotDimension = &Tag{
+	Group:       0x0014,
+	Element:     0x6013,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "HorizontalLaserSpotDimension",
+	Description: "Horizontal Laser Spot Dimension",
+}
+
+// VerticalLaserSpotDimension - (0014,6014) Vertical Laser Spot Dimension
+var VerticalLaserSpotDimension = &Tag{
+	Group:       0x0014,
+	Element:     0x6014,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "VerticalLaserSpotDimension",
+	Description: "Vertical Laser Spot Dimension",
+}
+
+// LaserWavelength - (0014,6015) Laser Wavelength
+var LaserWavelength = &Tag{
+	Group:       0x0014,
+	Element:     0x6015,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "LaserWavelength",
+	Description: "Laser Wavelength",
+}
+
+// LaserPower - (0014,6016) Laser Power
+var LaserPower = &Tag{
+	Group:       0x0014,
+	Element:     0x6016,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "LaserPower",
+	Description: "Laser Power",
+}
+
+// ForcedGasSettingSequence - (0014,6017) Forced Gas Setting Sequence
+var ForcedGasSettingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x6017,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ForcedGasSettingSequence",
+	Description: "Forced Gas Setting Sequence",
+}
+
+// VibrationSourceSettingSequence - (0014,6018) Vibration Source Setting Sequence
+var VibrationSourceSettingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x6018,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "VibrationSourceSettingSequence",
+	Description: "Vibration Source Setting Sequence",
+}
+
+// VibrationExcitationFrequency - (0014,6019) Vibration Excitation Frequency
+var VibrationExcitationFrequency = &Tag{
+	Group:       0x0014,
+	Element:     0x6019,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "VibrationExcitationFrequency",
+	Description: "Vibration Excitation Frequency",
+}
+
+// VibrationExcitationVoltage - (0014,601A) Vibration Excitation Voltage
+var VibrationExcitationVoltage = &Tag{
+	Group:       0x0014,
+	Element:     0x601A,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "VibrationExcitationVoltage",
+	Description: "Vibration Excitation Voltage",
+}
+
+// ThermographyDataCaptureMethod - (0014,601B) Thermography Data Capture Method
+var ThermographyDataCaptureMethod = &Tag{
+	Group:       0x0014,
+	Element:     0x601B,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "ThermographyDataCaptureMethod",
+	Description: "Thermography Data Capture Method",
+}
+
+// ThermalTechnique - (0014,601C) Thermal Technique
+var ThermalTechnique = &Tag{
+	Group:       0x0014,
+	Element:     0x601C,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "ThermalTechnique",
+	Description: "Thermal Technique",
+}
+
+// ThermalCameraCoreSequence - (0014,601D) Thermal Camera Core Sequence
+var ThermalCameraCoreSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x601D,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ThermalCameraCoreSequence",
+	Description: "Thermal Camera Core Sequence",
+}
+
+// DetectorWavelengthRange - (0014,601E) Detector Wavelength Range
+var DetectorWavelengthRange = &Tag{
+	Group:       0x0014,
+	Element:     0x601E,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "DetectorWavelengthRange",
+	Description: "Detector Wavelength Range",
+}
+
+// ThermalCameraCalibrationType - (0014,601F) Thermal Camera Calibration Type
+var ThermalCameraCalibrationType = &Tag{
+	Group:       0x0014,
+	Element:     0x601F,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "ThermalCameraCalibrationType",
+	Description: "Thermal Camera Calibration Type",
+}
+
+// AcquisitionImageCounter - (0014,6020) Acquisition Image Counter
+var AcquisitionImageCounter = &Tag{
+	Group:       0x0014,
+	Element:     0x6020,
+	VR:          "UV",
+	VM:          "1",
+	Name:        "AcquisitionImageCounter",
+	Description: "Acquisition Image Counter",
+}
+
+// FrontPanelTemperature - (0014,6021) Front Panel Temperature
+var FrontPanelTemperature = &Tag{
+	Group:       0x0014,
+	Element:     0x6021,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "FrontPanelTemperature",
+	Description: "Front Panel Temperature",
+}
+
+// AirGapTemperature - (0014,6022) Air Gap Temperature
+var AirGapTemperature = &Tag{
+	Group:       0x0014,
+	Element:     0x6022,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "AirGapTemperature",
+	Description: "Air Gap Temperature",
+}
+
+// VerticalPixelSize - (0014,6023) Vertical Pixel Size
+var VerticalPixelSize = &Tag{
+	Group:       0x0014,
+	Element:     0x6023,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "VerticalPixelSize",
+	Description: "Vertical Pixel Size",
+}
+
+// HorizontalPixelSize - (0014,6024) Horizontal Pixel Size
+var HorizontalPixelSize = &Tag{
+	Group:       0x0014,
+	Element:     0x6024,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "HorizontalPixelSize",
+	Description: "Horizontal Pixel Size",
+}
+
+// DataStreamingProtocol - (0014,6025) Data Streaming Protocol
+var DataStreamingProtocol = &Tag{
+	Group:       0x0014,
+	Element:     0x6025,
+	VR:          "ST",
+	VM:          "1-n",
+	Name:        "DataStreamingProtocol",
+	Description: "Data Streaming Protocol",
+}
+
+// LensSequence - (0014,6026) Lens Sequence
+var LensSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x6026,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "LensSequence",
+	Description: "Lens Sequence",
+}
+
+// FieldOfView - (0014,6027) Field of View
+var FieldOfView = &Tag{
+	Group:       0x0014,
+	Element:     0x6027,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "FieldOfView",
+	Description: "Field of View",
+}
+
+// LensFilterManufacturer - (0014,6028) Lens Filter Manufacturer
+var LensFilterManufacturer = &Tag{
+	Group:       0x0014,
+	Element:     0x6028,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "LensFilterManufacturer",
+	Description: "Lens Filter Manufacturer",
+}
+
+// CutoffFilterType - (0014,6029) Cutoff Filter Type
+var CutoffFilterType = &Tag{
+	Group:       0x0014,
+	Element:     0x6029,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "CutoffFilterType",
+	Description: "Cutoff Filter Type",
+}
+
+// LensFilterCutOffWavelength - (0014,602A) Lens Filter Cut-Off Wavelength
+var LensFilterCutOffWavelength = &Tag{
+	Group:       0x0014,
+	Element:     0x602A,
+	VR:          "DS",
+	VM:          "1-n",
+	Name:        "LensFilterCutOffWavelength",
+	Description: "Lens Filter Cut-Off Wavelength",
+}
+
+// ThermalSourceSequence - (0014,602B) Thermal Source Sequence
+var ThermalSourceSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x602B,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ThermalSourceSequence",
+	Description: "Thermal Source Sequence",
+}
+
+// ThermalSourceMotionState - (0014,602C) Thermal Source Motion State
+var ThermalSourceMotionState = &Tag{
+	Group:       0x0014,
+	Element:     0x602C,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "ThermalSourceMotionState",
+	Description: "Thermal Source Motion State",
+}
+
+// ThermalSourceMotionType - (0014,602D) Thermal Source Motion Type
+var ThermalSourceMotionType = &Tag{
+	Group:       0x0014,
+	Element:     0x602D,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "ThermalSourceMotionType",
+	Description: "Thermal Source Motion Type",
+}
+
+// InductionHeatingSequence - (0014,602E) Induction Heating Sequence
+var InductionHeatingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x602E,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "InductionHeatingSequence",
+	Description: "Induction Heating Sequence",
+}
+
+// CoilConfigurationID - (0014,602F) Coil Configuration ID
+var CoilConfigurationID = &Tag{
+	Group:       0x0014,
+	Element:     0x602F,
+	VR:          "ST",
+	VM:          "1",
+	Name:        "CoilConfigurationID",
+	Description: "Coil Configuration ID",
+}
+
+// NumberOfTurnsInCoil - (0014,6030) Number of Turns in Coil
+var NumberOfTurnsInCoil = &Tag{
+	Group:       0x0014,
+	Element:     0x6030,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "NumberOfTurnsInCoil",
+	Description: "Number of Turns in Coil",
+}
+
+// ShapeOfIndividualTurn - (0014,6031) Shape of Individual Turn
+var ShapeOfIndividualTurn = &Tag{
+	Group:       0x0014,
+	Element:     0x6031,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "ShapeOfIndividualTurn",
+	Description: "Shape of Individual Turn",
+}
+
+// SizeOfIndividualTurn - (0014,6032) Size of Individual Turn
+var SizeOfIndividualTurn = &Tag{
+	Group:       0x0014,
+	Element:     0x6032,
+	VR:          "DS",
+	VM:          "1-n",
+	Name:        "SizeOfIndividualTurn",
+	Description: "Size of Individual Turn",
+}
+
+// DistanceBetweenTurns - (0014,6033) Distance Between Turns
+var DistanceBetweenTurns = &Tag{
+	Group:       0x0014,
+	Element:     0x6033,
+	VR:          "DS",
+	VM:          "1-n",
+	Name:        "DistanceBetweenTurns",
+	Description: "Distance Between Turns",
+}
+
+// FlashHeatingSequence - (0014,6034) Flash Heating Sequence
+var FlashHeatingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x6034,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "FlashHeatingSequence",
+	Description: "Flash Heating Sequence",
+}
+
+// NumberOfLamps - (0014,6035) Number of Lamps
+var NumberOfLamps = &Tag{
+	Group:       0x0014,
+	Element:     0x6035,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "NumberOfLamps",
+	Description: "Number of Lamps",
+}
+
+// FlashSynchronizationProtocol - (0014,6036) Flash Synchronization Protocol
+var FlashSynchronizationProtocol = &Tag{
+	Group:       0x0014,
+	Element:     0x6036,
+	VR:          "ST",
+	VM:          "1",
+	Name:        "FlashSynchronizationProtocol",
+	Description: "Flash Synchronization Protocol",
+}
+
+// FlashModificationStatus - (0014,6037) Flash Modification Status
+var FlashModificationStatus = &Tag{
+	Group:       0x0014,
+	Element:     0x6037,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "FlashModificationStatus",
+	Description: "Flash Modification Status",
+}
+
+// LaserHeatingSequence - (0014,6038) Laser Heating Sequence
+var LaserHeatingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x6038,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "LaserHeatingSequence",
+	Description: "Laser Heating Sequence",
+}
+
+// LaserManufacturer - (0014,6039) Laser Manufacturer
+var LaserManufacturer = &Tag{
+	Group:       0x0014,
+	Element:     0x6039,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "LaserManufacturer",
+	Description: "Laser Manufacturer",
+}
+
+// LaserModelNumber - (0014,603A) Laser Model Number
+var LaserModelNumber = &Tag{
+	Group:       0x0014,
+	Element:     0x603A,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "LaserModelNumber",
+	Description: "Laser Model Number",
+}
+
+// LaserTypeDescription - (0014,603B) Laser Type Description
+var LaserTypeDescription = &Tag{
+	Group:       0x0014,
+	Element:     0x603B,
+	VR:          "ST",
+	VM:          "1",
+	Name:        "LaserTypeDescription",
+	Description: "Laser Type Description",
+}
+
+// ForcedGasHeatingSequence - (0014,603C) Forced Gas Heating Sequence
+var ForcedGasHeatingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x603C,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ForcedGasHeatingSequence",
+	Description: "Forced Gas Heating Sequence",
+}
+
+// GasUsedForHeatingCoolingPart - (0014,603D) Gas Used for Heating/Cooling Part
+var GasUsedForHeatingCoolingPart = &Tag{
+	Group:       0x0014,
+	Element:     0x603D,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "GasUsedForHeatingCoolingPart",
+	Description: "Gas Used for Heating/Cooling Part",
+}
+
+// VibrationSonicHeatingSequence - (0014,603E) Vibration/Sonic Heating Sequence
+var VibrationSonicHeatingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x603E,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "VibrationSonicHeatingSequence",
+	Description: "Vibration/Sonic Heating Sequence",
+}
+
+// ProbeManufacturer - (0014,603F) Probe Manufacturer
+var ProbeManufacturer = &Tag{
+	Group:       0x0014,
+	Element:     0x603F,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "ProbeManufacturer",
+	Description: "Probe Manufacturer",
+}
+
+// ProbeModelNumber - (0014,6040) Probe Model Number
+var ProbeModelNumber = &Tag{
+	Group:       0x0014,
+	Element:     0x6040,
+	VR:          "LO",
+	VM:          "1",
+	Name:        "ProbeModelNumber",
+	Description: "Probe Model Number",
+}
+
+// ApertureSize - (0014,6041) Aperture Size
+var ApertureSize = &Tag{
+	Group:       0x0014,
+	Element:     0x6041,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "ApertureSize",
+	Description: "Aperture Size",
+}
+
+// ProbeResonantFrequency - (0014,6042) Probe Resonant Frequency
+var ProbeResonantFrequency = &Tag{
+	Group:       0x0014,
+	Element:     0x6042,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "ProbeResonantFrequency",
+	Description: "Probe Resonant Frequency",
+}
+
+// HeatSourceDescription - (0014,6043) Heat Source Description
+var HeatSourceDescription = &Tag{
+	Group:       0x0014,
+	Element:     0x6043,
+	VR:          "UT",
+	VM:          "1",
+	Name:        "HeatSourceDescription",
+	Description: "Heat Source Description",
+}
+
+// SurfacePreparationWithOpticalCoating - (0014,6044) Surface Preparation with Optical Coating
+var SurfacePreparationWithOpticalCoating = &Tag{
+	Group:       0x0014,
+	Element:     0x6044,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "SurfacePreparationWithOpticalCoating",
+	Description: "Surface Preparation with Optical Coating",
+}
+
+// OpticalCoatingType - (0014,6045) Optical Coating Type
+var OpticalCoatingType = &Tag{
+	Group:       0x0014,
+	Element:     0x6045,
+	VR:          "ST",
+	VM:          "1",
+	Name:        "OpticalCoatingType",
+	Description: "Optical Coating Type",
+}
+
+// ThermalConductivityOfExposedSurface - (0014,6046) Thermal Conductivity of Exposed Surface
+var ThermalConductivityOfExposedSurface = &Tag{
+	Group:       0x0014,
+	Element:     0x6046,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "ThermalConductivityOfExposedSurface",
+	Description: "Thermal Conductivity of Exposed Surface",
+}
+
+// MaterialDensity - (0014,6047) Material Density
+var MaterialDensity = &Tag{
+	Group:       0x0014,
+	Element:     0x6047,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "MaterialDensity",
+	Description: "Material Density",
+}
+
+// SpecificHeatOfInspectionSurface - (0014,6048) Specific Heat of Inspection Surface
+var SpecificHeatOfInspectionSurface = &Tag{
+	Group:       0x0014,
+	Element:     0x6048,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "SpecificHeatOfInspectionSurface",
+	Description: "Specific Heat of Inspection Surface",
+}
+
+// EmissivityOfInspectionSurface - (0014,6049) Emissivity of Inspection Surface
+var EmissivityOfInspectionSurface = &Tag{
+	Group:       0x0014,
+	Element:     0x6049,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "EmissivityOfInspectionSurface",
+	Description: "Emissivity of Inspection Surface",
+}
+
+// ElectromagneticClassificationOfInspectionSurface - (0014,604A) Electromagnetic Classification of Inspection Surface
+var ElectromagneticClassificationOfInspectionSurface = &Tag{
+	Group:       0x0014,
+	Element:     0x604A,
+	VR:          "CS",
+	VM:          "1-n",
+	Name:        "ElectromagneticClassificationOfInspectionSurface",
+	Description: "Electromagnetic Classification of Inspection Surface",
+}
+
+// MovingWindowSize - (0014,604C) Moving Window Size
+var MovingWindowSize = &Tag{
+	Group:       0x0014,
+	Element:     0x604C,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "MovingWindowSize",
+	Description: "Moving Window Size",
+}
+
+// MovingWindowType - (0014,604D) Moving Window Type
+var MovingWindowType = &Tag{
+	Group:       0x0014,
+	Element:     0x604D,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "MovingWindowType",
+	Description: "Moving Window Type",
+}
+
+// MovingWindowWeights - (0014,604E) Moving Window Weights
+var MovingWindowWeights = &Tag{
+	Group:       0x0014,
+	Element:     0x604E,
+	VR:          "DS",
+	VM:          "1-n",
+	Name:        "MovingWindowWeights",
+	Description: "Moving Window Weights",
+}
+
+// MovingWindowPitch - (0014,604F) Moving Window Pitch
+var MovingWindowPitch = &Tag{
+	Group:       0x0014,
+	Element:     0x604F,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "MovingWindowPitch",
+	Description: "Moving Window Pitch",
+}
+
+// MovingWindowPaddingScheme - (0014,6050) Moving Window Padding Scheme
+var MovingWindowPaddingScheme = &Tag{
+	Group:       0x0014,
+	Element:     0x6050,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "MovingWindowPaddingScheme",
+	Description: "Moving Window Padding Scheme",
+}
+
+// MovingWindowPaddingLength - (0014,6051) Moving Window Padding Sength
+var MovingWindowPaddingLength = &Tag{
+	Group:       0x0014,
+	Element:     0x6051,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "MovingWindowPaddingLength",
+	Description: "Moving Window Padding Sength",
+}
+
+// SpatialFilteringParametersSequence - (0014,6052) Spatial Filtering Parameters Sequence
+var SpatialFilteringParametersSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x6052,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "SpatialFilteringParametersSequence",
+	Description: "Spatial Filtering Parameters Sequence",
+}
+
+// SpatialFilteringScheme - (0014,6053) Spatial Filtering Scheme
+var SpatialFilteringScheme = &Tag{
+	Group:       0x0014,
+	Element:     0x6053,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "SpatialFilteringScheme",
+	Description: "Spatial Filtering Scheme",
+}
+
+// HorizontalMovingWindowSize - (0014,6056) Horizontal Moving Window Size
+var HorizontalMovingWindowSize = &Tag{
+	Group:       0x0014,
+	Element:     0x6056,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "HorizontalMovingWindowSize",
+	Description: "Horizontal Moving Window Size",
+}
+
+// VerticalMovingWindowSize - (0014,6057) Vertical Moving Window Size
+var VerticalMovingWindowSize = &Tag{
+	Group:       0x0014,
+	Element:     0x6057,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "VerticalMovingWindowSize",
+	Description: "Vertical Moving Window Size",
+}
+
+// PolynomialFittingSequence - (0014,6059) Polynomial Fitting Sequence
+var PolynomialFittingSequence = &Tag{
+	Group:       0x0014,
+	Element:     0x6059,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "PolynomialFittingSequence",
+	Description: "Polynomial Fitting Sequence",
+}
+
+// FittingDataType - (0014,605A) Fitting Data Type
+var FittingDataType = &Tag{
+	Group:       0x0014,
+	Element:     0x605A,
+	VR:          "CS",
+	VM:          "1-n",
+	Name:        "FittingDataType",
+	Description: "Fitting Data Type",
+}
+
+// OperationOnTimeAxisBeforeFitting - (0014,605B) Operation on Time Axis Before Fitting
+var OperationOnTimeAxisBeforeFitting = &Tag{
+	Group:       0x0014,
+	Element:     0x605B,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "OperationOnTimeAxisBeforeFitting",
+	Description: "Operation on Time Axis Before Fitting",
+}
+
+// OperationOnPixelIntensityBeforeFitting - (0014,605C) Operation on Pixel Intensity Before Fitting
+var OperationOnPixelIntensityBeforeFitting = &Tag{
+	Group:       0x0014,
+	Element:     0x605C,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "OperationOnPixelIntensityBeforeFitting",
+	Description: "Operation on Pixel Intensity Before Fitting",
+}
+
+// OrderOfPolynomial - (0014,605D) Order of Polynomial
+var OrderOfPolynomial = &Tag{
+	Group:       0x0014,
+	Element:     0x605D,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "OrderOfPolynomial",
+	Description: "Order of Polynomial",
+}
+
+// IndependentVariableForPolynomialFit - (0014,605E) Independent Variable for Polynomial Fit
+var IndependentVariableForPolynomialFit = &Tag{
+	Group:       0x0014,
+	Element:     0x605E,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "IndependentVariableForPolynomialFit",
+	Description: "Independent Variable for Polynomial Fit",
+}
+
+// PolynomialCoefficients - (0014,605F) PolynomialCoefficients
+var PolynomialCoefficients = &Tag{
+	Group:       0x0014,
+	Element:     0x605F,
+	VR:          "DS",
+	VM:          "1-n",
+	Name:        "PolynomialCoefficients",
+	Description: "PolynomialCoefficients",
+}
+
+// ThermographyPixelDataUnit - (0014,6060) Thermography Pixel Data Unit
+var ThermographyPixelDataUnit = &Tag{
+	Group:       0x0014,
+	Element:     0x6060,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "ThermographyPixelDataUnit",
+	Description: "Thermography Pixel Data Unit",
 }
 
 // WhitePoint - (0016,0001) White Point
@@ -7920,6 +8970,16 @@ var KVP = &Tag{
 	Description: "KVP",
 }
 
+// Retiredblank00180061 - (0018,0061) Retired-blank
+var Retiredblank00180061 = &Tag{
+	Group:       0x0018,
+	Element:     0x0061,
+	VR:          "DS",
+	VM:          "1",
+	Name:        "Retiredblank00180061",
+	Description: "Retired-blank",
+}
+
 // CountsAccumulated - (0018,0070) Counts Accumulated
 var CountsAccumulated = &Tag{
 	Group:       0x0018,
@@ -9080,14 +10140,14 @@ var Exposure = &Tag{
 	Description: "Exposure",
 }
 
-// ExposureInuAs - (0018,1153) Exposure in µAs
+// ExposureInuAs - (0018,1153) Exposure in uAs
 var ExposureInuAs = &Tag{
 	Group:       0x0018,
 	Element:     0x1153,
 	VR:          "IS",
 	VM:          "1",
 	Name:        "ExposureInuAs",
-	Description: "Exposure in µAs",
+	Description: "Exposure in uAs",
 }
 
 // AveragePulseWidth - (0018,1154) Average Pulse Width
@@ -9538,6 +10598,26 @@ var CalibrationDateTime = &Tag{
 	VM:          "1",
 	Name:        "CalibrationDateTime",
 	Description: "Calibration DateTime",
+}
+
+// DateOfManufacture - (0018,1204) Date of Manufacture
+var DateOfManufacture = &Tag{
+	Group:       0x0018,
+	Element:     0x1204,
+	VR:          "DA",
+	VM:          "1",
+	Name:        "DateOfManufacture",
+	Description: "Date of Manufacture",
+}
+
+// DateOfInstallation - (0018,1205) Date of Installation
+var DateOfInstallation = &Tag{
+	Group:       0x0018,
+	Element:     0x1205,
+	VR:          "DA",
+	VM:          "1",
+	Name:        "DateOfInstallation",
+	Description: "Date of Installation",
 }
 
 // ConvolutionKernel - (0018,1210) Convolution Kernel
@@ -10957,7 +12037,7 @@ var DopplerSampleVolumeXPositionRetired = &Tag{
 	VR:          "UL",
 	VM:          "1",
 	Name:        "DopplerSampleVolumeXPositionRetired",
-	Description: "Doppler Sample Volume X Position",
+	Description: "Doppler Sample Volume X Position (Retired)",
 }
 
 // DopplerSampleVolumeXPosition - (0018,6039) Doppler Sample Volume X Position
@@ -10977,7 +12057,7 @@ var DopplerSampleVolumeYPositionRetired = &Tag{
 	VR:          "UL",
 	VM:          "1",
 	Name:        "DopplerSampleVolumeYPositionRetired",
-	Description: "Doppler Sample Volume Y Position",
+	Description: "Doppler Sample Volume Y Position (Retired)",
 }
 
 // DopplerSampleVolumeYPosition - (0018,603B) Doppler Sample Volume Y Position
@@ -10997,7 +12077,7 @@ var TMLinePositionX0Retired = &Tag{
 	VR:          "UL",
 	VM:          "1",
 	Name:        "TMLinePositionX0Retired",
-	Description: "TM-Line Position X0",
+	Description: "TM-Line Position X0 (Retired)",
 }
 
 // TMLinePositionX0 - (0018,603D) TM-Line Position X0
@@ -11017,7 +12097,7 @@ var TMLinePositionY0Retired = &Tag{
 	VR:          "UL",
 	VM:          "1",
 	Name:        "TMLinePositionY0Retired",
-	Description: "TM-Line Position Y0",
+	Description: "TM-Line Position Y0 (Retired)",
 }
 
 // TMLinePositionY0 - (0018,603F) TM-Line Position Y0
@@ -11037,7 +12117,7 @@ var TMLinePositionX1Retired = &Tag{
 	VR:          "UL",
 	VM:          "1",
 	Name:        "TMLinePositionX1Retired",
-	Description: "TM-Line Position X1",
+	Description: "TM-Line Position X1 (Retired)",
 }
 
 // TMLinePositionX1 - (0018,6041) TM-Line Position X1
@@ -11057,7 +12137,7 @@ var TMLinePositionY1Retired = &Tag{
 	VR:          "UL",
 	VM:          "1",
 	Name:        "TMLinePositionY1Retired",
-	Description: "TM-Line Position Y1",
+	Description: "TM-Line Position Y1 (Retired)",
 }
 
 // TMLinePositionY1 - (0018,6043) TM-Line Position Y1
@@ -11640,24 +12720,24 @@ var PhototimerSetting = &Tag{
 	Description: "Phototimer Setting",
 }
 
-// ExposureTimeInuS - (0018,8150) Exposure Time in µS
+// ExposureTimeInuS - (0018,8150) Exposure Time in uS
 var ExposureTimeInuS = &Tag{
 	Group:       0x0018,
 	Element:     0x8150,
 	VR:          "DS",
 	VM:          "1",
 	Name:        "ExposureTimeInuS",
-	Description: "Exposure Time in µS",
+	Description: "Exposure Time in uS",
 }
 
-// XRayTubeCurrentInuA - (0018,8151) X-Ray Tube Current in µA
+// XRayTubeCurrentInuA - (0018,8151) X-Ray Tube Current in uA
 var XRayTubeCurrentInuA = &Tag{
 	Group:       0x0018,
 	Element:     0x8151,
 	VR:          "DS",
 	VM:          "1",
 	Name:        "XRayTubeCurrentInuA",
-	Description: "X-Ray Tube Current in µA",
+	Description: "X-Ray Tube Current in uA",
 }
 
 // ContentQualification - (0018,9004) Content Qualification
@@ -12437,7 +13517,7 @@ var ParallelReductionFactorInPlaneRetired = &Tag{
 	VR:          "FD",
 	VM:          "1",
 	Name:        "ParallelReductionFactorInPlaneRetired",
-	Description: "Parallel Reduction Factor In-plane",
+	Description: "Parallel Reduction Factor In-plane (Retired)",
 }
 
 // TransmitterFrequency - (0018,9098) Transmitter Frequency
@@ -14400,6 +15480,16 @@ var VerticesOfThePolygonalExposureControlSensingRegion = &Tag{
 	Description: "Vertices of the Polygonal Exposure Control Sensing Region",
 }
 
+// Retiredblank00189445 - (0018,9445) Retired-blank
+var Retiredblank00189445 = &Tag{
+	Group:       0x0018,
+	Element:     0x9445,
+	VR:          "OB",
+	VM:          "1",
+	Name:        "Retiredblank00189445",
+	Description: "Retired-blank",
+}
+
 // ColumnAngulationPatient - (0018,9447) Column Angulation (Patient)
 var ColumnAngulationPatient = &Tag{
 	Group:       0x0018,
@@ -15704,10 +16794,220 @@ var TransducerApplicationCodeSequence = &Tag{
 var ZeroVelocityPixelValue = &Tag{
 	Group:       0x0018,
 	Element:     0x9810,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "ZeroVelocityPixelValue",
 	Description: "Zero Velocity Pixel Value",
+}
+
+// PhotoacousticExcitationCharacteristicsSequence - (0018,9821) Photoacoustic Excitation Characteristics Sequence
+var PhotoacousticExcitationCharacteristicsSequence = &Tag{
+	Group:       0x0018,
+	Element:     0x9821,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "PhotoacousticExcitationCharacteristicsSequence",
+	Description: "Photoacoustic Excitation Characteristics Sequence",
+}
+
+// ExcitationSpectralWidth - (0018,9822) Excitation Spectral Width
+var ExcitationSpectralWidth = &Tag{
+	Group:       0x0018,
+	Element:     0x9822,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "ExcitationSpectralWidth",
+	Description: "Excitation Spectral Width",
+}
+
+// ExcitationEnergy - (0018,9823) Excitation Energy
+var ExcitationEnergy = &Tag{
+	Group:       0x0018,
+	Element:     0x9823,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "ExcitationEnergy",
+	Description: "Excitation Energy",
+}
+
+// ExcitationPulseDuration - (0018,9824) Excitation Pulse Duration
+var ExcitationPulseDuration = &Tag{
+	Group:       0x0018,
+	Element:     0x9824,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "ExcitationPulseDuration",
+	Description: "Excitation Pulse Duration",
+}
+
+// ExcitationWavelengthSequence - (0018,9825) Excitation Wavelength Sequence
+var ExcitationWavelengthSequence = &Tag{
+	Group:       0x0018,
+	Element:     0x9825,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ExcitationWavelengthSequence",
+	Description: "Excitation Wavelength Sequence",
+}
+
+// ExcitationWavelength - (0018,9826) Excitation Wavelength
+var ExcitationWavelength = &Tag{
+	Group:       0x0018,
+	Element:     0x9826,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "ExcitationWavelength",
+	Description: "Excitation Wavelength",
+}
+
+// IlluminationTranslationFlag - (0018,9828) Illumination Translation Flag
+var IlluminationTranslationFlag = &Tag{
+	Group:       0x0018,
+	Element:     0x9828,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "IlluminationTranslationFlag",
+	Description: "Illumination Translation Flag",
+}
+
+// AcousticCouplingMediumFlag - (0018,9829) Acoustic Coupling Medium Flag
+var AcousticCouplingMediumFlag = &Tag{
+	Group:       0x0018,
+	Element:     0x9829,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "AcousticCouplingMediumFlag",
+	Description: "Acoustic Coupling Medium Flag",
+}
+
+// AcousticCouplingMediumCodeSequence - (0018,982A) Acoustic Coupling Medium Code Sequence
+var AcousticCouplingMediumCodeSequence = &Tag{
+	Group:       0x0018,
+	Element:     0x982A,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "AcousticCouplingMediumCodeSequence",
+	Description: "Acoustic Coupling Medium Code Sequence",
+}
+
+// AcousticCouplingMediumTemperature - (0018,982B) Acoustic Coupling Medium Temperature
+var AcousticCouplingMediumTemperature = &Tag{
+	Group:       0x0018,
+	Element:     0x982B,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "AcousticCouplingMediumTemperature",
+	Description: "Acoustic Coupling Medium Temperature",
+}
+
+// TransducerResponseSequence - (0018,982C) Transducer Response Sequence
+var TransducerResponseSequence = &Tag{
+	Group:       0x0018,
+	Element:     0x982C,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "TransducerResponseSequence",
+	Description: "Transducer Response Sequence",
+}
+
+// CenterFrequency - (0018,982D) Center Frequency
+var CenterFrequency = &Tag{
+	Group:       0x0018,
+	Element:     0x982D,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "CenterFrequency",
+	Description: "Center Frequency",
+}
+
+// FractionalBandwidth - (0018,982E) Fractional Bandwidth
+var FractionalBandwidth = &Tag{
+	Group:       0x0018,
+	Element:     0x982E,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "FractionalBandwidth",
+	Description: "Fractional Bandwidth",
+}
+
+// LowerCutoffFrequency - (0018,982F) Lower Cutoff Frequency
+var LowerCutoffFrequency = &Tag{
+	Group:       0x0018,
+	Element:     0x982F,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "LowerCutoffFrequency",
+	Description: "Lower Cutoff Frequency",
+}
+
+// UpperCutoffFrequency - (0018,9830) Upper Cutoff Frequency
+var UpperCutoffFrequency = &Tag{
+	Group:       0x0018,
+	Element:     0x9830,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "UpperCutoffFrequency",
+	Description: "Upper Cutoff Frequency",
+}
+
+// TransducerTechnologySequence - (0018,9831) Transducer Technology Sequence
+var TransducerTechnologySequence = &Tag{
+	Group:       0x0018,
+	Element:     0x9831,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "TransducerTechnologySequence",
+	Description: "Transducer Technology Sequence",
+}
+
+// SoundSpeedCorrectionMechanismCodeSequence - (0018,9832) Sound Speed Correction Mechanism Code Sequence
+var SoundSpeedCorrectionMechanismCodeSequence = &Tag{
+	Group:       0x0018,
+	Element:     0x9832,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "SoundSpeedCorrectionMechanismCodeSequence",
+	Description: "Sound Speed Correction Mechanism Code Sequence",
+}
+
+// ObjectSoundSpeed - (0018,9833) Object Sound Speed
+var ObjectSoundSpeed = &Tag{
+	Group:       0x0018,
+	Element:     0x9833,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "ObjectSoundSpeed",
+	Description: "Object Sound Speed",
+}
+
+// AcousticCouplingMediumSoundSpeed - (0018,9834) Acoustic Coupling Medium Sound Speed
+var AcousticCouplingMediumSoundSpeed = &Tag{
+	Group:       0x0018,
+	Element:     0x9834,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "AcousticCouplingMediumSoundSpeed",
+	Description: "Acoustic Coupling Medium Sound Speed",
+}
+
+// PhotoacousticImageFrameTypeSequence - (0018,9835) Photoacoustic Image Frame Type Sequence
+var PhotoacousticImageFrameTypeSequence = &Tag{
+	Group:       0x0018,
+	Element:     0x9835,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "PhotoacousticImageFrameTypeSequence",
+	Description: "Photoacoustic Image Frame Type Sequence",
+}
+
+// ImageDataTypeCodeSequence - (0018,9836) Image Data Type Code Sequence
+var ImageDataTypeCodeSequence = &Tag{
+	Group:       0x0018,
+	Element:     0x9836,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ImageDataTypeCodeSequence",
+	Description: "Image Data Type Code Sequence",
 }
 
 // ReferenceLocationLabel - (0018,9900) Reference Location Label
@@ -17690,6 +18990,16 @@ var DegreeOfDilation = &Tag{
 	Description: "Degree of Dilation",
 }
 
+// VertexDistance - (0022,000F) Vertex Distance
+var VertexDistance = &Tag{
+	Group:       0x0022,
+	Element:     0x000F,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "VertexDistance",
+	Description: "Vertex Distance",
+}
+
 // StereoBaselineAngle - (0022,0010) Stereo Baseline Angle
 var StereoBaselineAngle = &Tag{
 	Group:       0x0022,
@@ -18874,7 +20184,7 @@ var PixelValueMappingToCodedConceptSequence = &Tag{
 var MappedPixelValue = &Tag{
 	Group:       0x0022,
 	Element:     0x1452,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "MappedPixelValue",
 	Description: "Mapped Pixel Value",
@@ -19180,6 +20490,16 @@ var OphthalmicAnatomicReferencePointYCoordinate = &Tag{
 	Description: "Ophthalmic Anatomic Reference Point Y-Coordinate",
 }
 
+// OphthalmicEnFaceVolumeDescriptorSequence - (0022,1627) Ophthalmic En Face Volume Descriptor Sequence
+var OphthalmicEnFaceVolumeDescriptorSequence = &Tag{
+	Group:       0x0022,
+	Element:     0x1627,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "OphthalmicEnFaceVolumeDescriptorSequence",
+	Description: "Ophthalmic En Face Volume Descriptor Sequence",
+}
+
 // OphthalmicEnFaceImageQualityRatingSequence - (0022,1628) Ophthalmic En Face Image Quality Rating Sequence
 var OphthalmicEnFaceImageQualityRatingSequence = &Tag{
 	Group:       0x0022,
@@ -19188,6 +20508,16 @@ var OphthalmicEnFaceImageQualityRatingSequence = &Tag{
 	VM:          "1",
 	Name:        "OphthalmicEnFaceImageQualityRatingSequence",
 	Description: "Ophthalmic En Face Image Quality Rating Sequence",
+}
+
+// OphthalmicEnFaceVolumeDescriptorScope - (0022,1629) Ophthalmic En Face Volume Descriptor Scope
+var OphthalmicEnFaceVolumeDescriptorScope = &Tag{
+	Group:       0x0022,
+	Element:     0x1629,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "OphthalmicEnFaceVolumeDescriptorScope",
+	Description: "Ophthalmic En Face Volume Descriptor Scope",
 }
 
 // QualityThreshold - (0022,1630) Quality Threshold
@@ -20420,6 +21750,16 @@ var UltrasoundColorDataPresent = &Tag{
 	Description: "Ultrasound Color Data Present",
 }
 
+// Retiredblank00280020 - (0028,0020) Retired-blank
+var Retiredblank00280020 = &Tag{
+	Group:       0x0028,
+	Element:     0x0020,
+	VR:          "OB",
+	VM:          "1",
+	Name:        "Retiredblank00280020",
+	Description: "Retired-blank",
+}
+
 // PixelSpacing - (0028,0030) Pixel Spacing
 var PixelSpacing = &Tag{
 	Group:       0x0028,
@@ -20594,7 +21934,7 @@ var PerimeterTable = &Tag{
 var PerimeterValue = &Tag{
 	Group:       0x0028,
 	Element:     0x0071,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "PerimeterValue",
 	Description: "Perimeter Value",
@@ -20724,7 +22064,7 @@ var PixelRepresentation = &Tag{
 var SmallestValidPixelValue = &Tag{
 	Group:       0x0028,
 	Element:     0x0104,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "SmallestValidPixelValue",
 	Description: "Smallest Valid Pixel Value",
@@ -20734,7 +22074,7 @@ var SmallestValidPixelValue = &Tag{
 var LargestValidPixelValue = &Tag{
 	Group:       0x0028,
 	Element:     0x0105,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "LargestValidPixelValue",
 	Description: "Largest Valid Pixel Value",
@@ -20744,7 +22084,7 @@ var LargestValidPixelValue = &Tag{
 var SmallestImagePixelValue = &Tag{
 	Group:       0x0028,
 	Element:     0x0106,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "SmallestImagePixelValue",
 	Description: "Smallest Image Pixel Value",
@@ -20754,7 +22094,7 @@ var SmallestImagePixelValue = &Tag{
 var LargestImagePixelValue = &Tag{
 	Group:       0x0028,
 	Element:     0x0107,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "LargestImagePixelValue",
 	Description: "Largest Image Pixel Value",
@@ -20764,7 +22104,7 @@ var LargestImagePixelValue = &Tag{
 var SmallestPixelValueInSeries = &Tag{
 	Group:       0x0028,
 	Element:     0x0108,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "SmallestPixelValueInSeries",
 	Description: "Smallest Pixel Value in Series",
@@ -20774,7 +22114,7 @@ var SmallestPixelValueInSeries = &Tag{
 var LargestPixelValueInSeries = &Tag{
 	Group:       0x0028,
 	Element:     0x0109,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "LargestPixelValueInSeries",
 	Description: "Largest Pixel Value in Series",
@@ -20784,7 +22124,7 @@ var LargestPixelValueInSeries = &Tag{
 var SmallestImagePixelValueInPlane = &Tag{
 	Group:       0x0028,
 	Element:     0x0110,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "SmallestImagePixelValueInPlane",
 	Description: "Smallest Image Pixel Value in Plane",
@@ -20794,7 +22134,7 @@ var SmallestImagePixelValueInPlane = &Tag{
 var LargestImagePixelValueInPlane = &Tag{
 	Group:       0x0028,
 	Element:     0x0111,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "LargestImagePixelValueInPlane",
 	Description: "Largest Image Pixel Value in Plane",
@@ -20804,7 +22144,7 @@ var LargestImagePixelValueInPlane = &Tag{
 var PixelPaddingValue = &Tag{
 	Group:       0x0028,
 	Element:     0x0120,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "PixelPaddingValue",
 	Description: "Pixel Padding Value",
@@ -20814,7 +22154,7 @@ var PixelPaddingValue = &Tag{
 var PixelPaddingRangeLimit = &Tag{
 	Group:       0x0028,
 	Element:     0x0121,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "PixelPaddingRangeLimit",
 	Description: "Pixel Padding Range Limit",
@@ -21194,7 +22534,7 @@ var RecommendedViewingMode = &Tag{
 var GrayLookupTableDescriptor = &Tag{
 	Group:       0x0028,
 	Element:     0x1100,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "3",
 	Name:        "GrayLookupTableDescriptor",
 	Description: "Gray Lookup Table Descriptor",
@@ -21204,7 +22544,7 @@ var GrayLookupTableDescriptor = &Tag{
 var RedPaletteColorLookupTableDescriptor = &Tag{
 	Group:       0x0028,
 	Element:     0x1101,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "3",
 	Name:        "RedPaletteColorLookupTableDescriptor",
 	Description: "Red Palette Color Lookup Table Descriptor",
@@ -21214,7 +22554,7 @@ var RedPaletteColorLookupTableDescriptor = &Tag{
 var GreenPaletteColorLookupTableDescriptor = &Tag{
 	Group:       0x0028,
 	Element:     0x1102,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "3",
 	Name:        "GreenPaletteColorLookupTableDescriptor",
 	Description: "Green Palette Color Lookup Table Descriptor",
@@ -21224,7 +22564,7 @@ var GreenPaletteColorLookupTableDescriptor = &Tag{
 var BluePaletteColorLookupTableDescriptor = &Tag{
 	Group:       0x0028,
 	Element:     0x1103,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "3",
 	Name:        "BluePaletteColorLookupTableDescriptor",
 	Description: "Blue Palette Color Lookup Table Descriptor",
@@ -21244,7 +22584,7 @@ var AlphaPaletteColorLookupTableDescriptor = &Tag{
 var LargeRedPaletteColorLookupTableDescriptor = &Tag{
 	Group:       0x0028,
 	Element:     0x1111,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "4",
 	Name:        "LargeRedPaletteColorLookupTableDescriptor",
 	Description: "Large Red Palette Color Lookup Table Descriptor",
@@ -21254,7 +22594,7 @@ var LargeRedPaletteColorLookupTableDescriptor = &Tag{
 var LargeGreenPaletteColorLookupTableDescriptor = &Tag{
 	Group:       0x0028,
 	Element:     0x1112,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "4",
 	Name:        "LargeGreenPaletteColorLookupTableDescriptor",
 	Description: "Large Green Palette Color Lookup Table Descriptor",
@@ -21264,7 +22604,7 @@ var LargeGreenPaletteColorLookupTableDescriptor = &Tag{
 var LargeBluePaletteColorLookupTableDescriptor = &Tag{
 	Group:       0x0028,
 	Element:     0x1113,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "4",
 	Name:        "LargeBluePaletteColorLookupTableDescriptor",
 	Description: "Large Blue Palette Color Lookup Table Descriptor",
@@ -21284,8 +22624,8 @@ var PaletteColorLookupTableUID = &Tag{
 var GrayLookupTableData = &Tag{
 	Group:       0x0028,
 	Element:     0x1200,
-	VR:          "US/SS/OW",
-	VM:          "1-n or 1",
+	VR:          "US or SS or OW",
+	VM:          "1-n",
 	Name:        "GrayLookupTableData",
 	Description: "Gray Lookup Table Data",
 }
@@ -21704,7 +23044,7 @@ var VariableModalityLUTSequence = &Tag{
 var LUTDescriptor = &Tag{
 	Group:       0x0028,
 	Element:     0x3002,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "3",
 	Name:        "LUTDescriptor",
 	Description: "LUT Descriptor",
@@ -21734,8 +23074,8 @@ var ModalityLUTType = &Tag{
 var LUTData = &Tag{
 	Group:       0x0028,
 	Element:     0x3006,
-	VR:          "US/OW",
-	VM:          "1-n or 1",
+	VR:          "US or OW",
+	VM:          "1-n",
 	Name:        "LUTData",
 	Description: "LUT Data",
 }
@@ -23880,13 +25220,13 @@ var FilterHighFrequencyCharacteristicsSequence = &Tag{
 	Description: "Filter High Frequency Characteristics Sequence",
 }
 
-// SummarizedFilterLookupTable - (003A,0320) Summarized Filter Lookup Table Sequence
-var SummarizedFilterLookupTable = &Tag{
+// SummarizedFilterLookupTableSequence - (003A,0320) Summarized Filter Lookup Table Sequence
+var SummarizedFilterLookupTableSequence = &Tag{
 	Group:       0x003A,
 	Element:     0x0320,
 	VR:          "SQ",
 	VM:          "1",
-	Name:        "SummarizedFilterLookupTable",
+	Name:        "SummarizedFilterLookupTableSequence",
 	Description: "Summarized Filter Lookup Table Sequence",
 }
 
@@ -23927,16 +25267,16 @@ var AnalogFilterRollOff = &Tag{
 	VR:          "DS",
 	VM:          "1",
 	Name:        "AnalogFilterRollOff",
-	Description: "Analog Filter Roll Off ",
+	Description: "Analog Filter Roll Off",
 }
 
-// AnalogFilterType - (003A,0325) Analog Filter Type Code Sequence
-var AnalogFilterType = &Tag{
+// AnalogFilterTypeCodeSequence - (003A,0325) Analog Filter Type Code Sequence
+var AnalogFilterTypeCodeSequence = &Tag{
 	Group:       0x003A,
 	Element:     0x0325,
 	VR:          "SQ",
 	VM:          "1",
-	Name:        "AnalogFilterType",
+	Name:        "AnalogFilterTypeCodeSequence",
 	Description: "Analog Filter Type Code Sequence",
 }
 
@@ -24807,7 +26147,7 @@ var SpecimenDescriptionSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "SpecimenDescriptionSequenceTrial",
-	Description: "Specimen Description Sequence",
+	Description: "Specimen Description Sequence (Trial)",
 }
 
 // SpecimenDescriptionTrial - (0040,0553) Specimen Description (Trial)
@@ -24817,7 +26157,7 @@ var SpecimenDescriptionTrial = &Tag{
 	VR:          "ST",
 	VM:          "1",
 	Name:        "SpecimenDescriptionTrial",
-	Description: "Specimen Description",
+	Description: "Specimen Description (Trial)",
 }
 
 // SpecimenUID - (0040,0554) Specimen UID
@@ -24850,16 +26190,6 @@ var AcquisitionContextDescription = &Tag{
 	Description: "Acquisition Context Description",
 }
 
-// SpecimenTypeCodeSequence - (0040,059A) Specimen Type Code Sequence
-var SpecimenTypeCodeSequence = &Tag{
-	Group:       0x0040,
-	Element:     0x059A,
-	VR:          "SQ",
-	VM:          "1",
-	Name:        "SpecimenTypeCodeSequence",
-	Description: "Specimen Type Code Sequence",
-}
-
 // SpecimenDescriptionSequence - (0040,0560) Specimen Description Sequence
 var SpecimenDescriptionSequence = &Tag{
 	Group:       0x0040,
@@ -24878,6 +26208,16 @@ var IssuerOfTheSpecimenIdentifierSequence = &Tag{
 	VM:          "1",
 	Name:        "IssuerOfTheSpecimenIdentifierSequence",
 	Description: "Issuer of the Specimen Identifier Sequence",
+}
+
+// SpecimenTypeCodeSequence - (0040,059A) Specimen Type Code Sequence
+var SpecimenTypeCodeSequence = &Tag{
+	Group:       0x0040,
+	Element:     0x059A,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "SpecimenTypeCodeSequence",
+	Description: "Specimen Type Code Sequence",
 }
 
 // SpecimenShortDescription - (0040,0600) Specimen Short Description
@@ -25027,7 +26367,7 @@ var VitalStainCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "VitalStainCodeSequenceTrial",
-	Description: "Vital Stain Code Sequence",
+	Description: "Vital Stain Code Sequence (Trial)",
 }
 
 // RequestedProcedureID - (0040,1001) Requested Procedure ID
@@ -25167,7 +26507,7 @@ var RequestedProcedureDescriptionTrial = &Tag{
 	VR:          "LO",
 	VM:          "1",
 	Name:        "RequestedProcedureDescriptionTrial",
-	Description: "Requested Procedure Description",
+	Description: "Requested Procedure Description (Trial)",
 }
 
 // PersonIdentificationCodeSequence - (0040,1101) Person Identification Code Sequence
@@ -25257,7 +26597,7 @@ var PlacerOrderNumberImagingServiceRequestRetired = &Tag{
 	VR:          "SH",
 	VM:          "1",
 	Name:        "PlacerOrderNumberImagingServiceRequestRetired",
-	Description: "Placer Order Number / Imaging Service Request",
+	Description: "Placer Order Number / Imaging Service Request (Retired)",
 }
 
 // FillerOrderNumberImagingServiceRequestRetired - (0040,2007) Filler Order Number / Imaging Service Request (Retired)
@@ -25267,7 +26607,7 @@ var FillerOrderNumberImagingServiceRequestRetired = &Tag{
 	VR:          "SH",
 	VM:          "1",
 	Name:        "FillerOrderNumberImagingServiceRequestRetired",
-	Description: "Filler Order Number / Imaging Service Request",
+	Description: "Filler Order Number / Imaging Service Request (Retired)",
 }
 
 // OrderEnteredBy - (0040,2008) Order Entered By
@@ -25844,7 +27184,7 @@ var LUTLabel = &Tag{
 var RealWorldValueLastValueMapped = &Tag{
 	Group:       0x0040,
 	Element:     0x9211,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "RealWorldValueLastValueMapped",
 	Description: "Real World Value Last Value Mapped",
@@ -25884,7 +27224,7 @@ var DoubleFloatRealWorldValueFirstValueMapped = &Tag{
 var RealWorldValueFirstValueMapped = &Tag{
 	Group:       0x0040,
 	Element:     0x9216,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "RealWorldValueFirstValueMapped",
 	Description: "Real World Value First Value Mapped",
@@ -25927,7 +27267,7 @@ var FindingsFlagTrial = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "FindingsFlagTrial",
-	Description: "Findings Flag",
+	Description: "Findings Flag (Trial)",
 }
 
 // RelationshipType - (0040,A010) Relationship Type
@@ -25947,7 +27287,7 @@ var FindingsSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "FindingsSequenceTrial",
-	Description: "Findings Sequence",
+	Description: "Findings Sequence (Trial)",
 }
 
 // FindingsGroupUIDTrial - (0040,A021) Findings Group UID (Trial)
@@ -25957,7 +27297,7 @@ var FindingsGroupUIDTrial = &Tag{
 	VR:          "UI",
 	VM:          "1",
 	Name:        "FindingsGroupUIDTrial",
-	Description: "Findings Group UID",
+	Description: "Findings Group UID (Trial)",
 }
 
 // ReferencedFindingsGroupUIDTrial - (0040,A022) Referenced Findings Group UID (Trial)
@@ -25967,7 +27307,7 @@ var ReferencedFindingsGroupUIDTrial = &Tag{
 	VR:          "UI",
 	VM:          "1",
 	Name:        "ReferencedFindingsGroupUIDTrial",
-	Description: "Referenced Findings Group UID",
+	Description: "Referenced Findings Group UID (Trial)",
 }
 
 // FindingsGroupRecordingDateTrial - (0040,A023) Findings Group Recording Date (Trial)
@@ -25977,7 +27317,7 @@ var FindingsGroupRecordingDateTrial = &Tag{
 	VR:          "DA",
 	VM:          "1",
 	Name:        "FindingsGroupRecordingDateTrial",
-	Description: "Findings Group Recording Date",
+	Description: "Findings Group Recording Date (Trial)",
 }
 
 // FindingsGroupRecordingTimeTrial - (0040,A024) Findings Group Recording Time (Trial)
@@ -25987,7 +27327,7 @@ var FindingsGroupRecordingTimeTrial = &Tag{
 	VR:          "TM",
 	VM:          "1",
 	Name:        "FindingsGroupRecordingTimeTrial",
-	Description: "Findings Group Recording Time",
+	Description: "Findings Group Recording Time (Trial)",
 }
 
 // FindingsSourceCategoryCodeSequenceTrial - (0040,A026) Findings Source Category Code Sequence (Trial)
@@ -25997,7 +27337,7 @@ var FindingsSourceCategoryCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "FindingsSourceCategoryCodeSequenceTrial",
-	Description: "Findings Source Category Code Sequence",
+	Description: "Findings Source Category Code Sequence (Trial)",
 }
 
 // VerifyingOrganization - (0040,A027) Verifying Organization
@@ -26017,7 +27357,7 @@ var DocumentingOrganizationIdentifierCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "DocumentingOrganizationIdentifierCodeSequenceTrial",
-	Description: "Documenting Organization Identifier Code Sequence",
+	Description: "Documenting Organization Identifier Code Sequence (Trial)",
 }
 
 // VerificationDateTime - (0040,A030) Verification DateTime
@@ -26077,7 +27417,7 @@ var MeasurementPrecisionDescriptionTrial = &Tag{
 	VR:          "LO",
 	VM:          "1",
 	Name:        "MeasurementPrecisionDescriptionTrial",
-	Description: "Measurement Precision Description",
+	Description: "Measurement Precision Description (Trial)",
 }
 
 // ContinuityOfContent - (0040,A050) Continuity Of Content
@@ -26097,7 +27437,7 @@ var UrgencyOrPriorityAlertsTrial = &Tag{
 	VR:          "CS",
 	VM:          "1-n",
 	Name:        "UrgencyOrPriorityAlertsTrial",
-	Description: "Urgency or Priority Alerts",
+	Description: "Urgency or Priority Alerts (Trial)",
 }
 
 // SequencingIndicatorTrial - (0040,A060) Sequencing Indicator (Trial)
@@ -26107,7 +27447,7 @@ var SequencingIndicatorTrial = &Tag{
 	VR:          "LO",
 	VM:          "1",
 	Name:        "SequencingIndicatorTrial",
-	Description: "Sequencing Indicator",
+	Description: "Sequencing Indicator (Trial)",
 }
 
 // DocumentIdentifierCodeSequenceTrial - (0040,A066) Document Identifier Code Sequence (Trial)
@@ -26117,7 +27457,7 @@ var DocumentIdentifierCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "DocumentIdentifierCodeSequenceTrial",
-	Description: "Document Identifier Code Sequence",
+	Description: "Document Identifier Code Sequence (Trial)",
 }
 
 // DocumentAuthorTrial - (0040,A067) Document Author (Trial)
@@ -26127,7 +27467,7 @@ var DocumentAuthorTrial = &Tag{
 	VR:          "PN",
 	VM:          "1",
 	Name:        "DocumentAuthorTrial",
-	Description: "Document Author",
+	Description: "Document Author (Trial)",
 }
 
 // DocumentAuthorIdentifierCodeSequenceTrial - (0040,A068) Document Author Identifier Code Sequence (Trial)
@@ -26137,7 +27477,7 @@ var DocumentAuthorIdentifierCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "DocumentAuthorIdentifierCodeSequenceTrial",
-	Description: "Document Author Identifier Code Sequence",
+	Description: "Document Author Identifier Code Sequence (Trial)",
 }
 
 // IdentifierCodeSequenceTrial - (0040,A070) Identifier Code Sequence (Trial)
@@ -26147,7 +27487,7 @@ var IdentifierCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "IdentifierCodeSequenceTrial",
-	Description: "Identifier Code Sequence",
+	Description: "Identifier Code Sequence (Trial)",
 }
 
 // VerifyingObserverSequence - (0040,A073) Verifying Observer Sequence
@@ -26167,7 +27507,7 @@ var ObjectBinaryIdentifierTrial = &Tag{
 	VR:          "OB",
 	VM:          "1",
 	Name:        "ObjectBinaryIdentifierTrial",
-	Description: "Object Binary Identifier",
+	Description: "Object Binary Identifier (Trial)",
 }
 
 // VerifyingObserverName - (0040,A075) Verifying Observer Name
@@ -26187,7 +27527,7 @@ var DocumentingObserverIdentifierCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "DocumentingObserverIdentifierCodeSequenceTrial",
-	Description: "Documenting Observer Identifier Code Sequence",
+	Description: "Documenting Observer Identifier Code Sequence (Trial)",
 }
 
 // AuthorObserverSequence - (0040,A078) Author Observer Sequence
@@ -26257,7 +27597,7 @@ var ProcedureIdentifierCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "ProcedureIdentifierCodeSequenceTrial",
-	Description: "Procedure Identifier Code Sequence",
+	Description: "Procedure Identifier Code Sequence (Trial)",
 }
 
 // VerifyingObserverIdentificationCodeSequence - (0040,A088) Verifying Observer Identification Code Sequence
@@ -26277,7 +27617,7 @@ var ObjectDirectoryBinaryIdentifierTrial = &Tag{
 	VR:          "OB",
 	VM:          "1",
 	Name:        "ObjectDirectoryBinaryIdentifierTrial",
-	Description: "Object Directory Binary Identifier",
+	Description: "Object Directory Binary Identifier (Trial)",
 }
 
 // EquivalentCDADocumentSequence - (0040,A090) Equivalent CDA Document Sequence
@@ -26307,7 +27647,7 @@ var DateOfDocumentOrVerbalTransactionTrial = &Tag{
 	VR:          "DA",
 	VM:          "1",
 	Name:        "DateOfDocumentOrVerbalTransactionTrial",
-	Description: "Date of Document or Verbal Transaction",
+	Description: "Date of Document or Verbal Transaction (Trial)",
 }
 
 // TimeOfDocumentCreationOrVerbalTransactionTrial - (0040,A112) Time of Document Creation or Verbal Transaction (Trial)
@@ -26317,7 +27657,7 @@ var TimeOfDocumentCreationOrVerbalTransactionTrial = &Tag{
 	VR:          "TM",
 	VM:          "1",
 	Name:        "TimeOfDocumentCreationOrVerbalTransactionTrial",
-	Description: "Time of Document Creation or Verbal Transaction",
+	Description: "Time of Document Creation or Verbal Transaction (Trial)",
 }
 
 // DateTime - (0040,A120) DateTime
@@ -26377,7 +27717,7 @@ var ReportStatusIDTrial = &Tag{
 	VR:          "CS",
 	VM:          "2",
 	Name:        "ReportStatusIDTrial",
-	Description: "Report Status ID",
+	Description: "Report Status ID (Trial)",
 }
 
 // TemporalRangeType - (0040,A130) Temporal Range Type
@@ -26477,7 +27817,7 @@ var ObservationCategoryCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "ObservationCategoryCodeSequenceTrial",
-	Description: "Observation Category Code Sequence",
+	Description: "Observation Category Code Sequence (Trial)",
 }
 
 // ConceptCodeSequence - (0040,A168) Concept Code Sequence
@@ -26497,7 +27837,7 @@ var BibliographicCitationTrial = &Tag{
 	VR:          "ST",
 	VM:          "1",
 	Name:        "BibliographicCitationTrial",
-	Description: "Bibliographic Citation",
+	Description: "Bibliographic Citation (Trial)",
 }
 
 // PurposeOfReferenceCodeSequence - (0040,A170) Purpose of Reference Code Sequence
@@ -26527,7 +27867,7 @@ var ReferencedObservationUIDTrial = &Tag{
 	VR:          "UI",
 	VM:          "1",
 	Name:        "ReferencedObservationUIDTrial",
-	Description: "Referenced Observation UID",
+	Description: "Referenced Observation UID (Trial)",
 }
 
 // ReferencedObservationClassTrial - (0040,A173) Referenced Observation Class (Trial)
@@ -26537,7 +27877,7 @@ var ReferencedObservationClassTrial = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "ReferencedObservationClassTrial",
-	Description: "Referenced Observation Class",
+	Description: "Referenced Observation Class (Trial)",
 }
 
 // ReferencedObjectObservationClassTrial - (0040,A174) Referenced Object Observation Class (Trial)
@@ -26547,7 +27887,7 @@ var ReferencedObjectObservationClassTrial = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "ReferencedObjectObservationClassTrial",
-	Description: "Referenced Object Observation Class",
+	Description: "Referenced Object Observation Class (Trial)",
 }
 
 // AnnotationGroupNumber - (0040,A180) Annotation Group Number
@@ -26567,7 +27907,7 @@ var ObservationDateTrial = &Tag{
 	VR:          "DA",
 	VM:          "1",
 	Name:        "ObservationDateTrial",
-	Description: "Observation Date",
+	Description: "Observation Date (Trial)",
 }
 
 // ObservationTimeTrial - (0040,A193) Observation Time (Trial)
@@ -26577,7 +27917,7 @@ var ObservationTimeTrial = &Tag{
 	VR:          "TM",
 	VM:          "1",
 	Name:        "ObservationTimeTrial",
-	Description: "Observation Time",
+	Description: "Observation Time (Trial)",
 }
 
 // MeasurementAutomationTrial - (0040,A194) Measurement Automation (Trial)
@@ -26587,7 +27927,7 @@ var MeasurementAutomationTrial = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "MeasurementAutomationTrial",
-	Description: "Measurement Automation",
+	Description: "Measurement Automation (Trial)",
 }
 
 // ModifierCodeSequence - (0040,A195) Modifier Code Sequence
@@ -26607,7 +27947,7 @@ var IdentificationDescriptionTrial = &Tag{
 	VR:          "ST",
 	VM:          "1",
 	Name:        "IdentificationDescriptionTrial",
-	Description: "Identification Description",
+	Description: "Identification Description (Trial)",
 }
 
 // CoordinatesSetGeometricTypeTrial - (0040,A290) Coordinates Set Geometric Type (Trial)
@@ -26617,7 +27957,7 @@ var CoordinatesSetGeometricTypeTrial = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "CoordinatesSetGeometricTypeTrial",
-	Description: "Coordinates Set Geometric Type",
+	Description: "Coordinates Set Geometric Type (Trial)",
 }
 
 // AlgorithmCodeSequenceTrial - (0040,A296) Algorithm Code Sequence (Trial)
@@ -26627,7 +27967,7 @@ var AlgorithmCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "AlgorithmCodeSequenceTrial",
-	Description: "Algorithm Code Sequence",
+	Description: "Algorithm Code Sequence (Trial)",
 }
 
 // AlgorithmDescriptionTrial - (0040,A297) Algorithm Description (Trial)
@@ -26637,7 +27977,7 @@ var AlgorithmDescriptionTrial = &Tag{
 	VR:          "ST",
 	VM:          "1",
 	Name:        "AlgorithmDescriptionTrial",
-	Description: "Algorithm Description",
+	Description: "Algorithm Description (Trial)",
 }
 
 // PixelCoordinatesSetTrial - (0040,A29A) Pixel Coordinates Set (Trial)
@@ -26647,7 +27987,7 @@ var PixelCoordinatesSetTrial = &Tag{
 	VR:          "SL",
 	VM:          "2-2n",
 	Name:        "PixelCoordinatesSetTrial",
-	Description: "Pixel Coordinates Set",
+	Description: "Pixel Coordinates Set (Trial)",
 }
 
 // MeasuredValueSequence - (0040,A300) Measured Value Sequence
@@ -26677,7 +28017,7 @@ var CurrentObserverTrial = &Tag{
 	VR:          "PN",
 	VM:          "1",
 	Name:        "CurrentObserverTrial",
-	Description: "Current Observer",
+	Description: "Current Observer (Trial)",
 }
 
 // NumericValue - (0040,A30A) Numeric Value
@@ -26697,7 +28037,7 @@ var ReferencedAccessionSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "ReferencedAccessionSequenceTrial",
-	Description: "Referenced Accession Sequence",
+	Description: "Referenced Accession Sequence (Trial)",
 }
 
 // ReportStatusCommentTrial - (0040,A33A) Report Status Comment (Trial)
@@ -26707,7 +28047,7 @@ var ReportStatusCommentTrial = &Tag{
 	VR:          "ST",
 	VM:          "1",
 	Name:        "ReportStatusCommentTrial",
-	Description: "Report Status Comment",
+	Description: "Report Status Comment (Trial)",
 }
 
 // ProcedureContextSequenceTrial - (0040,A340) Procedure Context Sequence (Trial)
@@ -26717,7 +28057,7 @@ var ProcedureContextSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "ProcedureContextSequenceTrial",
-	Description: "Procedure Context Sequence",
+	Description: "Procedure Context Sequence (Trial)",
 }
 
 // VerbalSourceTrial - (0040,A352) Verbal Source (Trial)
@@ -26727,7 +28067,7 @@ var VerbalSourceTrial = &Tag{
 	VR:          "PN",
 	VM:          "1",
 	Name:        "VerbalSourceTrial",
-	Description: "Verbal Source",
+	Description: "Verbal Source (Trial)",
 }
 
 // AddressTrial - (0040,A353) Address (Trial)
@@ -26737,7 +28077,7 @@ var AddressTrial = &Tag{
 	VR:          "ST",
 	VM:          "1",
 	Name:        "AddressTrial",
-	Description: "Address",
+	Description: "Address (Trial)",
 }
 
 // TelephoneNumberTrial - (0040,A354) Telephone Number (Trial)
@@ -26747,7 +28087,7 @@ var TelephoneNumberTrial = &Tag{
 	VR:          "LO",
 	VM:          "1",
 	Name:        "TelephoneNumberTrial",
-	Description: "Telephone Number",
+	Description: "Telephone Number (Trial)",
 }
 
 // VerbalSourceIdentifierCodeSequenceTrial - (0040,A358) Verbal Source Identifier Code Sequence (Trial)
@@ -26757,7 +28097,7 @@ var VerbalSourceIdentifierCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "VerbalSourceIdentifierCodeSequenceTrial",
-	Description: "Verbal Source Identifier Code Sequence",
+	Description: "Verbal Source Identifier Code Sequence (Trial)",
 }
 
 // PredecessorDocumentsSequence - (0040,A360) Predecessor Documents Sequence
@@ -26807,7 +28147,7 @@ var ReportDetailSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "ReportDetailSequenceTrial",
-	Description: "Report Detail Sequence",
+	Description: "Report Detail Sequence (Trial)",
 }
 
 // PertinentOtherEvidenceSequence - (0040,A385) Pertinent Other Evidence Sequence
@@ -26837,7 +28177,7 @@ var ObservationSubjectUIDTrial = &Tag{
 	VR:          "UI",
 	VM:          "1",
 	Name:        "ObservationSubjectUIDTrial",
-	Description: "Observation Subject UID",
+	Description: "Observation Subject UID (Trial)",
 }
 
 // ObservationSubjectClassTrial - (0040,A403) Observation Subject Class (Trial)
@@ -26847,7 +28187,7 @@ var ObservationSubjectClassTrial = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "ObservationSubjectClassTrial",
-	Description: "Observation Subject Class",
+	Description: "Observation Subject Class (Trial)",
 }
 
 // ObservationSubjectTypeCodeSequenceTrial - (0040,A404) Observation Subject Type Code Sequence (Trial)
@@ -26857,7 +28197,7 @@ var ObservationSubjectTypeCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "ObservationSubjectTypeCodeSequenceTrial",
-	Description: "Observation Subject Type Code Sequence",
+	Description: "Observation Subject Type Code Sequence (Trial)",
 }
 
 // CompletionFlag - (0040,A491) Completion Flag
@@ -26937,7 +28277,7 @@ var ObservationSubjectContextFlagTrial = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "ObservationSubjectContextFlagTrial",
-	Description: "Observation Subject Context Flag",
+	Description: "Observation Subject Context Flag (Trial)",
 }
 
 // ObserverContextFlagTrial - (0040,A601) Observer Context Flag (Trial)
@@ -26947,7 +28287,7 @@ var ObserverContextFlagTrial = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "ObserverContextFlagTrial",
-	Description: "Observer Context Flag",
+	Description: "Observer Context Flag (Trial)",
 }
 
 // ProcedureContextFlagTrial - (0040,A603) Procedure Context Flag (Trial)
@@ -26957,7 +28297,7 @@ var ProcedureContextFlagTrial = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "ProcedureContextFlagTrial",
-	Description: "Procedure Context Flag",
+	Description: "Procedure Context Flag (Trial)",
 }
 
 // ContentSequence - (0040,A730) Content Sequence
@@ -26977,7 +28317,7 @@ var RelationshipSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "RelationshipSequenceTrial",
-	Description: "Relationship Sequence",
+	Description: "Relationship Sequence (Trial)",
 }
 
 // RelationshipTypeCodeSequenceTrial - (0040,A732) Relationship Type Code Sequence (Trial)
@@ -26987,7 +28327,7 @@ var RelationshipTypeCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "RelationshipTypeCodeSequenceTrial",
-	Description: "Relationship Type Code Sequence",
+	Description: "Relationship Type Code Sequence (Trial)",
 }
 
 // LanguageCodeSequenceTrial - (0040,A744) Language Code Sequence (Trial)
@@ -26997,7 +28337,7 @@ var LanguageCodeSequenceTrial = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "LanguageCodeSequenceTrial",
-	Description: "Language Code Sequence",
+	Description: "Language Code Sequence (Trial)",
 }
 
 // TabulatedValuesSequence - (0040,A801) Tabulated Values Sequence
@@ -27087,7 +28427,7 @@ var UniformResourceLocatorTrial = &Tag{
 	VR:          "ST",
 	VM:          "1",
 	Name:        "UniformResourceLocatorTrial",
-	Description: "Uniform Resource Locator",
+	Description: "Uniform Resource Locator (Trial)",
 }
 
 // WaveformAnnotationSequence - (0040,B020) Waveform Annotation Sequence
@@ -28730,6 +30070,46 @@ var ObjectiveLensNumericalAperture = &Tag{
 	Description: "Objective Lens Numerical Aperture",
 }
 
+// ConfocalMode - (0048,0114) Confocal Mode
+var ConfocalMode = &Tag{
+	Group:       0x0048,
+	Element:     0x0114,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "ConfocalMode",
+	Description: "Confocal Mode",
+}
+
+// TissueLocation - (0048,0115) Tissue Location
+var TissueLocation = &Tag{
+	Group:       0x0048,
+	Element:     0x0115,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "TissueLocation",
+	Description: "Tissue Location",
+}
+
+// ConfocalMicroscopyImageFrameTypeSequence - (0048,0116) Confocal Microscopy Image Frame Type Sequence
+var ConfocalMicroscopyImageFrameTypeSequence = &Tag{
+	Group:       0x0048,
+	Element:     0x0116,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ConfocalMicroscopyImageFrameTypeSequence",
+	Description: "Confocal Microscopy Image Frame Type Sequence",
+}
+
+// ImageAcquisitionDepth - (0048,0117) Image Acquisition Depth
+var ImageAcquisitionDepth = &Tag{
+	Group:       0x0048,
+	Element:     0x0117,
+	VR:          "FD",
+	VM:          "1",
+	Name:        "ImageAcquisitionDepth",
+	Description: "Image Acquisition Depth",
+}
+
 // PaletteColorLookupTableSequence - (0048,0120) Palette Color Lookup Table Sequence
 var PaletteColorLookupTableSequence = &Tag{
 	Group:       0x0048,
@@ -30104,7 +31484,7 @@ var HistogramNumberOfBins = &Tag{
 var HistogramFirstBinValue = &Tag{
 	Group:       0x0060,
 	Element:     0x3004,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "HistogramFirstBinValue",
 	Description: "Histogram First Bin Value",
@@ -30114,7 +31494,7 @@ var HistogramFirstBinValue = &Tag{
 var HistogramLastBinValue = &Tag{
 	Group:       0x0060,
 	Element:     0x3006,
-	VR:          "US/SS",
+	VR:          "US or SS",
 	VM:          "1",
 	Name:        "HistogramLastBinValue",
 	Description: "Histogram Last Bin Value",
@@ -30478,6 +31858,16 @@ var SurfaceComments = &Tag{
 	VM:          "1",
 	Name:        "SurfaceComments",
 	Description: "Surface Comments",
+}
+
+// SurfaceOffset - (0066,0005) Surface Offset
+var SurfaceOffset = &Tag{
+	Group:       0x0066,
+	Element:     0x0005,
+	VR:          "FL",
+	VM:          "1",
+	Name:        "SurfaceOffset",
+	Description: "Surface Offset",
 }
 
 // SurfaceProcessing - (0066,0009) Surface Processing
@@ -32217,7 +33607,7 @@ var ImageRotationRetired = &Tag{
 	VR:          "IS",
 	VM:          "1",
 	Name:        "ImageRotationRetired",
-	Description: "Image Rotation",
+	Description: "Image Rotation (Retired)",
 }
 
 // ImageHorizontalFlip - (0070,0041) Image Horizontal Flip
@@ -32247,7 +33637,7 @@ var DisplayedAreaTopLeftHandCornerTrial = &Tag{
 	VR:          "US",
 	VM:          "2",
 	Name:        "DisplayedAreaTopLeftHandCornerTrial",
-	Description: "Displayed Area Top Left Hand Corner",
+	Description: "Displayed Area Top Left Hand Corner (Trial)",
 }
 
 // DisplayedAreaBottomRightHandCornerTrial - (0070,0051) Displayed Area Bottom Right Hand Corner (Trial)
@@ -32257,7 +33647,7 @@ var DisplayedAreaBottomRightHandCornerTrial = &Tag{
 	VR:          "US",
 	VM:          "2",
 	Name:        "DisplayedAreaBottomRightHandCornerTrial",
-	Description: "Displayed Area Bottom Right Hand Corner",
+	Description: "Displayed Area Bottom Right Hand Corner (Trial)",
 }
 
 // DisplayedAreaTopLeftHandCorner - (0070,0052) Displayed Area Top Left Hand Corner
@@ -35287,7 +36677,7 @@ var BeamOrderIndexTrial = &Tag{
 	VR:          "IS",
 	VM:          "1",
 	Name:        "BeamOrderIndexTrial",
-	Description: "Beam Order Index",
+	Description: "Beam Order Index (Trial)",
 }
 
 // AutosequenceFlag - (0074,1025) Autosequence Flag
@@ -35417,7 +36807,7 @@ var DoubleExposureMetersetTrial = &Tag{
 	VR:          "DS",
 	VM:          "1",
 	Name:        "DoubleExposureMetersetTrial",
-	Description: "Double Exposure Meterset",
+	Description: "Double Exposure Meterset (Trial)",
 }
 
 // DoubleExposureFieldDeltaTrial - (0074,103A) Double Exposure Field Delta (Trial)
@@ -35427,7 +36817,7 @@ var DoubleExposureFieldDeltaTrial = &Tag{
 	VR:          "DS",
 	VM:          "4",
 	Name:        "DoubleExposureFieldDeltaTrial",
-	Description: "Double Exposure Field Delta",
+	Description: "Double Exposure Field Delta (Trial)",
 }
 
 // RelatedReferenceRTImageSequence - (0074,1040) Related Reference RT Image Sequence
@@ -36890,6 +38280,16 @@ var CertifiedTimestamp = &Tag{
 	Description: "Certified Timestamp",
 }
 
+// Retiredblank04000315 - (0400,0315) Retired-blank
+var Retiredblank04000315 = &Tag{
+	Group:       0x0400,
+	Element:     0x0315,
+	VR:          "FL",
+	VM:          "1",
+	Name:        "Retiredblank04000315",
+	Description: "Retired-blank",
+}
+
 // DigitalSignaturePurposeCodeSequence - (0400,0401) Digital Signature Purpose Code Sequence
 var DigitalSignaturePurposeCodeSequence = &Tag{
 	Group:       0x0400,
@@ -37767,7 +39167,7 @@ var ReferencedImageBoxSequenceRetired = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "ReferencedImageBoxSequenceRetired",
-	Description: "Referenced Image Box Sequence",
+	Description: "Referenced Image Box Sequence (Retired)",
 }
 
 // PresentationLUTSequence - (2050,0010) Presentation LUT Sequence
@@ -39010,6 +40410,16 @@ var AcquisitionInitiationSequence = &Tag{
 	Description: "Acquisition Initiation Sequence",
 }
 
+// RTConeBeamImagingGeometrySequence - (3002,0136) RT Cone-Beam Imaging Geometry Sequence
+var RTConeBeamImagingGeometrySequence = &Tag{
+	Group:       0x3002,
+	Element:     0x0136,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "RTConeBeamImagingGeometrySequence",
+	Description: "RT Cone-Beam Imaging Geometry Sequence",
+}
+
 // DVHType - (3004,0001) DVH Type
 var DVHType = &Tag{
 	Group:       0x3004,
@@ -39420,6 +40830,26 @@ var ROIVolume = &Tag{
 	Description: "ROI Volume",
 }
 
+// ROIDateTime - (3006,002D) ROI DateTime
+var ROIDateTime = &Tag{
+	Group:       0x3006,
+	Element:     0x002D,
+	VR:          "DT",
+	VM:          "1",
+	Name:        "ROIDateTime",
+	Description: "ROI DateTime",
+}
+
+// ROIObservationDateTime - (3006,002E) ROI Observation DateTime
+var ROIObservationDateTime = &Tag{
+	Group:       0x3006,
+	Element:     0x002E,
+	VR:          "DT",
+	VM:          "1",
+	Name:        "ROIObservationDateTime",
+	Description: "ROI Observation DateTime",
+}
+
 // RTRelatedROISequence - (3006,0030) RT Related ROI Sequence
 var RTRelatedROISequence = &Tag{
 	Group:       0x3006,
@@ -39558,6 +40988,56 @@ var SourcePixelPlanesCharacteristicsSequence = &Tag{
 	VM:          "1",
 	Name:        "SourcePixelPlanesCharacteristicsSequence",
 	Description: "Source Pixel Planes Characteristics Sequence",
+}
+
+// SourceSeriesSequence - (3006,004B) Source Series Sequence
+var SourceSeriesSequence = &Tag{
+	Group:       0x3006,
+	Element:     0x004B,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "SourceSeriesSequence",
+	Description: "Source Series Sequence",
+}
+
+// SourceSeriesInformationSequence - (3006,004C) Source Series Information Sequence
+var SourceSeriesInformationSequence = &Tag{
+	Group:       0x3006,
+	Element:     0x004C,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "SourceSeriesInformationSequence",
+	Description: "Source Series Information Sequence",
+}
+
+// ROICreatorSequence - (3006,004D) ROI Creator Sequence
+var ROICreatorSequence = &Tag{
+	Group:       0x3006,
+	Element:     0x004D,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ROICreatorSequence",
+	Description: "ROI Creator Sequence",
+}
+
+// ROIInterpreterSequence - (3006,004E) ROI Interpreter Sequence
+var ROIInterpreterSequence = &Tag{
+	Group:       0x3006,
+	Element:     0x004E,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ROIInterpreterSequence",
+	Description: "ROI Interpreter Sequence",
+}
+
+// ROIObservationContextCodeSequence - (3006,004F) ROI Observation Context Code Sequence
+var ROIObservationContextCodeSequence = &Tag{
+	Group:       0x3006,
+	Element:     0x004F,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ROIObservationContextCodeSequence",
+	Description: "ROI Observation Context Code Sequence",
 }
 
 // ContourData - (3006,0050) Contour Data
@@ -41260,6 +42740,16 @@ var TableTopLateralPositionTolerance = &Tag{
 	Description: "Table Top Lateral Position Tolerance",
 }
 
+// TableTopPositionAlignmentUID - (300A,0054) Table Top Position Alignment UID
+var TableTopPositionAlignmentUID = &Tag{
+	Group:       0x300A,
+	Element:     0x0054,
+	VR:          "UI",
+	VM:          "1",
+	Name:        "TableTopPositionAlignmentUID",
+	Description: "Table Top Position Alignment UID",
+}
+
 // RTPlanRelationship - (300A,0055) RT Plan Relationship
 var RTPlanRelationship = &Tag{
 	Group:       0x300A,
@@ -42578,6 +44068,16 @@ var CumulativeMetersetWeight = &Tag{
 	VM:          "1",
 	Name:        "CumulativeMetersetWeight",
 	Description: "Cumulative Meterset Weight",
+}
+
+// Retiredblank300A0135 - (300A,0135) Retired-blank
+var Retiredblank300A0135 = &Tag{
+	Group:       0x300A,
+	Element:     0x0135,
+	VR:          "OB",
+	VM:          "1",
+	Name:        "Retiredblank300A0135",
+	Description: "Retired-blank",
 }
 
 // TableTopPitchAngle - (300A,0140) Table Top Pitch Angle
@@ -46220,6 +47720,16 @@ var ReferencedRTPrescriptionSequence = &Tag{
 	Description: "Referenced RT Prescription Sequence",
 }
 
+// DoseValueInterpretation - (300A,068B) Dose Value Interpretation
+var DoseValueInterpretation = &Tag{
+	Group:       0x300A,
+	Element:     0x068B,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "DoseValueInterpretation",
+	Description: "Dose Value Interpretation",
+}
+
 // TreatmentSessionUID - (300A,0700) Treatment Session UID
 var TreatmentSessionUID = &Tag{
 	Group:       0x300A,
@@ -46620,6 +48130,16 @@ var AdditionalParameterRecordingInstanceSequence = &Tag{
 	Description: "Additional Parameter Recording Instance Sequence",
 }
 
+// Retiredblank300A0782 - (300A,0782) Retired-blank
+var Retiredblank300A0782 = &Tag{
+	Group:       0x300A,
+	Element:     0x0782,
+	VR:          "US",
+	VM:          "1",
+	Name:        "Retiredblank300A0782",
+	Description: "Retired-blank",
+}
+
 // InterlockOriginDescription - (300A,0783) Interlock Origin Description
 var InterlockOriginDescription = &Tag{
 	Group:       0x300A,
@@ -46757,7 +48277,7 @@ var PatientTreatmentPreparationProcedureSequence = &Tag{
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "PatientTreatmentPreparationProcedureSequence",
-	Description: "Patient Treatment Preparation Procedure Sequence ",
+	Description: "Patient Treatment Preparation Procedure Sequence",
 }
 
 // PatientTreatmentPreparationProcedureCodeSequence - (300A,0791) Patient Treatment Preparation Procedure Code Sequence
@@ -46898,6 +48418,36 @@ var RTRadiationSetDeliveryUsage = &Tag{
 	VM:          "1",
 	Name:        "RTRadiationSetDeliveryUsage",
 	Description: "RT Radiation Set Delivery Usage",
+}
+
+// PatientTreatmentPreparationSequence - (300A,079F) Patient Treatment Preparation Sequence
+var PatientTreatmentPreparationSequence = &Tag{
+	Group:       0x300A,
+	Element:     0x079F,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "PatientTreatmentPreparationSequence",
+	Description: "Patient Treatment Preparation Sequence",
+}
+
+// PatientToEquipmentRelationshipSequence - (300A,07A0) Patient to Equipment Relationship Sequence
+var PatientToEquipmentRelationshipSequence = &Tag{
+	Group:       0x300A,
+	Element:     0x07A0,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "PatientToEquipmentRelationshipSequence",
+	Description: "Patient to Equipment Relationship Sequence",
+}
+
+// ImagingEquipmentToTreatmentDeliveryDeviceRelationshipSequence - (300A,07A1) Imaging Equipment to Treatment Delivery Device Relationship Sequence
+var ImagingEquipmentToTreatmentDeliveryDeviceRelationshipSequence = &Tag{
+	Group:       0x300A,
+	Element:     0x07A1,
+	VR:          "SQ",
+	VM:          "1",
+	Name:        "ImagingEquipmentToTreatmentDeliveryDeviceRelationshipSequence",
+	Description: "Imaging Equipment to Treatment Delivery Device Relationship Sequence",
 }
 
 // ReferencedRTPlanSequence - (300C,0002) Referenced RT Plan Sequence
@@ -47388,6 +48938,16 @@ var BeamHoldOriginatingDeviceSequence = &Tag{
 	VM:          "1",
 	Name:        "BeamHoldOriginatingDeviceSequence",
 	Description: "Beam Hold Originating Device Sequence",
+}
+
+// BeamHoldTransitionTriggerSource - (300C,0129) Beam Hold Transition Trigger Source
+var BeamHoldTransitionTriggerSource = &Tag{
+	Group:       0x300C,
+	Element:     0x0129,
+	VR:          "CS",
+	VM:          "1",
+	Name:        "BeamHoldTransitionTriggerSource",
+	Description: "Beam Hold Transition Trigger Source",
 }
 
 // ApprovalStatus - (300E,0002) Approval Status
@@ -48967,7 +50527,7 @@ var ReportProductionStatusTrial = &Tag{
 	VR:          "CS",
 	VM:          "1",
 	Name:        "ReportProductionStatusTrial",
-	Description: "Report Production Status",
+	Description: "Report Production Status (Trial)",
 }
 
 // InterpretationRecordedDate - (4008,0100) Interpretation Recorded Date
@@ -50090,14 +51650,14 @@ var SharedFunctionalGroupsSequence = &Tag{
 	Description: "Shared Functional Groups Sequence",
 }
 
-// PerFrameFunctionalGroupsSequence - (5200,9230) Per-frame Functional Groups Sequence
+// PerFrameFunctionalGroupsSequence - (5200,9230) Per-Frame Functional Groups Sequence
 var PerFrameFunctionalGroupsSequence = &Tag{
 	Group:       0x5200,
 	Element:     0x9230,
 	VR:          "SQ",
 	VM:          "1",
 	Name:        "PerFrameFunctionalGroupsSequence",
-	Description: "Per-frame Functional Groups Sequence",
+	Description: "Per-Frame Functional Groups Sequence",
 }
 
 // WaveformSequence - (5400,0100) Waveform Sequence
@@ -50114,7 +51674,7 @@ var WaveformSequence = &Tag{
 var ChannelMinimumValue = &Tag{
 	Group:       0x5400,
 	Element:     0x0110,
-	VR:          "OB/OW",
+	VR:          "OB or OW",
 	VM:          "1",
 	Name:        "ChannelMinimumValue",
 	Description: "Channel Minimum Value",
@@ -50124,7 +51684,7 @@ var ChannelMinimumValue = &Tag{
 var ChannelMaximumValue = &Tag{
 	Group:       0x5400,
 	Element:     0x0112,
-	VR:          "OB/OW",
+	VR:          "OB or OW",
 	VM:          "1",
 	Name:        "ChannelMaximumValue",
 	Description: "Channel Maximum Value",
@@ -50154,7 +51714,7 @@ var WaveformSampleInterpretation = &Tag{
 var WaveformPaddingValue = &Tag{
 	Group:       0x5400,
 	Element:     0x100A,
-	VR:          "OB/OW",
+	VR:          "OB or OW",
 	VM:          "1",
 	Name:        "WaveformPaddingValue",
 	Description: "Waveform Padding Value",
@@ -50164,7 +51724,7 @@ var WaveformPaddingValue = &Tag{
 var WaveformData = &Tag{
 	Group:       0x5400,
 	Element:     0x1010,
-	VR:          "OB/OW",
+	VR:          "OB or OW",
 	VM:          "1",
 	Name:        "WaveformData",
 	Description: "Waveform Data",
@@ -50244,7 +51804,7 @@ var DoubleFloatPixelData = &Tag{
 var PixelData = &Tag{
 	Group:       0x7FE0,
 	Element:     0x0010,
-	VR:          "OB/OW",
+	VR:          "OB or OW",
 	VM:          "1",
 	Name:        "PixelData",
 	Description: "Pixel Data",
@@ -50304,7 +51864,7 @@ var DataSetTrailingPadding = &Tag{
 var Item = &Tag{
 	Group:       0xFFFE,
 	Element:     0xE000,
-	VR:          "",
+	VR:          "NONE",
 	VM:          "1",
 	Name:        "Item",
 	Description: "Item",
@@ -50314,7 +51874,7 @@ var Item = &Tag{
 var ItemDelimitationItem = &Tag{
 	Group:       0xFFFE,
 	Element:     0xE00D,
-	VR:          "",
+	VR:          "NONE",
 	VM:          "1",
 	Name:        "ItemDelimitationItem",
 	Description: "Item Delimitation Item",
@@ -50324,32 +51884,29 @@ var ItemDelimitationItem = &Tag{
 var SequenceDelimitationItem = &Tag{
 	Group:       0xFFFE,
 	Element:     0xE0DD,
-	VR:          "",
+	VR:          "NONE",
 	VM:          "1",
 	Name:        "SequenceDelimitationItem",
 	Description: "Sequence Delimitation Item",
 }
 
-// CurrentFrameFunctionalGroupsSequence - (0006,0001) Current Frame Functional Groups Sequence
-var CurrentFrameFunctionalGroupsSequence = &Tag{
-	Group:       0x0006,
-	Element:     0x0001,
-	VR:          "SQ",
-	VM:          "1",
-	Name:        "CurrentFrameFunctionalGroupsSequence",
-	Description: "Current Frame Functional Groups Sequence",
-}
-
 var tags = []*Tag{
 	CommandGroupLength,
+	CommandLengthToEnd,
 	AffectedSOPClassUID,
 	RequestedSOPClassUID,
+	CommandRecognitionCode,
 	CommandField,
 	MessageID,
 	MessageIDBeingRespondedTo,
+	Initiator,
+	Receiver,
+	FindLocation,
 	MoveDestination,
 	Priority,
 	CommandDataSetType,
+	NumberOfMatches,
+	ResponseSequenceNumber,
 	Status,
 	OffendingElement,
 	ErrorComment,
@@ -50365,13 +51922,6 @@ var tags = []*Tag{
 	NumberOfWarningSuboperations,
 	MoveOriginatorApplicationEntityTitle,
 	MoveOriginatorMessageID,
-	CommandLengthToEnd,
-	CommandRecognitionCode,
-	Initiator,
-	Receiver,
-	FindLocation,
-	NumberOfMatches,
-	ResponseSequenceNumber,
 	DialogReceiver,
 	TerminalType,
 	MessageSetID,
@@ -50443,6 +51993,7 @@ var tags = []*Tag{
 	PyramidUID,
 	RelatedGeneralSOPClassUID,
 	OriginalSpecializedSOPClassUID,
+	SyntheticData,
 	StudyDate,
 	SeriesDate,
 	AcquisitionDate,
@@ -50513,6 +52064,7 @@ var tags = []*Tag{
 	ContextGroupIdentificationSequence,
 	MappingResourceIdentificationSequence,
 	TimezoneOffsetFromUTC,
+	Retiredblank,
 	ResponsibleGroupCodeSequence,
 	EquipmentModality,
 	ManufacturerRelatedModelGroup,
@@ -50521,8 +52073,8 @@ var tags = []*Tag{
 	PrivateCreatorReference,
 	BlockIdentifyingInformationStatus,
 	NonidentifyingPrivateElements,
-	IdentifyingPrivateElements,
 	DeidentificationActionSequence,
+	IdentifyingPrivateElements,
 	DeidentificationAction,
 	PrivateDataElement,
 	PrivateDataElementValueMultiplicity,
@@ -50598,6 +52150,7 @@ var tags = []*Tag{
 	ReferencedResultsSequence,
 	ReferencedStudySequence,
 	ReferencedPerformedProcedureStepSequence,
+	ReferencedInstancesBySOPClassSequence,
 	ReferencedSeriesSequence,
 	ReferencedPatientSequence,
 	ReferencedVisitSequence,
@@ -50608,6 +52161,7 @@ var tags = []*Tag{
 	ReferencedCurveSequence,
 	ReferencedInstanceSequence,
 	ReferencedRealWorldValueMappingInstanceSequence,
+	ReferencedSegmentationSequence,
 	ReferencedSOPClassUID,
 	ReferencedSOPInstanceUID,
 	DefinitionSourceSequence,
@@ -50625,6 +52179,7 @@ var tags = []*Tag{
 	FailedSOPSequence,
 	ReferencedSOPSequence,
 	OtherFailuresSequence,
+	FailedStudySequence,
 	StudiesContainingOtherReferencedInstancesSequence,
 	RelatedSeriesSequence,
 	LossyImageCompressionRetired,
@@ -50745,6 +52300,7 @@ var tags = []*Tag{
 	PatientTelephoneNumbers,
 	PatientTelecomInformation,
 	EthnicGroup,
+	EthnicGroupCodeSequence,
 	Occupation,
 	SmokingStatus,
 	AdditionalPatientHistory,
@@ -50768,21 +52324,28 @@ var tags = []*Tag{
 	ClinicalTrialSponsorName,
 	ClinicalTrialProtocolID,
 	ClinicalTrialProtocolName,
+	IssuerOfClinicalTrialProtocolID,
+	OtherClinicalTrialProtocolIDsSequence,
 	ClinicalTrialSiteID,
 	ClinicalTrialSiteName,
+	IssuerOfClinicalTrialSiteID,
 	ClinicalTrialSubjectID,
+	IssuerOfClinicalTrialSubjectID,
 	ClinicalTrialSubjectReadingID,
+	IssuerOfClinicalTrialSubjectReadingID,
 	ClinicalTrialTimePointID,
 	ClinicalTrialTimePointDescription,
 	LongitudinalTemporalOffsetFromEvent,
 	LongitudinalTemporalEventType,
 	ClinicalTrialTimePointTypeCodeSequence,
+	IssuerOfClinicalTrialTimePointID,
 	ClinicalTrialCoordinatingCenterName,
 	PatientIdentityRemoved,
 	DeidentificationMethod,
 	DeidentificationMethodCodeSequence,
 	ClinicalTrialSeriesID,
 	ClinicalTrialSeriesDescription,
+	IssuerOfClinicalTrialSeriesID,
 	ClinicalTrialProtocolEthicsCommitteeName,
 	ClinicalTrialProtocolEthicsCommitteeApprovalNumber,
 	ConsentForClinicalTrialUseSequence,
@@ -50992,6 +52555,98 @@ var tags = []*Tag{
 	WedgeChamferHeight,
 	WedgeCurve,
 	RadiusAlongWedge,
+	ThermalCameraSettingsSequence,
+	AcquisitionFrameRate,
+	IntegrationTime,
+	NumberOfCalibrationFrames,
+	NumberOfRowsInFullAcquisitionImage,
+	NumberOfColumnsInFullAcquisitionImage,
+	ThermalSourceSettingsSequence,
+	SourceHorizontalPitch,
+	SourceVerticalPitch,
+	SourceHorizontalScanSpeed,
+	ThermalSourceModulationFrequency,
+	InductionSourceSettingSequence,
+	CoilFrequency,
+	CurrentAmplitudeAcrossCoil,
+	FlashSourceSettingSequence,
+	FlashDuration,
+	FlashFrameNumber,
+	LaserSourceSettingSequence,
+	HorizontalLaserSpotDimension,
+	VerticalLaserSpotDimension,
+	LaserWavelength,
+	LaserPower,
+	ForcedGasSettingSequence,
+	VibrationSourceSettingSequence,
+	VibrationExcitationFrequency,
+	VibrationExcitationVoltage,
+	ThermographyDataCaptureMethod,
+	ThermalTechnique,
+	ThermalCameraCoreSequence,
+	DetectorWavelengthRange,
+	ThermalCameraCalibrationType,
+	AcquisitionImageCounter,
+	FrontPanelTemperature,
+	AirGapTemperature,
+	VerticalPixelSize,
+	HorizontalPixelSize,
+	DataStreamingProtocol,
+	LensSequence,
+	FieldOfView,
+	LensFilterManufacturer,
+	CutoffFilterType,
+	LensFilterCutOffWavelength,
+	ThermalSourceSequence,
+	ThermalSourceMotionState,
+	ThermalSourceMotionType,
+	InductionHeatingSequence,
+	CoilConfigurationID,
+	NumberOfTurnsInCoil,
+	ShapeOfIndividualTurn,
+	SizeOfIndividualTurn,
+	DistanceBetweenTurns,
+	FlashHeatingSequence,
+	NumberOfLamps,
+	FlashSynchronizationProtocol,
+	FlashModificationStatus,
+	LaserHeatingSequence,
+	LaserManufacturer,
+	LaserModelNumber,
+	LaserTypeDescription,
+	ForcedGasHeatingSequence,
+	GasUsedForHeatingCoolingPart,
+	VibrationSonicHeatingSequence,
+	ProbeManufacturer,
+	ProbeModelNumber,
+	ApertureSize,
+	ProbeResonantFrequency,
+	HeatSourceDescription,
+	SurfacePreparationWithOpticalCoating,
+	OpticalCoatingType,
+	ThermalConductivityOfExposedSurface,
+	MaterialDensity,
+	SpecificHeatOfInspectionSurface,
+	EmissivityOfInspectionSurface,
+	ElectromagneticClassificationOfInspectionSurface,
+	MovingWindowSize,
+	MovingWindowType,
+	MovingWindowWeights,
+	MovingWindowPitch,
+	MovingWindowPaddingScheme,
+	MovingWindowPaddingLength,
+	SpatialFilteringParametersSequence,
+	SpatialFilteringScheme,
+	HorizontalMovingWindowSize,
+	VerticalMovingWindowSize,
+	PolynomialFittingSequence,
+	FittingDataType,
+	OperationOnTimeAxisBeforeFitting,
+	OperationOnPixelIntensityBeforeFitting,
+	OrderOfPolynomial,
+	IndependentVariableForPolynomialFit,
+	PolynomialCoefficients,
+	ThermographyPixelDataUnit,
 	WhitePoint,
 	PrimaryChromaticities,
 	BatteryLevel,
@@ -51133,6 +52788,7 @@ var tags = []*Tag{
 	InitialCineRunState,
 	SliceThickness,
 	KVP,
+	Retiredblank00180061,
 	CountsAccumulated,
 	AcquisitionTerminationCondition,
 	EffectiveDuration,
@@ -51295,6 +52951,8 @@ var tags = []*Tag{
 	TimeOfLastCalibration,
 	DateTimeOfLastCalibration,
 	CalibrationDateTime,
+	DateOfManufacture,
+	DateOfInstallation,
 	ConvolutionKernel,
 	UpperLowerPixelValues,
 	ActualFrameDuration,
@@ -51781,6 +53439,7 @@ var tags = []*Tag{
 	CenterOfCircularExposureControlSensingRegion,
 	RadiusOfCircularExposureControlSensingRegion,
 	VerticesOfThePolygonalExposureControlSensingRegion,
+	Retiredblank00189445,
 	ColumnAngulationPatient,
 	BeamAngle,
 	FrameDetectorParametersSequence,
@@ -51912,6 +53571,27 @@ var tags = []*Tag{
 	TransducerBeamSteeringCodeSequence,
 	TransducerApplicationCodeSequence,
 	ZeroVelocityPixelValue,
+	PhotoacousticExcitationCharacteristicsSequence,
+	ExcitationSpectralWidth,
+	ExcitationEnergy,
+	ExcitationPulseDuration,
+	ExcitationWavelengthSequence,
+	ExcitationWavelength,
+	IlluminationTranslationFlag,
+	AcousticCouplingMediumFlag,
+	AcousticCouplingMediumCodeSequence,
+	AcousticCouplingMediumTemperature,
+	TransducerResponseSequence,
+	CenterFrequency,
+	FractionalBandwidth,
+	LowerCutoffFrequency,
+	UpperCutoffFrequency,
+	TransducerTechnologySequence,
+	SoundSpeedCorrectionMechanismCodeSequence,
+	ObjectSoundSpeed,
+	AcousticCouplingMediumSoundSpeed,
+	PhotoacousticImageFrameTypeSequence,
+	ImageDataTypeCodeSequence,
 	ReferenceLocationLabel,
 	ReferenceLocationDescription,
 	ReferenceBasisCodeSequence,
@@ -52110,6 +53790,7 @@ var tags = []*Tag{
 	HorizontalFieldOfView,
 	PupilDilated,
 	DegreeOfDilation,
+	VertexDistance,
 	StereoBaselineAngle,
 	StereoBaselineDisplacement,
 	StereoHorizontalPixelOffset,
@@ -52259,7 +53940,9 @@ var tags = []*Tag{
 	OphthalmicVolumetricPropertiesFlag,
 	OphthalmicAnatomicReferencePointXCoordinate,
 	OphthalmicAnatomicReferencePointYCoordinate,
+	OphthalmicEnFaceVolumeDescriptorSequence,
 	OphthalmicEnFaceImageQualityRatingSequence,
+	OphthalmicEnFaceVolumeDescriptorScope,
 	QualityThreshold,
 	OCTBscanAnalysisAcquisitionParametersSequence,
 	NumberOfBscansPerFrame,
@@ -52383,6 +54066,7 @@ var tags = []*Tag{
 	Columns,
 	Planes,
 	UltrasoundColorDataPresent,
+	Retiredblank00280020,
 	PixelSpacing,
 	ZoomFactor,
 	ZoomCenter,
@@ -52729,12 +54413,12 @@ var tags = []*Tag{
 	WaveformAmplifierType,
 	FilterLowFrequencyCharacteristicsSequence,
 	FilterHighFrequencyCharacteristicsSequence,
-	SummarizedFilterLookupTable,
+	SummarizedFilterLookupTableSequence,
 	NotchFilterCharacteristicsSequence,
 	WaveformFilterType,
 	AnalogFilterCharacteristicsSequence,
 	AnalogFilterRollOff,
-	AnalogFilterType,
+	AnalogFilterTypeCodeSequence,
 	DigitalFilterCharacteristicsSequence,
 	DigitalFilterOrder,
 	DigitalFilterTypeCodeSequence,
@@ -52826,9 +54510,9 @@ var tags = []*Tag{
 	SpecimenUID,
 	AcquisitionContextSequence,
 	AcquisitionContextDescription,
-	SpecimenTypeCodeSequence,
 	SpecimenDescriptionSequence,
 	IssuerOfTheSpecimenIdentifierSequence,
+	SpecimenTypeCodeSequence,
 	SpecimenShortDescription,
 	SpecimenDetailedDescription,
 	SpecimenPreparationSequence,
@@ -53214,6 +54898,10 @@ var tags = []*Tag{
 	CondenserLensPower,
 	ObjectiveLensPower,
 	ObjectiveLensNumericalAperture,
+	ConfocalMode,
+	TissueLocation,
+	ConfocalMicroscopyImageFrameTypeSequence,
+	ImageAcquisitionDepth,
 	PaletteColorLookupTableSequence,
 	ReferencedImageNavigationSequence,
 	TopLeftHandCornerOfLocalizerArea,
@@ -53389,6 +55077,7 @@ var tags = []*Tag{
 	SurfaceSequence,
 	SurfaceNumber,
 	SurfaceComments,
+	SurfaceOffset,
 	SurfaceProcessing,
 	SurfaceProcessingRatio,
 	SurfaceProcessingDescription,
@@ -54030,6 +55719,7 @@ var tags = []*Tag{
 	Signature,
 	CertifiedTimestampType,
 	CertifiedTimestamp,
+	Retiredblank04000315,
 	DigitalSignaturePurposeCodeSequence,
 	ReferencedDigitalSignatureSequence,
 	ReferencedSOPInstanceMACSequence,
@@ -54242,6 +55932,7 @@ var tags = []*Tag{
 	EnergyDerivationCodeSequence,
 	MaximumCumulativeMetersetExposure,
 	AcquisitionInitiationSequence,
+	RTConeBeamImagingGeometrySequence,
 	DVHType,
 	DoseUnits,
 	DoseType,
@@ -54283,6 +55974,8 @@ var tags = []*Tag{
 	ROIDescription,
 	ROIDisplayColor,
 	ROIVolume,
+	ROIDateTime,
+	ROIObservationDateTime,
 	RTRelatedROISequence,
 	RTROIRelationship,
 	ROIGenerationAlgorithm,
@@ -54297,6 +55990,11 @@ var tags = []*Tag{
 	ContourNumber,
 	AttachedContours,
 	SourcePixelPlanesCharacteristicsSequence,
+	SourceSeriesSequence,
+	SourceSeriesInformationSequence,
+	ROICreatorSequence,
+	ROIInterpreterSequence,
+	ROIObservationContextCodeSequence,
 	ContourData,
 	RTROIObservationsSequence,
 	ObservationNumber,
@@ -54467,6 +56165,7 @@ var tags = []*Tag{
 	TableTopVerticalPositionTolerance,
 	TableTopLongitudinalPositionTolerance,
 	TableTopLateralPositionTolerance,
+	TableTopPositionAlignmentUID,
 	RTPlanRelationship,
 	FractionGroupSequence,
 	FractionGroupNumber,
@@ -54599,6 +56298,7 @@ var tags = []*Tag{
 	SourceToExternalContourDistance,
 	ExternalContourEntryPoint,
 	CumulativeMetersetWeight,
+	Retiredblank300A0135,
 	TableTopPitchAngle,
 	TableTopPitchRotationDirection,
 	TableTopRollAngle,
@@ -54963,6 +56663,7 @@ var tags = []*Tag{
 	RTBeamModifierDefinitionDistance,
 	BeamAreaLimitSequence,
 	ReferencedRTPrescriptionSequence,
+	DoseValueInterpretation,
 	TreatmentSessionUID,
 	RTRadiationUsage,
 	ReferencedRTRadiationSetSequence,
@@ -55003,6 +56704,7 @@ var tags = []*Tag{
 	ReferencedExpectedInVivoMeasurementValueIndex,
 	DoseMeasurementDeviceCodeSequence,
 	AdditionalParameterRecordingInstanceSequence,
+	Retiredblank300A0782,
 	InterlockOriginDescription,
 	RTPatientPositionScopeSequence,
 	ReferencedTreatmentPositionGroupUID,
@@ -55031,6 +56733,9 @@ var tags = []*Tag{
 	PatientSupportDisplacementSequence,
 	DisplacementReferenceLocationCodeSequence,
 	RTRadiationSetDeliveryUsage,
+	PatientTreatmentPreparationSequence,
+	PatientToEquipmentRelationshipSequence,
+	ImagingEquipmentToTreatmentDeliveryDeviceRelationshipSequence,
 	ReferencedRTPlanSequence,
 	ReferencedBeamSequence,
 	ReferencedBeamNumber,
@@ -55080,6 +56785,7 @@ var tags = []*Tag{
 	BeamHoldTransition,
 	BeamHoldTransitionDateTime,
 	BeamHoldOriginatingDeviceSequence,
+	BeamHoldTransitionTriggerSource,
 	ApprovalStatus,
 	ReviewDate,
 	ReviewTime,
@@ -55374,5 +57080,4 @@ var tags = []*Tag{
 	Item,
 	ItemDelimitationItem,
 	SequenceDelimitationItem,
-	CurrentFrameFunctionalGroupsSequence,
 }

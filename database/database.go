@@ -3,9 +3,9 @@ package database
 import "github.com/innovative-io/io-dicom/media"
 
 type Database interface {
-	AddPatient(dcmObj media.DcmObj) error
-	AddStudy(dcmObj media.DcmObj) error
-	AddSeries(dcmObj media.DcmObj) error
-	AddInstance(dcmObj media.DcmObj) error
-	AddDicom(dcmObj media.DcmObj) error
+	AddPatient(dicomObject media.DICOMObject) error
+	AddStudy(dicomObject media.DICOMObject) error
+	AddSeries(dicomObject media.DICOMObject) error
+	AddInstance(dicomObject media.DICOMObject) error
+	AddDicom(dicomObject media.DICOMObject) error
 }

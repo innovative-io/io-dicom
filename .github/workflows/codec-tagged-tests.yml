@@ -1,0 +1,64 @@
+name: Codec Tagged Tests
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  tagged-codec-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install source-build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            curl \
+            git \
+            libbrotli-dev \
+            libgif-dev \
+            libhwy-dev \
+            libjpeg-dev \
+            libpng-dev \
+            make \
+            nasm \
+            ninja-build \
+            perl \
+            pkg-config \
+            python3 \
+            yasm \
+            zlib1g-dev
+
+      - name: Build codec dependencies from source
+        env:
+          PREFIX: ${{ github.workspace }}/.local/codec-deps
+          JOBS: 4
+        run: |
+          ./tools/build_codec_deps_from_source.sh
+          echo "${{ github.workspace }}/.local/codec-deps/bin" >> "$GITHUB_PATH"
+          source "${{ github.workspace }}/.local/codec-deps/env.sh"
+          {
+            echo "CODEC_DEPS_PREFIX=$CODEC_DEPS_PREFIX"
+            echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+            echo "CGO_CFLAGS=$CGO_CFLAGS"
+            echo "CGO_LDFLAGS=$CGO_LDFLAGS"
+            echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+          } >> "$GITHUB_ENV"
+
+      - name: Run untagged test suite
+        run: go test ./...
+
+      - name: Run tagged codec backend suite
+        run: ./tools/test_codec_tags.sh

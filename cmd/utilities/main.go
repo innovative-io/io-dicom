@@ -20,13 +20,13 @@ const sopClassesFile string = "../../dictionary/sopclass/sop_classes.go"
 
 const transferSyntaxesFile string = "../../dictionary/transfersyntax/transfer_syntaxes.go"
 
-type dictionary struct {
-	XMLName xml.Name `xml:"dictionary"`
-	Tags    []tag    `xml:"tag"`
-	UIDs    []uid    `xml:"uid"`
+type xmlDictionary struct {
+	XMLName xml.Name           `xml:"dictionary"`
+	Tags    []xmlDictionaryTag `xml:"tag"`
+	UIDs    []xmlDictionaryUID `xml:"uid"`
 }
 
-type tag struct {
+type xmlDictionaryTag struct {
 	Group   string `xml:"group,attr"`
 	Element string `xml:"element,attr"`
 	Keyword string `xml:"keyword,attr"`
@@ -35,7 +35,7 @@ type tag struct {
 	Name    string `xml:",chardata"`
 }
 
-type uid struct {
+type xmlDictionaryUID struct {
 	UID     string `xml:"uid,attr"`
 	Keyword string `xml:"keyword,attr"`
 	Type    string `xml:"type,attr"`
@@ -50,8 +50,8 @@ func main() {
 	writeTransferSyntaxesFile(uids)
 }
 
-func downloadDictionary() ([]tag, []uid) {
-	params := httpclient.HTTPParams{
+func downloadDictionary() ([]xmlDictionaryTag, []xmlDictionaryUID) {
+	params := httpclient.HTTPClientParams{
 		URL: dictionaryURL,
 	}
 	client := httpclient.NewHTTPClient(params)
@@ -60,7 +60,7 @@ func downloadDictionary() ([]tag, []uid) {
 		log.Panic(err)
 	}
 
-	dict := new(dictionary)
+	dict := new(xmlDictionary)
 	err = xml.Unmarshal(response, dict)
 	if err != nil {
 		log.Panic(err)
@@ -68,7 +68,7 @@ func downloadDictionary() ([]tag, []uid) {
 	return dict.Tags, dict.UIDs
 }
 
-func writeCopdingSchemesFile(uids []uid) {
+func writeCopdingSchemesFile(uids []xmlDictionaryUID) {
 	if FileExists(codingSchemesFile) {
 		err := os.Remove(codingSchemesFile)
 		if err != nil {
@@ -109,7 +109,7 @@ func writeCopdingSchemesFile(uids []uid) {
 	f.Sync()
 }
 
-func writeDicomTags(tags []tag) {
+func writeDicomTags(tags []xmlDictionaryTag) {
 	if FileExists(dicomTagsFile) {
 		err := os.Remove(dicomTagsFile)
 		if err != nil {
@@ -154,7 +154,7 @@ func writeDicomTags(tags []tag) {
 	f.Sync()
 }
 
-func writeSOPClassesFile(uids []uid) {
+func writeSOPClassesFile(uids []xmlDictionaryUID) {
 	if FileExists(sopClassesFile) {
 		err := os.Remove(sopClassesFile)
 		if err != nil {
@@ -196,7 +196,7 @@ func writeSOPClassesFile(uids []uid) {
 	f.Sync()
 }
 
-func writeTransferSyntaxesFile(uids []uid) {
+func writeTransferSyntaxesFile(uids []xmlDictionaryUID) {
 	if FileExists(transferSyntaxesFile) {
 		err := os.Remove(transferSyntaxesFile)
 		if err != nil {

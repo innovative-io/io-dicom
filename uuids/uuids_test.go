@@ -3,7 +3,7 @@ package uuids
 import (
 	"testing"
 
-	"github.com/innovative-io/io-dicom/imp"
+	"github.com/innovative-io/io-dicom/implementation"
 )
 
 func Test_hash32(t *testing.T) {
@@ -76,7 +76,7 @@ func TestCreateSeriesUID(t *testing.T) {
 		{
 			name: "Should generate series UID",
 			args: args{
-				RootUID:      imp.GetImpClassUID(),
+				RootUID:      implementation.GetImplementationClassUID(),
 				Modality:     "MR",
 				SeriesNumber: "1",
 			},
@@ -105,7 +105,7 @@ func TestCreateInstanceUID(t *testing.T) {
 		{
 			name: "Should generate instance UID",
 			args: args{
-				RootUID:    imp.GetImpClassUID(),
+				RootUID:    implementation.GetImplementationClassUID(),
 				InstNumber: "1",
 			},
 			want: "1.2.826.0.1.3680043.10.90.999.1",

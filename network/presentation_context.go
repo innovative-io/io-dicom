@@ -12,8 +12,8 @@ type PresentationContext interface {
 	GetPresentationContextID() byte
 	SetPresentationContextID(id byte)
 	GetAbstractSyntax() UIDItem
-	SetAbstractSyntax(Abst string)
-	AddTransferSyntax(Tran string)
+	SetAbstractSyntax(abstractSyntaxUID string)
+	AddTransferSyntax(transferSyntaxUID string)
 	GetTransferSyntaxes() []UIDItem
 	Size() uint16
 	Write(rw *bufio.ReadWriter) error
@@ -53,16 +53,16 @@ func (pc *presentationContext) GetAbstractSyntax() UIDItem {
 	return &pc.AbsSyntax
 }
 
-func (pc *presentationContext) SetAbstractSyntax(Abst string) {
+func (pc *presentationContext) SetAbstractSyntax(abstractSyntaxUID string) {
 	pc.AbsSyntax.SetType(0x30)
 	pc.AbsSyntax.SetReserved(0x00)
-	pc.AbsSyntax.SetUID(Abst)
-	pc.AbsSyntax.SetLength(uint16(len(Abst)))
+	pc.AbsSyntax.SetUID(abstractSyntaxUID)
+	pc.AbsSyntax.SetLength(uint16(len(abstractSyntaxUID)))
 }
 
-func (pc *presentationContext) AddTransferSyntax(Tran string) {
-	TrnSyntax := NewUIDItem(Tran, 0x40)
-	pc.TrnSyntaxs = append(pc.TrnSyntaxs, TrnSyntax)
+func (pc *presentationContext) AddTransferSyntax(transferSyntaxUID string) {
+	transferSyntax := NewUIDItem(transferSyntaxUID, 0x40)
+	pc.TrnSyntaxs = append(pc.TrnSyntaxs, transferSyntax)
 }
 
 func (pc *presentationContext) GetTransferSyntaxes() []UIDItem {
@@ -71,8 +71,8 @@ func (pc *presentationContext) GetTransferSyntaxes() []UIDItem {
 
 func (pc *presentationContext) Size() uint16 {
 	pc.Length = 4 + pc.AbsSyntax.GetSize()
-	for _, TrnSyntax := range pc.TrnSyntaxs {
-		pc.Length += TrnSyntax.GetSize()
+	for _, transferSyntax := range pc.TrnSyntaxs {
+		pc.Length += transferSyntax.GetSize()
 	}
 	return pc.Length + 4
 }
@@ -95,8 +95,8 @@ func (pc *presentationContext) Write(rw *bufio.ReadWriter) error {
 	if err := pc.AbsSyntax.Write(rw); err != nil {
 		return err
 	}
-	for _, TrnSyntax := range pc.TrnSyntaxs {
-		if err := TrnSyntax.Write(rw); err != nil {
+	for _, transferSyntax := range pc.TrnSyntaxs {
+		if err := transferSyntax.Write(rw); err != nil {
 			return err
 		}
 	}
@@ -133,19 +133,19 @@ func (pc *presentationContext) ReadDynamic(ms media.MemoryStream) (err error) {
 		return err
 	}
 
-	Count := pc.Length - 4 - pc.AbsSyntax.GetSize()
-	for Count > 0 {
-		var TrnSyntax uidItem
-		TrnSyntax.Read(ms)
-		Count = Count - TrnSyntax.GetSize()
-		if TrnSyntax.GetSize() > 0 {
-			pc.TrnSyntaxs = append(pc.TrnSyntaxs, &TrnSyntax)
+	remainingBytes := pc.Length - 4 - pc.AbsSyntax.GetSize()
+	for remainingBytes > 0 {
+		var transferSyntax uidItem
+		transferSyntax.Read(ms)
+		remainingBytes = remainingBytes - transferSyntax.GetSize()
+		if transferSyntax.GetSize() > 0 {
+			pc.TrnSyntaxs = append(pc.TrnSyntaxs, &transferSyntax)
 		}
 	}
 
-	if Count == 0 {
+	if remainingBytes == 0 {
 		return nil
 	}
 
-	return errors.New("pc::ReadDynamic, Count is not zero")
+	return errors.New("pc::ReadDynamic, remainingBytes is not zero")
 }

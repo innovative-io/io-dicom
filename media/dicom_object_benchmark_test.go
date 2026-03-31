@@ -1,0 +1,100 @@
+package media
+
+import (
+	"io"
+	"log"
+	"os"
+	"sync"
+	"testing"
+)
+
+var benchmarkLogOnce sync.Once
+
+func muteParserLogsForBenchmarks() {
+	benchmarkLogOnce.Do(func() {
+		log.SetOutput(io.Discard)
+	})
+}
+
+func benchmarkNewDCMObjFromFile(b *testing.B, fileName string) {
+	b.Helper()
+	muteParserLogsForBenchmarks()
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		obj, err := NewDCMObjFromFile(fileName)
+		if err != nil {
+			b.Fatalf("NewDCMObjFromFile(%s) failed: %v", fileName, err)
+		}
+		if obj == nil {
+			b.Fatalf("NewDCMObjFromFile(%s) returned nil object", fileName)
+		}
+	}
+}
+
+func benchmarkNewDCMObjFromBytes(b *testing.B, fileName string) {
+	b.Helper()
+	muteParserLogsForBenchmarks()
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		b.Fatalf("failed to read sample %s: %v", fileName, err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		obj, err := NewDCMObjFromBytes(data)
+		if err != nil {
+			b.Fatalf("NewDCMObjFromBytes(%s) failed: %v", fileName, err)
+		}
+		if obj == nil {
+			b.Fatalf("NewDCMObjFromBytes(%s) returned nil object", fileName)
+		}
+	}
+}
+
+func benchmarkWriteToBytes(b *testing.B, fileName string) {
+	b.Helper()
+	muteParserLogsForBenchmarks()
+
+	obj, err := NewDCMObjFromFile(fileName)
+	if err != nil {
+		b.Fatalf("failed to load sample %s: %v", fileName, err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		data := obj.WriteToBytes()
+		if len(data) == 0 {
+			b.Fatalf("WriteToBytes(%s) returned empty payload", fileName)
+		}
+	}
+}
+
+func BenchmarkNewDCMObjFromFile_Test2(b *testing.B) {
+	benchmarkNewDCMObjFromFile(b, "../samples/test2.dcm")
+}
+
+func BenchmarkNewDCMObjFromBytes_Test2(b *testing.B) {
+	benchmarkNewDCMObjFromBytes(b, "../samples/test2.dcm")
+}
+
+func BenchmarkNewDCMObjFromFile_JPEG8(b *testing.B) {
+	benchmarkNewDCMObjFromFile(b, "../samples/jpeg8.dcm")
+}
+
+func BenchmarkNewDCMObjFromBytes_JPEG8(b *testing.B) {
+	benchmarkNewDCMObjFromBytes(b, "../samples/jpeg8.dcm")
+}
+
+func BenchmarkWriteToBytes_Test2(b *testing.B) {
+	benchmarkWriteToBytes(b, "../samples/test2.dcm")
+}
+
+func BenchmarkWriteToBytes_JPEG8(b *testing.B) {
+	benchmarkWriteToBytes(b, "../samples/jpeg8.dcm")
+}

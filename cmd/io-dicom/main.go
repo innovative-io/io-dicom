@@ -59,26 +59,26 @@ func main() {
 		}
 		scp := services.NewSCP(*port)
 
-		scp.OnAssociationRequest(func(request network.AAssociationRQ) bool {
+		scp.OnAssociationRequest(func(request network.AssociationRequest) bool {
 			called := request.GetCalledAE()
 			return *calledAE == called
 		})
 
-		scp.OnCFindRequest(func(request network.AAssociationRQ, queryLevel string, query media.DcmObj) ([]media.DcmObj, uint16) {
+		scp.OnCFindRequest(func(request network.AssociationRequest, queryLevel string, query media.DICOMObject) ([]media.DICOMObject, uint16) {
 			query.DumpTags()
-			results := make([]media.DcmObj, 0)
+			results := make([]media.DICOMObject, 0)
 			for i := 0; i < 10; i++ {
 				results = append(results, utils.GenerateCFindRequest())
 			}
 			return results, dicomstatus.Success
 		})
 
-		scp.OnCMoveRequest(func(request network.AAssociationRQ, moveLevel string, query media.DcmObj) uint16 {
+		scp.OnCMoveRequest(func(request network.AssociationRequest, moveLevel string, query media.DICOMObject) uint16 {
 			query.DumpTags()
 			return dicomstatus.Success
 		})
 
-		scp.OnCStoreRequest(func(request network.AAssociationRQ, data media.DcmObj) uint16 {
+		scp.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
 			log.Printf("INFO, C-Store recieved %s", data.GetString(tags.SOPInstanceUID))
 			directory := filepath.Join(*datastore, data.GetString(tags.PatientID), data.GetString(tags.StudyInstanceUID), data.GetString(tags.SeriesInstanceUID))
 			os.MkdirAll(directory, 0755)
@@ -122,7 +122,7 @@ func main() {
 	if *cfind {
 		request := utils.DefaultCFindRequest()
 		scu := services.NewSCU(destination)
-		scu.SetOnCFindResult(func(result media.DcmObj) {
+		scu.SetOnCFindResult(func(result media.DICOMObject) {
 			log.Printf("Found study %s\n", result.GetString(tags.StudyInstanceUID))
 			result.DumpTags()
 		})
@@ -132,7 +132,7 @@ func main() {
 			for _, part := range parts {
 				log.Println(part)
 				// p := strings.Split(part, "=")
-				// tag := media.DcmTag{
+				// tag := media.DICOMTag{
 
 				// }
 			}

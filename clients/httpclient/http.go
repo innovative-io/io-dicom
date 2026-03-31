@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -27,12 +26,12 @@ type HTTPClient interface {
 	Put(body io.Reader) ([]byte, error)
 }
 
-type hTTPClient struct {
-	Params HTTPParams
+type httpClient struct {
+	Params HTTPClientParams
 }
 
-// HTTPParams are connection parameters
-type HTTPParams struct {
+// HTTPClientParams are connection parameters
+type HTTPClientParams struct {
 	URL                 string
 	Proxy               string
 	Timeout             int64
@@ -40,6 +39,7 @@ type HTTPParams struct {
 	ContentType         string
 	AcceptType          string
 	DisableCompression  bool
+	InsecureTLS         bool // skip TLS certificate verification; use only in development/testing
 	AuthorizationBearer string
 	AuthorizationKey    string
 	AuthorizationToken  string
@@ -50,15 +50,15 @@ type HTTPParams struct {
 }
 
 // NewHTTPClient returns a new http client
-func NewHTTPClient(params HTTPParams) HTTPClient {
-	return &hTTPClient{
+func NewHTTPClient(params HTTPClientParams) HTTPClient {
+	return &httpClient{
 		Params: params,
 	}
 }
 
 // GetOAuthToken - Gets a token from OAuth2 endpoint
 func GetOAuthToken(tokenURL string, form url.Values) (map[string]string, error) {
-	params := HTTPParams{
+	params := HTTPClientParams{
 		URL:         tokenURL,
 		ContentType: "application/x-www-form-urlencoded",
 	}
@@ -80,7 +80,7 @@ func GetOAuthToken(tokenURL string, form url.Values) (map[string]string, error) 
 }
 
 // Delete sends DELETE request
-func (h *hTTPClient) Delete() ([]byte, error) {
+func (h *httpClient) Delete() ([]byte, error) {
 	request, err := http.NewRequest("DELETE", h.Params.URL, nil)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func (h *hTTPClient) Delete() ([]byte, error) {
 }
 
 // Get sends GET request
-func (h *hTTPClient) Get() ([]byte, error) {
+func (h *httpClient) Get() ([]byte, error) {
 	request, err := http.NewRequest("GET", h.Params.URL, nil)
 	if err != nil {
 		return nil, err
@@ -100,7 +100,7 @@ func (h *hTTPClient) Get() ([]byte, error) {
 }
 
 // Patch sends PATCH request
-func (h *hTTPClient) Patch(body io.Reader) ([]byte, error) {
+func (h *httpClient) Patch(body io.Reader) ([]byte, error) {
 	request, err := http.NewRequest("PATCH", h.Params.URL, body)
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func (h *hTTPClient) Patch(body io.Reader) ([]byte, error) {
 }
 
 // Post sends POST request
-func (h *hTTPClient) Post(body io.Reader) ([]byte, error) {
+func (h *httpClient) Post(body io.Reader) ([]byte, error) {
 	request, err := http.NewRequest("POST", h.Params.URL, body)
 	if err != nil {
 		return nil, err
@@ -118,12 +118,12 @@ func (h *hTTPClient) Post(body io.Reader) ([]byte, error) {
 }
 
 // PostDicom - sends a multipart post
-func (h *hTTPClient) PostDicom(fieldName string, fileName string, content io.Reader) ([]byte, error) {
+func (h *httpClient) PostDicom(fieldName string, fileName string, content io.Reader) ([]byte, error) {
 	return h.PostMultiContent(fieldName, fileName, "application/dicom", content)
 }
 
 // PostMulti - sends a multipart post
-func (h *hTTPClient) PostMulti(fieldName string, fileName string, content io.Reader) ([]byte, error) {
+func (h *httpClient) PostMulti(fieldName string, fileName string, content io.Reader) ([]byte, error) {
 	body := new(bytes.Buffer)
 	writer := multipart.NewWriter(body)
 	part, err := writer.CreateFormFile(fieldName, fieldName)
@@ -131,7 +131,7 @@ func (h *hTTPClient) PostMulti(fieldName string, fileName string, content io.Rea
 		return nil, err
 	}
 
-	len, err := io.Copy(part, content)
+	byteCount, err := io.Copy(part, content)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func (h *hTTPClient) PostMulti(fieldName string, fileName string, content io.Rea
 		return nil, err
 	}
 
-	h.Params.Headers["Content-Length"] = fmt.Sprintf("%d", len)
+	h.Params.Headers["Content-Length"] = fmt.Sprintf("%d", byteCount)
 
 	request, err := http.NewRequest("POST", h.Params.URL, body)
 	if err != nil {
@@ -153,16 +153,19 @@ func (h *hTTPClient) PostMulti(fieldName string, fileName string, content io.Rea
 }
 
 // PostMultiContent - sends a multipart post
-func (h *hTTPClient) PostMultiContent(fieldName string, fileName string, contentType string, content io.Reader) ([]byte, error) {
+func (h *httpClient) PostMultiContent(fieldName string, fileName string, contentType string, content io.Reader) ([]byte, error) {
 	body := new(bytes.Buffer)
 	writer := multipart.NewWriter(body)
 
 	mediaHeader := textproto.MIMEHeader{}
 	mediaHeader.Set("Content-Disposition", fmt.Sprintf("attachment; name=\"%s\"; filename=\"%s\"", fieldName, fileName))
 	mediaHeader.Set("Content-Type", contentType)
-	mediaPart, _ := writer.CreatePart(mediaHeader)
+	mediaPart, err := writer.CreatePart(mediaHeader)
+	if err != nil {
+		return nil, err
+	}
 
-	len, err := io.Copy(mediaPart, content)
+	byteCount, err := io.Copy(mediaPart, content)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +177,7 @@ func (h *hTTPClient) PostMultiContent(fieldName string, fileName string, content
 		return nil, err
 	}
 
-	h.Params.Headers["Content-Length"] = fmt.Sprintf("%d", len)
+	h.Params.Headers["Content-Length"] = fmt.Sprintf("%d", byteCount)
 
 	request, err := http.NewRequest("POST", h.Params.URL, body)
 	if err != nil {
@@ -184,7 +187,7 @@ func (h *hTTPClient) PostMultiContent(fieldName string, fileName string, content
 }
 
 // Put sends PUT request
-func (h *hTTPClient) Put(body io.Reader) ([]byte, error) {
+func (h *httpClient) Put(body io.Reader) ([]byte, error) {
 	request, err := http.NewRequest("PUT", h.Params.URL, body)
 	if err != nil {
 		return nil, err
@@ -192,7 +195,7 @@ func (h *hTTPClient) Put(body io.Reader) ([]byte, error) {
 	return h.sendRequest(request)
 }
 
-func (h *hTTPClient) setupRequest(request *http.Request) {
+func (h *httpClient) setupRequest(request *http.Request) {
 	if h.Params.ContentType != "" {
 		request.Header.Set("Content-Type", h.Params.ContentType)
 	}
@@ -231,8 +234,11 @@ func (h *hTTPClient) setupRequest(request *http.Request) {
 	request.URL.RawQuery = q.Encode()
 }
 
-func (h *hTTPClient) sendRequest(request *http.Request) ([]byte, error) {
+func (h *httpClient) sendRequest(request *http.Request) ([]byte, error) {
 	h.setupRequest(request)
+
+	// #nosec G402 -- InsecureTLS is an explicit opt-in controlled by the caller
+	tlsCfg := &tls.Config{InsecureSkipVerify: h.Params.InsecureTLS} //nolint:gosec
 
 	var client *http.Client
 	if h.Params.Proxy != "" {
@@ -242,7 +248,7 @@ func (h *hTTPClient) sendRequest(request *http.Request) ([]byte, error) {
 		}
 		t := &http.Transport{
 			Proxy:              http.ProxyURL(proxy),
-			TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig:    tlsCfg,
 			DisableCompression: h.Params.DisableCompression,
 		}
 		client = &http.Client{
@@ -251,7 +257,7 @@ func (h *hTTPClient) sendRequest(request *http.Request) ([]byte, error) {
 		}
 	} else {
 		t := &http.Transport{
-			TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig:    tlsCfg,
 			DisableCompression: h.Params.DisableCompression,
 		}
 		client = &http.Client{
@@ -276,7 +282,7 @@ func (h *hTTPClient) sendRequest(request *http.Request) ([]byte, error) {
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	return body, nil

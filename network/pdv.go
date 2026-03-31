@@ -1,6 +1,6 @@
 package network
 
-type PDV struct {
+type PresentationDataValue struct {
 	Length                uint32
 	PresentationContextID byte
 	MsgHeader             byte

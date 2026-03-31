@@ -7,22 +7,22 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 )
 
-// PDataTF - PDataTF
-type PDataTF struct {
+// PresentationDataTransfer - PresentationDataTransfer
+type PresentationDataTransfer struct {
 	ItemType              byte
 	Reserved1             byte
 	Length                uint32
-	Buffer                media.BufData
+	Buffer                media.DICOMBuffer
 	BlockSize             uint32
 	MsgStatus             uint32
 	Endian                uint32
-	pdv                   PDV
+	pdv                   PresentationDataValue
 	PresentationContextID byte
 	MsgHeader             byte
 }
 
 // ReadDynamic - ReadDynamic
-func (pd *PDataTF) ReadDynamic(ms media.MemoryStream) (err error) {
+func (pd *PresentationDataTransfer) ReadDynamic(ms media.MemoryStream) (err error) {
 	if pd.Length == 0 {
 		if pd.Reserved1, err = ms.GetByte(); err != nil {
 			return
@@ -69,7 +69,7 @@ func (pd *PDataTF) ReadDynamic(ms media.MemoryStream) (err error) {
 	return nil
 }
 
-func (pd *PDataTF) Write(rw *bufio.ReadWriter) error {
+func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 	TotalSize := uint32(pd.Buffer.GetSize())
 	pd.Buffer.SetPosition(0)
 	if pd.BlockSize == 0 {

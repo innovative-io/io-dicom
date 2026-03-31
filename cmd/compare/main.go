@@ -41,7 +41,7 @@ func main() {
 	compare(srcDicom, dstDicom)
 }
 
-func compare(source media.DcmObj, destination media.DcmObj) {
+func compare(source media.DICOMObject, destination media.DICOMObject) {
 	for _, st := range source.GetTags() {
 		found := false
 		if st.VR == "SQ" {
@@ -49,6 +49,7 @@ func compare(source media.DcmObj, destination media.DcmObj) {
 			dt := destination.GetTagGE(st.Group, st.Element)
 			if dt == nil {
 				log.Printf("Sequence: (%04X,%04X) %s not found in destination", st.Group, st.Element, st.Name)
+				continue
 			}
 			dSeq := dt.ReadSeq(destination.IsExplicitVR())
 			compareSeq(1, sSeq, dSeq)
@@ -66,7 +67,11 @@ func compare(source media.DcmObj, destination media.DcmObj) {
 					} else {
 						switch st.VR {
 						case "US":
-							log.Printf("Tag: (%04X,%04X) %s are not equal, source: %d, destination: %d", st.Group, st.Element, st.Name, binary.LittleEndian.Uint16(st.Data), binary.LittleEndian.Uint16(dt.Data))
+							if len(st.Data) >= 2 && len(dt.Data) >= 2 {
+								log.Printf("Tag: (%04X,%04X) %s are not equal, source: %d, destination: %d", st.Group, st.Element, st.Name, binary.LittleEndian.Uint16(st.Data), binary.LittleEndian.Uint16(dt.Data))
+							} else {
+								log.Printf("Tag: (%04X,%04X) %s are not equal", st.Group, st.Element, st.Name)
+							}
 						default:
 							log.Printf("Tag: (%04X,%04X) %s are not equal, source: %s, destination: %s", st.Group, st.Element, st.Name, st.Data, dt.Data)
 						}
@@ -81,7 +86,7 @@ func compare(source media.DcmObj, destination media.DcmObj) {
 	}
 }
 
-func compareSeq(indent int, source media.DcmObj, destination media.DcmObj) {
+func compareSeq(indent int, source media.DICOMObject, destination media.DICOMObject) {
 	tabs := "\t"
 	for i := 0; i < indent; i++ {
 		tabs += "\t"
@@ -94,6 +99,7 @@ func compareSeq(indent int, source media.DcmObj, destination media.DcmObj) {
 			dt := destination.GetTagGE(st.Group, st.Element)
 			if dt == nil {
 				log.Printf("%sSequence: (%04X,%04X) %s not found in destination", tabs, st.Group, st.Element, st.Name)
+				continue
 			}
 			dSeq := dt.ReadSeq(destination.IsExplicitVR())
 			compareSeq(indent+1, sSeq, dSeq)
@@ -111,7 +117,11 @@ func compareSeq(indent int, source media.DcmObj, destination media.DcmObj) {
 					} else {
 						switch st.VR {
 						case "US":
-							log.Printf("%sTag: (%04X,%04X) %s are not equal, source: %d, destination: %d", tabs, st.Group, st.Element, st.Name, binary.LittleEndian.Uint16(st.Data), binary.LittleEndian.Uint16(dt.Data))
+							if len(st.Data) >= 2 && len(dt.Data) >= 2 {
+								log.Printf("%sTag: (%04X,%04X) %s are not equal, source: %d, destination: %d", tabs, st.Group, st.Element, st.Name, binary.LittleEndian.Uint16(st.Data), binary.LittleEndian.Uint16(dt.Data))
+							} else {
+								log.Printf("%sTag: (%04X,%04X) %s are not equal", tabs, st.Group, st.Element, st.Name)
+							}
 						default:
 							log.Printf("%sTag: (%04X,%04X) %s are not equal, source: %s, destination: %s", tabs, st.Group, st.Element, st.Name, st.Data, dt.Data)
 						}

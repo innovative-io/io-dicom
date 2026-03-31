@@ -13,13 +13,13 @@ type UserInformation interface {
 	GetItemType() byte
 	SetItemType(t byte)
 	GetAsyncOperationWindow() AsyncOperationWindow
-	GetMaxSubLength() MaximumSubLength
-	SetMaxSubLength(length MaximumSubLength)
+	GetMaxSubLength() MaximumPDULength
+	SetMaxSubLength(length MaximumPDULength)
 	Size() uint16
-	GetImpClass() UIDItem
-	SetImpClassUID(name string)
-	GetImpVersion() UIDItem
-	SetImpVersionName(name string)
+	GetImplementationClass() UIDItem
+	SetImplementationClassUID(name string)
+	GetImplementationVersion() UIDItem
+	SetImplementationVersionName(name string)
 	Write(rw *bufio.ReadWriter) (err error)
 	Read(ms media.MemoryStream) (err error)
 	ReadDynamic(ms media.MemoryStream) (err error)
@@ -30,7 +30,7 @@ type userInformation struct {
 	Reserved1       byte
 	Length          uint16
 	UserInfoBaggage uint32
-	MaxSubLength    MaximumSubLength
+	MaxSubLength    MaximumPDULength
 	AsyncOpWindow   AsyncOperationWindow
 	SCPSCURole      RoleSelect
 	ImpClass        uidItem
@@ -41,7 +41,7 @@ type userInformation struct {
 func NewUserInformation() UserInformation {
 	return &userInformation{
 		ItemType:      0x50,
-		MaxSubLength:  NewMaximumSubLength(),
+		MaxSubLength:  NewMaximumPDULength(),
 		AsyncOpWindow: NewAsyncOperationWindow(),
 		SCPSCURole:    NewRoleSelect(),
 		ImpClass: uidItem{
@@ -61,7 +61,7 @@ func (ui *userInformation) SetItemType(t byte) {
 	ui.ItemType = t
 }
 
-func (ui *userInformation) GetMaxSubLength() MaximumSubLength {
+func (ui *userInformation) GetMaxSubLength() MaximumPDULength {
 	return ui.MaxSubLength
 }
 
@@ -69,7 +69,7 @@ func (ui *userInformation) GetAsyncOperationWindow() AsyncOperationWindow {
 	return ui.AsyncOpWindow
 }
 
-func (ui *userInformation) SetMaxSubLength(length MaximumSubLength) {
+func (ui *userInformation) SetMaxSubLength(length MaximumPDULength) {
 	ui.MaxSubLength = length
 }
 
@@ -80,22 +80,22 @@ func (ui *userInformation) Size() uint16 {
 	return ui.Length + 4
 }
 
-func (ui *userInformation) GetImpClass() UIDItem {
+func (ui *userInformation) GetImplementationClass() UIDItem {
 	return &ui.ImpClass
 }
 
-func (ui *userInformation) SetImpClassUID(name string) {
+func (ui *userInformation) SetImplementationClassUID(name string) {
 	ui.ImpClass.SetType(0x52)
 	ui.ImpClass.SetReserved(0x00)
 	ui.ImpClass.SetUID(name)
 	ui.ImpClass.SetLength(uint16(len(name)))
 }
 
-func (ui *userInformation) GetImpVersion() UIDItem {
+func (ui *userInformation) GetImplementationVersion() UIDItem {
 	return &ui.ImpVersion
 }
 
-func (ui *userInformation) SetImpVersionName(name string) {
+func (ui *userInformation) SetImplementationVersionName(name string) {
 	ui.ImpVersion.SetType(0x55)
 	ui.ImpVersion.SetReserved(0x00)
 	ui.ImpVersion.SetUID(name)

@@ -7,7 +7,7 @@ import (
 	"net"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
-	"github.com/innovative-io/io-dicom/dimsec"
+	"github.com/innovative-io/io-dicom/dimse"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomcommand"
@@ -18,20 +18,20 @@ import (
 type SCP interface {
 	Start() error
 	Stop() error
-	OnAssociationRequest(f func(request network.AAssociationRQ) bool)
-	OnCFindRequest(f func(request network.AAssociationRQ, findLevel string, data media.DcmObj) ([]media.DcmObj, uint16))
-	OnCMoveRequest(f func(request network.AAssociationRQ, moveLevel string, data media.DcmObj) uint16)
-	OnCStoreRequest(f func(request network.AAssociationRQ, data media.DcmObj) uint16)
+	OnAssociationRequest(f func(request network.AssociationRequest) bool)
+	OnCFindRequest(f func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16))
+	OnCMoveRequest(f func(request network.AssociationRequest, moveLevel string, data media.DICOMObject) uint16)
+	OnCStoreRequest(f func(request network.AssociationRequest, data media.DICOMObject) uint16)
 	handleConnection(conn net.Conn)
 }
 
 type scp struct {
 	Port                 int
 	listener             net.Listener
-	onAssociationRequest func(request network.AAssociationRQ) bool
-	onCFindRequest       func(request network.AAssociationRQ, findLevel string, data media.DcmObj) ([]media.DcmObj, uint16)
-	onCMoveRequest       func(request network.AAssociationRQ, moveLevel string, data media.DcmObj) uint16
-	onCStoreRequest      func(request network.AAssociationRQ, data media.DcmObj) uint16
+	onAssociationRequest func(request network.AssociationRequest) bool
+	onCFindRequest       func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16)
+	onCMoveRequest       func(request network.AssociationRequest, moveLevel string, data media.DICOMObject) uint16
+	onCStoreRequest      func(request network.AssociationRequest, data media.DICOMObject) uint16
 }
 
 // NewSCP - Creates an interface to scu
@@ -53,8 +53,8 @@ func (s *scp) Start() error {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
-			slog.Error(err.Error())
-			continue
+			// Listener was closed by Stop() — exit cleanly.
+			return nil
 		}
 		slog.Info("handleConnection, new connection", "ADDRESS", conn.RemoteAddr())
 		go s.handleConnection(conn)
@@ -78,7 +78,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	var err error
-	var dco media.DcmObj
+	var dco media.DICOMObject
 	for err == nil {
 		dco, err = pdu.NextPDU()
 		if dco == nil {
@@ -87,23 +87,27 @@ func (s *scp) handleConnection(conn net.Conn) {
 		command := dco.GetUShort(tags.CommandField)
 		switch command {
 		case dicomcommand.CStoreRequest:
-			ddo, err := dimsec.CStoreReadRQ(pdu, dco)
+			ddo, err := dimse.CStoreReadRQ(pdu, dco)
 			if err != nil {
 				slog.Error("handleConnection, C-Store failed to read request", "ERROR", err.Error())
 				return
 			}
 
 			if s.onCStoreRequest == nil {
-				panic("OnCStoreRequest() not implemented")
+				slog.Error("handleConnection, OnCStoreRequest not implemented")
+				if err := dimse.CStoreWriteRSP(pdu, dco, dicomstatus.FailureUnableToProcess); err != nil {
+					slog.Error("handleConnection, C-Store failed to write error response", "ERROR", err.Error())
+				}
+				return
 			}
 
 			status := s.onCStoreRequest(pdu.GetAAssociationRQ(), ddo)
-			if err := dimsec.CStoreWriteRSP(pdu, dco, status); err != nil {
+			if err := dimse.CStoreWriteRSP(pdu, dco, status); err != nil {
 				slog.Error("handleConnection, C-Store failed to write response", "ERROR", err.Error())
 				return
 			}
 		case dicomcommand.CFindRequest:
-			ddo, err := dimsec.CFindReadRQ(pdu)
+			ddo, err := dimse.CFindReadRQ(pdu)
 			if err != nil {
 				slog.Error("handleConnection, C-Find failed to read request!")
 				return
@@ -113,7 +117,11 @@ func (s *scp) handleConnection(conn net.Conn) {
 			status := dicomstatus.Success
 
 			if s.onCFindRequest == nil {
-				panic("OnCFindRequest() not implemented")
+				slog.Error("handleConnection, OnCFindRequest not implemented")
+				if err := dimse.CFindWriteRSP(pdu, dco, dco, dicomstatus.FailureUnableToProcess); err != nil {
+					slog.Error("handleConnection, C-Find failed to write error response", "ERROR", err.Error())
+				}
+				return
 			}
 
 			results, status := s.onCFindRequest(pdu.GetAAssociationRQ(), queryLevel, ddo)
@@ -122,24 +130,24 @@ func (s *scp) handleConnection(conn net.Conn) {
 					if index == len(results)-1 {
 						break
 					}
-					if err := dimsec.CFindWriteRSP(pdu, dco, result, dicomstatus.Pending); err != nil {
+					if err := dimse.CFindWriteRSP(pdu, dco, result, dicomstatus.Pending); err != nil {
 						slog.Error("handleConnection, C-Find failed to write response", "ERROR", err.Error())
 						return
 					}
 				}
 
-				if err := dimsec.CFindWriteRSP(pdu, dco, results[len(results)-1], status); err != nil {
+				if err := dimse.CFindWriteRSP(pdu, dco, results[len(results)-1], status); err != nil {
 					slog.Error("handleConnection, C-Find failed to write response", "ERROR", err.Error())
 					return
 				}
 			} else {
-				if err := dimsec.CFindWriteRSP(pdu, dco, dco, status); err != nil {
+				if err := dimse.CFindWriteRSP(pdu, dco, dco, status); err != nil {
 					slog.Error("handleConnection, C-Find failed to write response", "ERROR", err.Error())
 					return
 				}
 			}
 		case dicomcommand.CMoveRequest:
-			ddo, err := dimsec.CMoveReadRQ(pdu)
+			ddo, err := dimse.CMoveReadRQ(pdu)
 			if err != nil {
 				slog.Error("handleConnection, C-Move failed to read request!")
 				return
@@ -147,18 +155,22 @@ func (s *scp) handleConnection(conn net.Conn) {
 			moveLevel := ddo.GetString(tags.QueryRetrieveLevel)
 
 			if s.onCMoveRequest == nil {
-				panic("OnCMoveRequest() not implemented")
+				slog.Error("handleConnection, OnCMoveRequest not implemented")
+				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.FailureUnableToProcess, 0x00); err != nil {
+					slog.Error("handleConnection, C-Move failed to write error response", "ERROR", err.Error())
+				}
+				return
 			}
 
 			status := s.onCMoveRequest(pdu.GetAAssociationRQ(), moveLevel, ddo)
 
-			if err := dimsec.CMoveWriteRSP(pdu, dco, status, 0x00); err != nil {
-				slog.Error("slog.ErrorhandleConnection, C-Move failed to write response", "ERROR", err.Error())
+			if err := dimse.CMoveWriteRSP(pdu, dco, status, 0x00); err != nil {
+				slog.Error("handleConnection, C-Move failed to write response", "ERROR", err.Error())
 				return
 			}
 		case dicomcommand.CEchoRequest:
-			if dimsec.CEchoReadRQ(dco) {
-				if err := dimsec.CEchoWriteRSP(pdu, dco); err != nil {
+			if dimse.CEchoReadRQ(dco) {
+				if err := dimse.CEchoWriteRSP(pdu, dco); err != nil {
 					slog.Error("handleConnection, C-Echo failed to write response!")
 					return
 				}
@@ -170,18 +182,18 @@ func (s *scp) handleConnection(conn net.Conn) {
 	}
 }
 
-func (s *scp) OnAssociationRequest(f func(request network.AAssociationRQ) bool) {
+func (s *scp) OnAssociationRequest(f func(request network.AssociationRequest) bool) {
 	s.onAssociationRequest = f
 }
 
-func (s *scp) OnCFindRequest(f func(request network.AAssociationRQ, findLevel string, data media.DcmObj) ([]media.DcmObj, uint16)) {
+func (s *scp) OnCFindRequest(f func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16)) {
 	s.onCFindRequest = f
 }
 
-func (s *scp) OnCMoveRequest(f func(request network.AAssociationRQ, moveLevel string, data media.DcmObj) uint16) {
+func (s *scp) OnCMoveRequest(f func(request network.AssociationRequest, moveLevel string, data media.DICOMObject) uint16) {
 	s.onCMoveRequest = f
 }
 
-func (s *scp) OnCStoreRequest(f func(request network.AAssociationRQ, data media.DcmObj) uint16) {
+func (s *scp) OnCStoreRequest(f func(request network.AssociationRequest, data media.DICOMObject) uint16) {
 	s.onCStoreRequest = f
 }

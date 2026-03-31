@@ -40,5 +40,5 @@ func GetGroupElement(Name string) (group uint16, element uint16) {
 			return tag.Group, tag.Element
 		}
 	}
-  return 0, 0
+	return 0, 0
 }

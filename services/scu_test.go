@@ -1,7 +1,10 @@
 package services
 
 import (
+	"fmt"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/media"
@@ -13,7 +16,7 @@ import (
 func Test_scu_EchoSCU(t *testing.T) {
 	_, testSCP := StartSCP(t, 1040)
 
-	testSCP.OnAssociationRequest(func(request network.AAssociationRQ) bool {
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
 		return request.GetCalledAE() == "TEST_SCP"
 	})
 
@@ -85,12 +88,12 @@ func Test_scu_EchoSCU(t *testing.T) {
 func Test_scu_FindSCU(t *testing.T) {
 	_, testSCP := StartSCP(t, 1041)
 
-	testSCP.OnAssociationRequest(func(request network.AAssociationRQ) bool {
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
 		return request.GetCalledAE() == "TEST_SCP"
 	})
 
-	testSCP.OnCFindRequest(func(request network.AAssociationRQ, findLevel string, data media.DcmObj) ([]media.DcmObj, uint16) {
-		return make([]media.DcmObj, 0), dicomstatus.Success
+	testSCP.OnCFindRequest(func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16) {
+		return make([]media.DICOMObject, 0), dicomstatus.Success
 	})
 
 	media.InitDict()
@@ -99,7 +102,7 @@ func Test_scu_FindSCU(t *testing.T) {
 		destination *network.Destination
 	}
 	type args struct {
-		Query   media.DcmObj
+		Query   media.DICOMObject
 		timeout int
 	}
 	tests := []struct {
@@ -135,7 +138,7 @@ func Test_scu_FindSCU(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.args.Query.WriteString(tags.StudyDate, "20150617")
 			d := NewSCU(tt.fields.destination)
-			d.SetOnCFindResult(func(result media.DcmObj) {
+			d.SetOnCFindResult(func(result media.DICOMObject) {
 				result.DumpTags()
 			})
 
@@ -154,11 +157,11 @@ func Test_scu_FindSCU(t *testing.T) {
 func Test_scu_StoreSCU(t *testing.T) {
 	_, testSCP := StartSCP(t, 1042)
 
-	testSCP.OnAssociationRequest(func(request network.AAssociationRQ) bool {
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
 		return request.GetCalledAE() == "TEST_SCP"
 	})
 
-	testSCP.OnCStoreRequest(func(request network.AAssociationRQ, data media.DcmObj) uint16 {
+	testSCP.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
 		data.DumpTags()
 		return dicomstatus.Success
 	})
@@ -214,13 +217,30 @@ func StartSCP(t testing.TB, port int) (func(t testing.TB), SCP) {
 	testSCP := NewSCP(port)
 	go func() {
 		if err := testSCP.Start(); err != nil {
-			panic(err)
+			t.Logf("SCP stopped: %v", err)
 		}
 	}()
 
-	return func(t testing.TB) {
-		if err := testSCP.Stop(); err != nil {
-			panic(err)
+	// Poll until the SCP port is accepting connections.
+	addr := fmt.Sprintf("localhost:%d", port)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			// Give the SCP goroutine a moment to reach Accept() again
+			// after handling our probe connection.
+			time.Sleep(20 * time.Millisecond)
+			break
 		}
-	}, testSCP
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cleanup := func(t testing.TB) {
+		if err := testSCP.Stop(); err != nil {
+			t.Errorf("failed to stop SCP: %v", err)
+		}
+	}
+	t.Cleanup(func() { cleanup(t) })
+	return cleanup, testSCP
 }

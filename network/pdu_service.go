@@ -11,7 +11,7 @@ import (
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
-	"github.com/innovative-io/io-dicom/imp"
+	"github.com/innovative-io/io-dicom/implementation"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network/pdutype"
 )
@@ -22,21 +22,21 @@ type PDUService interface {
 	SetTimeout(timeout int)
 	Connect(IP string, Port string) error
 	Close()
-	GetAAssociationRQ() AAssociationRQ
+	GetAAssociationRQ() AssociationRequest
 	GetCalledAE() string
 	GetCallingAE() string
 	SetCalledAE(calledAE string)
 	SetCallingAE(callingAE string)
 	SetConn(rw *bufio.ReadWriter)
-	NextPDU() (media.DcmObj, error)
+	NextPDU() (media.DICOMObject, error)
 	AddPresContexts(presentationContext PresentationContext)
 	GetPresentationContextID() byte
-	SetOnAssociationRequest(f func(request AAssociationRQ) bool)
-	Write(DCO media.DcmObj, ItemType byte) error
+	SetOnAssociationRequest(f func(request AssociationRequest) bool)
+	Write(DCO media.DICOMObject, ItemType byte) error
 	interogateAAssociateAC() bool
 	interogateAAssociateRQ(rw *bufio.ReadWriter) error
-	parseDCMIntoRaw(DCO media.DcmObj) bool
-	parseRawVRIntoDCM(DCO media.DcmObj) bool
+	parseDCMIntoRaw(DCO media.DICOMObject) bool
+	parseRawVRIntoDCM(DCO media.DICOMObject) bool
 	readPDU() error
 }
 
@@ -46,27 +46,27 @@ type pduService struct {
 	ms                           media.MemoryStream
 	pdutype                      int
 	pdulength                    uint32
-	AssocRQ                      AAssociationRQ
-	AssocAC                      AAssociationAC
-	AssocRJ                      AAssociationRJ
-	ReleaseRQ                    AReleaseRQ
-	ReleaseRP                    AReleaseRP
-	AbortRQ                      AAbortRQ
-	Pdata                        PDataTF
+	AssocRQ                      AssociationRequest
+	AssocAC                      AssociationAccept
+	AssocRJ                      AssociationReject
+	ReleaseRQ                    ReleaseRequest
+	ReleaseRP                    ReleaseResponse
+	AbortRQ                      AbortRequest
+	Pdata                        PresentationDataTransfer
 	Timeout                      int
-	OnAssociationRequest         func(request AAssociationRQ) bool
+	OnAssociationRequest         func(request AssociationRequest) bool
 }
 
 // NewPDUService - creates a pointer to PDUService
 func NewPDUService() PDUService {
 	return &pduService{
 		ms:        media.NewEmptyMemoryStream(),
-		AssocRQ:   NewAAssociationRQ(),
-		AssocAC:   NewAAssociationAC(),
-		AssocRJ:   NewAAssociationRJ(),
-		ReleaseRQ: NewAReleaseRQ(),
-		ReleaseRP: NewAReleaseRP(),
-		AbortRQ:   NewAAbortRQ(),
+		AssocRQ:   NewAssociationRequest(),
+		AssocAC:   NewAssociationAccept(),
+		AssocRJ:   NewAssociationReject(),
+		ReleaseRQ: NewReleaseRequest(),
+		ReleaseRP: NewReleaseResponse(),
+		AbortRQ:   NewAbortRequest(),
 	}
 }
 
@@ -103,8 +103,8 @@ func (pdu *pduService) Connect(IP string, Port string) error {
 
 	pdu.readWriter = rw
 	pdu.AssocRQ.SetMaxSubLength(maxPduLength)
-	pdu.AssocRQ.SetImpClassUID(imp.GetImpClassUID())
-	pdu.AssocRQ.SetImpVersionName(imp.GetImpVersion())
+	pdu.AssocRQ.SetImplementationClassUID(implementation.GetImplementationClassUID())
+	pdu.AssocRQ.SetImplementationVersionName(implementation.GetImplementationVersion())
 
 	if err = pdu.AssocRQ.Write(pdu.readWriter); err != nil {
 		return err
@@ -164,7 +164,7 @@ func (pdu *pduService) Close() {
 	pdu.ReleaseRP.Read(pdu.ms)
 }
 
-func (pdu *pduService) NextPDU() (command media.DcmObj, err error) {
+func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 	if pdu.Pdata.Buffer != nil {
 		pdu.Pdata.Buffer.ClearMemoryStream()
 	} else {
@@ -256,7 +256,7 @@ func (pdu *pduService) NextPDU() (command media.DcmObj, err error) {
 	}
 }
 
-func (pdu *pduService) GetAAssociationRQ() AAssociationRQ {
+func (pdu *pduService) GetAAssociationRQ() AssociationRequest {
 	return pdu.AssocRQ
 }
 
@@ -284,15 +284,21 @@ func (pdu *pduService) GetPresentationContextID() byte {
 	return pdu.Pdata.PresentationContextID
 }
 
-func (pdu *pduService) SetOnAssociationRequest(f func(request AAssociationRQ) bool) {
+func (pdu *pduService) SetOnAssociationRequest(f func(request AssociationRequest) bool) {
 	pdu.OnAssociationRequest = f
 }
 
-func (pdu *pduService) Write(DCO media.DcmObj, ItemType byte) error {
+func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
 	if pdu.Pdata.Buffer != nil {
 		pdu.Pdata.Buffer.ClearMemoryStream()
 	} else {
 		pdu.Pdata.Buffer = media.NewEmptyBufData()
+	}
+
+	if ts := pdu.GetTransferSyntax(pdu.Pdata.PresentationContextID); ts != nil {
+		DCO.SetTransferSyntax(ts)
+		DCO.SetBigEndian(ts.UID == transfersyntax.ExplicitVRBigEndian.UID)
+		DCO.SetExplicitVR(ts.UID != transfersyntax.ImplicitVRLittleEndian.UID)
 	}
 
 	if pdu.Pdata.PresentationContextID == 0 {
@@ -353,8 +359,8 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 	pdu.AssocAC.SetUserInformation(pdu.AssocRQ.GetUserInformation())
 
 	slog.Info("ASSOC-RQ:", "CallingAE", pdu.AssocRQ.GetCallingAE(), "CalledAE", pdu.AssocRQ.GetCalledAE())
-	slog.Info("ASSOC-RQ:", "ImpClass", pdu.AssocRQ.GetUserInformation().GetImpClass().GetUID())
-	slog.Info("ASSOC-RQ:", "ImpVersion", pdu.AssocRQ.GetUserInformation().GetImpVersion().GetUID())
+	slog.Info("ASSOC-RQ:", "ImpClass", pdu.AssocRQ.GetUserInformation().GetImplementationClass().GetUID())
+	slog.Info("ASSOC-RQ:", "ImpVersion", pdu.AssocRQ.GetUserInformation().GetImplementationVersion().GetUID())
 	slog.Info("ASSOC-RQ:", "MaxPDULength", pdu.AssocRQ.GetUserInformation().GetMaxSubLength().GetMaximumLength())
 	slog.Info("ASSOC-RQ:", "MaxOpsInvoked", pdu.AssocRQ.GetUserInformation().GetAsyncOperationWindow().GetMaxNumberOperationsInvoked(), "MaxOpsPerformed", pdu.AssocRQ.GetUserInformation().GetAsyncOperationWindow().GetMaxNumberOperationsPerformed())
 
@@ -369,7 +375,7 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 			if transferSyntax != nil {
 				tsName = transferSyntax.Description
 			}
-			slog.Info("ASSOC-RQ: \tTransferSynxtax:", "UID", TransferSyn.GetUID(), "Description", tsName)
+			slog.Info("ASSOC-RQ: \tTransferSyntax:", "UID", TransferSyn.GetUID(), "Description", tsName)
 		}
 
 		PresContextAccept := NewPresentationContextAccept()
@@ -391,12 +397,12 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 	}
 
 	if len(pdu.AcceptedPresentationContexts) > 0 {
-		MaxSubLength := NewMaximumSubLength()
+		MaxSubLength := NewMaximumPDULength()
 		UserInfo := NewUserInformation()
 
 		MaxSubLength.SetMaximumLength(maxPduLength)
-		UserInfo.SetImpClassUID(imp.GetImpClassUID())
-		UserInfo.SetImpVersionName(imp.GetImpVersion())
+		UserInfo.SetImplementationClassUID(implementation.GetImplementationClassUID())
+		UserInfo.SetImplementationVersionName(implementation.GetImplementationVersion())
 		UserInfo.SetMaxSubLength(MaxSubLength)
 		pdu.AssocAC.SetUserInformation(UserInfo)
 		return pdu.AssocAC.Write(rw)
@@ -406,12 +412,12 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 	return pdu.AssocRJ.Write(rw)
 }
 
-func (pdu *pduService) parseDCMIntoRaw(DCO media.DcmObj) bool {
+func (pdu *pduService) parseDCMIntoRaw(DCO media.DICOMObject) bool {
 	pdu.Pdata.Buffer.WriteObj(DCO)
 	return true
 }
 
-func (pdu *pduService) parseRawVRIntoDCM(DCO media.DcmObj) bool {
+func (pdu *pduService) parseRawVRIntoDCM(DCO media.DICOMObject) bool {
 	TrnSyntax := pdu.GetTransferSyntax(pdu.Pdata.PresentationContextID)
 	if TrnSyntax == nil {
 		slog.Info("pduservice::ParseRawVRIntoDCM - Transfer syntax length is 0")

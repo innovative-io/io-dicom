@@ -14,7 +14,7 @@ func TestNewUserInformation(t *testing.T) {
 			name: "Should get UserInformation",
 			want: &userInformation{
 				ItemType:      0x50,
-				MaxSubLength:  NewMaximumSubLength(),
+				MaxSubLength:  NewMaximumPDULength(),
 				AsyncOpWindow: NewAsyncOperationWindow(),
 				SCPSCURole:    NewRoleSelect(),
 				ImpClass:      uidItem{itemType: 0x52},

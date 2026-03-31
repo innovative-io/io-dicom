@@ -6,36 +6,36 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 )
 
-// AReleaseRP - AReleaseRP
-type AReleaseRP interface {
+// ReleaseResponse - ReleaseResponse
+type ReleaseResponse interface {
 	Size() uint32
 	Write(rw *bufio.ReadWriter) error
 	Read(ms media.MemoryStream) (err error)
 	ReadDynamic(ms media.MemoryStream) (err error)
 }
 
-type areleaseRP struct {
+type releaseResponse struct {
 	ItemType  byte // 0x06
 	Reserved1 byte
 	Length    uint32
 	Reserved2 uint32
 }
 
-// NewAReleaseRP - NewAReleaseRP
-func NewAReleaseRP() AReleaseRP {
-	return &areleaseRP{
+// NewReleaseResponse - NewReleaseResponse
+func NewReleaseResponse() ReleaseResponse {
+	return &releaseResponse{
 		ItemType:  0x06,
 		Reserved1: 0x00,
 		Reserved2: 0x00,
 	}
 }
 
-func (arrp *areleaseRP) Size() uint32 {
+func (arrp *releaseResponse) Size() uint32 {
 	arrp.Length = 4
 	return arrp.Length + 6
 }
 
-func (arrp *areleaseRP) Write(rw *bufio.ReadWriter) error {
+func (arrp *releaseResponse) Write(rw *bufio.ReadWriter) error {
 	bd := media.NewEmptyBufData()
 
 	bd.SetBigEndian(true)
@@ -48,14 +48,14 @@ func (arrp *areleaseRP) Write(rw *bufio.ReadWriter) error {
 	return bd.Send(rw)
 }
 
-func (arrp *areleaseRP) Read(ms media.MemoryStream) (err error) {
+func (arrp *releaseResponse) Read(ms media.MemoryStream) (err error) {
 	if arrp.ItemType, err = ms.GetByte(); err != nil {
 		return err
 	}
 	return arrp.ReadDynamic(ms)
 }
 
-func (arrp *areleaseRP) ReadDynamic(ms media.MemoryStream) (err error) {
+func (arrp *releaseResponse) ReadDynamic(ms media.MemoryStream) (err error) {
 	if arrp.Reserved1, err = ms.GetByte(); err != nil {
 		return err
 	}
