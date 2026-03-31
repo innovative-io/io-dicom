@@ -134,7 +134,7 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			name:     "Should change transfer syntax to JPEG2000Lossless",
 			fileName: "../samples/jpeg8.dcm",
 			args:     args{transfersyntax.JPEG2000Lossless},
-			wantErr:  false,
+			wantErr:  true,
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000",
@@ -146,7 +146,7 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			name:     "Should change transfer syntax to JPEG2000MCLossless",
 			fileName: "../samples/jpeg8.dcm",
 			args:     args{transfersyntax.JPEG2000MCLossless},
-			wantErr:  false,
+			wantErr:  true,
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000MC",
@@ -158,13 +158,13 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			name:     "Should change transfer syntax to HTJ2KLossless",
 			fileName: "../samples/jpeg8.dcm",
 			args:     args{transfersyntax.HTJ2KLossless},
-			wantErr:  false,
+			wantErr:  true,
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2KLosslessRPCL",
 			fileName: "../samples/jpeg8.dcm",
 			args:     args{transfersyntax.HTJ2KLosslessRPCL},
-			wantErr:  false,
+			wantErr:  true,
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2K",
@@ -645,6 +645,13 @@ func TestRepresentativePixelTransferSyntaxRoundTrips(t *testing.T) {
 			}
 			if frameItemCount == 0 {
 				t.Fatalf("expected non-empty encapsulated frame items after converting to %s", tt.ts.Name)
+			}
+
+			if tt.nativeFamily != "" {
+				if err := obj.ChangeTransferSyntax(transfersyntax.ExplicitVRLittleEndian); err == nil {
+					t.Fatalf("expected ChangeTransferSyntax back to ExplicitVRLittleEndian to fail without native %s decode backend", tt.nativeFamily)
+				}
+				return
 			}
 
 			if err := obj.ChangeTransferSyntax(transfersyntax.ExplicitVRLittleEndian); err != nil {

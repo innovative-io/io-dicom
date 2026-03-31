@@ -94,3 +94,103 @@ func TestUseBackendsUnknown(t *testing.T) {
 		t.Fatal("expected UseBackends to fail for unknown backend")
 	}
 }
+
+func TestResolveBackendForUID(t *testing.T) {
+	family, ok := ResolveBackendForUID("1.2.840.10008.1.2.4.90")
+	if !ok || family != "jpeg2000" {
+		t.Fatalf("unexpected resolver result: family=%q ok=%v", family, ok)
+	}
+
+	if family, ok := ResolveBackendForUID("1.2.3"); ok || family != "" {
+		t.Fatalf("expected unresolved UID, got family=%q ok=%v", family, ok)
+	}
+}
+
+func TestAvailableTransferSyntaxUIDs(t *testing.T) {
+	available := AvailableTransferSyntaxUIDs()
+	if len(available["jpeg"]) == 0 {
+		t.Fatal("expected jpeg transfer syntaxes")
+	}
+	if len(available["jpip"]) == 0 {
+		t.Fatal("expected jpip transfer syntaxes")
+	}
+}
+
+func TestNativeDefaultsMatchesRegisteredBackends(t *testing.T) {
+	defaults := NativeDefaults()
+	available := AvailableBackends()
+
+	assertDefault := func(family string, got string) {
+		t.Helper()
+		nativeCount := 0
+		lastNative := ""
+		for _, name := range available[family] {
+			if name == "passthrough" {
+				continue
+			}
+			nativeCount++
+			lastNative = name
+		}
+		expected := ""
+		if nativeCount == 1 {
+			expected = lastNative
+		}
+		if got != expected {
+			t.Fatalf("unexpected native default for %s: got %q want %q", family, got, expected)
+		}
+	}
+
+	assertDefault("jpeg", defaults.JPEG)
+	assertDefault("jpegls", defaults.JPEGLS)
+	assertDefault("jpeg2000", defaults.JPEG2000)
+	assertDefault("jpegxl", defaults.JPEGXL)
+	assertDefault("mpeg", defaults.MPEG)
+	assertDefault("jpip", defaults.JPIP)
+	assertDefault("smpte2110", defaults.SMPTE2110)
+}
+
+func TestUseNativeDefaultsAndValidateCurrentBackends(t *testing.T) {
+	jpegcodec.SetBackend(nil)
+	jpeglscodec.SetBackend(nil)
+	jpeg2000codec.SetBackend(nil)
+	jpegxlcodec.SetBackend(nil)
+	mpegcodec.SetBackend(nil)
+	jpipcodec.SetBackend(nil)
+	smptecodec.SetBackend(nil)
+
+	t.Cleanup(func() {
+		jpegcodec.SetBackend(nil)
+		jpeglscodec.SetBackend(nil)
+		jpeg2000codec.SetBackend(nil)
+		jpegxlcodec.SetBackend(nil)
+		mpegcodec.SetBackend(nil)
+		jpipcodec.SetBackend(nil)
+		smptecodec.SetBackend(nil)
+	})
+
+	if err := UseNativeDefaults(); err != nil {
+		t.Fatalf("UseNativeDefaults failed: %v", err)
+	}
+	if err := ValidateCurrentBackends(); err != nil {
+		t.Fatalf("ValidateCurrentBackends failed: %v", err)
+	}
+
+	defaults := NativeDefaults()
+	assertBackend := func(family string, got string, expected string) {
+		t.Helper()
+		if expected == "" {
+			expected = "passthrough"
+		}
+		if got != expected {
+			t.Fatalf("unexpected backend for %s: got %q want %q", family, got, expected)
+		}
+	}
+
+	assertBackend("jpeg", jpegcodec.BackendName(), defaults.JPEG)
+	assertBackend("jpegls", jpeglscodec.BackendName(), defaults.JPEGLS)
+	assertBackend("jpeg2000", jpeg2000codec.BackendName(), defaults.JPEG2000)
+	assertBackend("jpegxl", jpegxlcodec.BackendName(), defaults.JPEGXL)
+	assertBackend("mpeg", mpegcodec.BackendName(), defaults.MPEG)
+	assertBackend("jpip", jpipcodec.BackendName(), defaults.JPIP)
+	assertBackend("smpte2110", smptecodec.BackendName(), defaults.SMPTE2110)
+}

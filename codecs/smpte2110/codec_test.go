@@ -2,6 +2,8 @@ package smpte2110
 
 import "testing"
 
+var mockSupportedTransferSyntaxUIDs = []string{"1.2.840.10008.1.2.7.1", "1.2.840.10008.1.2.7.3"}
+
 type mockBackend struct {
 	name         string
 	decodedBytes int
@@ -10,6 +12,12 @@ type mockBackend struct {
 
 func (m *mockBackend) Name() string {
 	return m.name
+}
+
+func (m *mockBackend) SupportedTransferSyntaxUIDs() []string {
+	out := make([]string, len(mockSupportedTransferSyntaxUIDs))
+	copy(out, mockSupportedTransferSyntaxUIDs)
+	return out
 }
 
 func (m *mockBackend) Decode(encoded []byte, output []byte, _ string) error {
@@ -39,7 +47,7 @@ func TestCGOEnabled(t *testing.T) {
 	}
 }
 
-func TestSMPTE2110RoundTrip(t *testing.T) {
+func TestSMPTE2110PassthroughDecodeFails(t *testing.T) {
 	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
 
@@ -56,14 +64,8 @@ func TestSMPTE2110RoundTrip(t *testing.T) {
 	}
 
 	decoded := make([]byte, len(raw))
-	if err := SMPTE2110decode(out, uint32(outSize), decoded, "1.2.840.10008.1.2.7.1"); err != nil {
-		t.Fatalf("SMPTE2110decode failed: %v", err)
-	}
-
-	for i := range raw {
-		if decoded[i] != raw[i] {
-			t.Fatalf("decoded[%d]=%d want=%d", i, decoded[i], raw[i])
-		}
+	if err := SMPTE2110decode(out, uint32(outSize), decoded, "1.2.840.10008.1.2.7.1"); err == nil {
+		t.Fatal("expected SMPTE2110decode to fail without native backend")
 	}
 }
 

@@ -3,13 +3,14 @@
 package smpte2110
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
 )
@@ -32,8 +33,23 @@ func (st2110Backend) Name() string {
 	return "st2110"
 }
 
+func (st2110Backend) Ready() error {
+	return ensureST2110Tools()
+}
+
+func (st2110Backend) SupportedTransferSyntaxUIDs() []string {
+	return SupportedTransferSyntaxUIDs()
+}
+
 func (st2110Backend) Decode(encoded []byte, output []byte, _ string) error {
+	return st2110Backend{}.DecodeContext(context.Background(), encoded, output, "")
+}
+
+func (st2110Backend) DecodeContext(ctx context.Context, encoded []byte, output []byte, _ string) error {
 	if len(encoded) == 0 || len(output) == 0 {
+		return errors.New("invalid SMPTE ST 2110 payload size")
+	}
+	if len(encoded) > maxCodecPayloadBytes || len(output) > maxCodecPayloadBytes {
 		return errors.New("invalid SMPTE ST 2110 payload size")
 	}
 	if err := ensureST2110Tools(); err != nil {
@@ -52,7 +68,7 @@ func (st2110Backend) Decode(encoded []byte, output []byte, _ string) error {
 		return fmt.Errorf("write stream payload: %w", err)
 	}
 
-	width, height, err := probeDimensions(inPath)
+	width, height, err := probeDimensions(ctx, inPath)
 	if err != nil {
 		return err
 	}
@@ -70,7 +86,7 @@ func (st2110Backend) Decode(encoded []byte, output []byte, _ string) error {
 		"-pix_fmt", pixFmt,
 		outPath,
 	}
-	cmd := exec.Command(resolvedST2110FFmpeg, args...)
+	cmd := nativeenv.CommandContext(ctx, resolvedST2110FFmpeg, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg decode failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -86,8 +102,15 @@ func (st2110Backend) Decode(encoded []byte, output []byte, _ string) error {
 	return nil
 }
 
-func (st2110Backend) Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, _ string) ([]byte, error) {
+func (st2110Backend) Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, transferSyntaxUID string) ([]byte, error) {
+	return st2110Backend{}.EncodeContext(context.Background(), raw, width, height, samples, bitsa, transferSyntaxUID)
+}
+
+func (st2110Backend) EncodeContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, _ string) ([]byte, error) {
 	if len(raw) == 0 {
+		return nil, errors.New("invalid SMPTE ST 2110 payload size")
+	}
+	if len(raw) > maxCodecPayloadBytes {
 		return nil, errors.New("invalid SMPTE ST 2110 payload size")
 	}
 	if err := ensureST2110Tools(); err != nil {
@@ -130,7 +153,7 @@ func (st2110Backend) Encode(raw []byte, width uint16, height uint16, samples uin
 		"-f", "matroska",
 		outPath,
 	}
-	cmd := exec.Command(resolvedST2110FFmpeg, args...)
+	cmd := nativeenv.CommandContext(ctx, resolvedST2110FFmpeg, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("ffmpeg encode failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -148,23 +171,26 @@ func (st2110Backend) Encode(raw []byte, width uint16, height uint16, samples uin
 var (
 	resolvedST2110FFmpeg  string
 	resolvedST2110FFprobe string
+	st2110ToolsOnce       sync.Once
+	st2110ToolsError      error
 )
 
 func ensureST2110Tools() error {
-	if resolvedST2110FFmpeg != "" && resolvedST2110FFprobe != "" {
-		return nil
-	}
-	p, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		return errST2110ToolingUnavailable
-	}
-	q, err := exec.LookPath("ffprobe")
-	if err != nil {
-		return errST2110ToolingUnavailable
-	}
-	resolvedST2110FFmpeg = p
-	resolvedST2110FFprobe = q
-	return nil
+	st2110ToolsOnce.Do(func() {
+		p, err := nativeenv.LookPath("ffmpeg")
+		if err != nil {
+			st2110ToolsError = errST2110ToolingUnavailable
+			return
+		}
+		q, err := nativeenv.LookPath("ffprobe")
+		if err != nil {
+			st2110ToolsError = errST2110ToolingUnavailable
+			return
+		}
+		resolvedST2110FFmpeg = p
+		resolvedST2110FFprobe = q
+	})
+	return st2110ToolsError
 }
 
 func pixelFormatForLayout(samples int, bits int) (string, int, error) {
@@ -187,11 +213,12 @@ func pixelFormatForLayout(samples int, bits int) (string, int, error) {
 	return "", 0, errST2110UnsupportedFormat
 }
 
-func probeDimensions(path string) (int, int, error) {
+func probeDimensions(ctx context.Context, path string) (int, int, error) {
 	if err := ensureST2110Tools(); err != nil {
 		return 0, 0, err
 	}
-	cmd := exec.Command(
+	cmd := nativeenv.CommandContext(
+		ctx,
 		resolvedST2110FFprobe,
 		"-v", "error",
 		"-select_streams", "v:0",
@@ -203,8 +230,14 @@ func probeDimensions(path string) (int, int, error) {
 	if err != nil {
 		return 0, 0, fmt.Errorf("ffprobe failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	parts := strings.Split(strings.TrimSpace(string(out)), "x")
-	if len(parts) != 2 {
+	return parseProbeDimensionsOutput(string(out))
+}
+
+func parseProbeDimensionsOutput(output string) (int, int, error) {
+	parts := strings.FieldsFunc(strings.TrimSpace(output), func(r rune) bool {
+		return r < '0' || r > '9'
+	})
+	if len(parts) < 2 {
 		return 0, 0, errors.New("unexpected ffprobe dimension output")
 	}
 	width, err := strconv.Atoi(parts[0])

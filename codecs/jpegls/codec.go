@@ -1,6 +1,7 @@
 package jpegls
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"sync"
@@ -8,14 +9,32 @@ import (
 
 var CGOEnabled = nativeBackendEnabled
 
+const maxCodecPayloadBytes = 512 << 20
+
 var errInvalidJLSPayload = errors.New("invalid JPEG-LS payload size")
+var errBackendUnavailable = errors.New("jpeg-ls decode requires the charls native backend (build with -tags charls)")
+
+var supportedTransferSyntaxUIDs = []string{
+	"1.2.840.10008.1.2.4.80",
+	"1.2.840.10008.1.2.4.81",
+}
 
 // Backend defines a JPEG-LS implementation that can be plugged at runtime.
 // The default backend keeps pure-Go passthrough behavior.
 type Backend interface {
 	Name() string
+	SupportedTransferSyntaxUIDs() []string
 	Decode(encoded []byte, output []byte) error
 	Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, nearLossless bool) ([]byte, error)
+}
+
+type contextBackend interface {
+	DecodeContext(ctx context.Context, encoded []byte, output []byte) error
+	EncodeContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, nearLossless bool) ([]byte, error)
+}
+
+type readinessBackend interface {
+	Ready() error
 }
 
 type passthroughBackend struct{}
@@ -24,12 +43,14 @@ func (passthroughBackend) Name() string {
 	return "passthrough"
 }
 
+func (passthroughBackend) SupportedTransferSyntaxUIDs() []string {
+	return SupportedTransferSyntaxUIDs()
+}
+
 func (passthroughBackend) Decode(encoded []byte, output []byte) error {
-	if len(encoded) > len(output) {
-		return errInvalidJLSPayload
-	}
-	copy(output[:len(encoded)], encoded)
-	return nil
+	_ = encoded
+	_ = output
+	return errBackendUnavailable
 }
 
 func (passthroughBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uint16, _ bool) ([]byte, error) {
@@ -49,6 +70,41 @@ var (
 
 func init() {
 	registerNativeBackends()
+	selectDefaultBackend()
+}
+
+func selectDefaultBackend() {
+	backendMu.Lock()
+	defer backendMu.Unlock()
+
+	preferred := preferredBackendNameLocked()
+	if preferred == "passthrough" {
+		return
+	}
+	factory := backendFactories[preferred]
+	if factory == nil {
+		return
+	}
+	backend := factory()
+	if backend == nil {
+		return
+	}
+	currentBackend = backend
+	currentName = preferred
+}
+
+func preferredBackendNameLocked() string {
+	nativeNames := make([]string, 0, len(backendFactories))
+	for name := range backendFactories {
+		if name == "passthrough" {
+			continue
+		}
+		nativeNames = append(nativeNames, name)
+	}
+	if len(nativeNames) != 1 {
+		return "passthrough"
+	}
+	return nativeNames[0]
 }
 
 // SetBackend overrides the active JPEG-LS backend. Passing nil resets to default passthrough behavior.
@@ -118,25 +174,86 @@ func AvailableBackends() []string {
 	return names
 }
 
+func ValidateBackend(name string) error {
+	backendMu.RLock()
+	if name == currentName {
+		backend := currentBackend
+		backendMu.RUnlock()
+		if ready, ok := backend.(readinessBackend); ok {
+			return ready.Ready()
+		}
+		return nil
+	}
+	factory, exists := backendFactories[name]
+	backendMu.RUnlock()
+	if !exists {
+		return errors.New("backend not registered")
+	}
+	backend := factory()
+	if backend == nil {
+		return errors.New("backend factory returned nil")
+	}
+	if ready, ok := backend.(readinessBackend); ok {
+		return ready.Ready()
+	}
+	return nil
+}
+
 func activeBackend() Backend {
 	backendMu.RLock()
 	defer backendMu.RUnlock()
 	return currentBackend
 }
 
+func SupportedTransferSyntaxUIDs() []string {
+	out := make([]string, len(supportedTransferSyntaxUIDs))
+	copy(out, supportedTransferSyntaxUIDs)
+	return out
+}
+
+func decodeWithContext(ctx context.Context, encoded []byte, output []byte) error {
+	backend := activeBackend()
+	if withContext, ok := backend.(contextBackend); ok {
+		return withContext.DecodeContext(ctx, encoded, output)
+	}
+	return backend.Decode(encoded, output)
+}
+
+func encodeWithContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, nearLossless bool) ([]byte, error) {
+	backend := activeBackend()
+	if withContext, ok := backend.(contextBackend); ok {
+		return withContext.EncodeContext(ctx, raw, width, height, samples, bitsa, nearLossless)
+	}
+	return backend.Encode(raw, width, height, samples, bitsa, nearLossless)
+}
+
 func JLSdecode(jlsData []byte, jlsSize uint32, outputData []byte) error {
+	return JLSdecodeContext(context.Background(), jlsData, jlsSize, outputData)
+}
+
+func JLSdecodeContext(ctx context.Context, jlsData []byte, jlsSize uint32, outputData []byte) error {
 	if jlsSize > uint32(len(jlsData)) {
 		return errInvalidJLSPayload
 	}
-	return activeBackend().Decode(jlsData[:jlsSize], outputData)
+	if jlsSize > maxCodecPayloadBytes || len(outputData) > maxCodecPayloadBytes {
+		return errInvalidJLSPayload
+	}
+	return decodeWithContext(ctx, jlsData[:jlsSize], outputData)
 }
 
 func JLSencode(rawData []byte, width uint16, height uint16, samples uint16, bitsa uint16, outData *[]byte, outSize *int, nearLossless bool) error {
+	return JLSencodeContext(context.Background(), rawData, width, height, samples, bitsa, outData, outSize, nearLossless)
+}
+
+func JLSencodeContext(ctx context.Context, rawData []byte, width uint16, height uint16, samples uint16, bitsa uint16, outData *[]byte, outSize *int, nearLossless bool) error {
 	if outData == nil || outSize == nil {
 		return errors.New("nil output pointers")
 	}
+	if len(rawData) > maxCodecPayloadBytes {
+		return errInvalidJLSPayload
+	}
 
-	encoded, err := activeBackend().Encode(rawData, width, height, samples, bitsa, nearLossless)
+	encoded, err := encodeWithContext(ctx, rawData, width, height, samples, bitsa, nearLossless)
 	if err != nil {
 		return err
 	}

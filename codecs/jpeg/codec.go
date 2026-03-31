@@ -2,6 +2,7 @@ package jpeg
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"image"
 	"image/color"
@@ -12,14 +13,37 @@ import (
 
 var CGOEnabled = nativeBackendEnabled
 
+const maxCodecPayloadBytes = 512 << 20
+
+var errBackendUnavailable = errors.New("jpeg 12/16-bit decode requires the libjpeg native backend (build with -tags libjpeg)")
+
+var supportedTransferSyntaxUIDs = []string{
+	"1.2.840.10008.1.2.4.50",
+	"1.2.840.10008.1.2.4.51",
+	"1.2.840.10008.1.2.4.57",
+	"1.2.840.10008.1.2.4.70",
+}
+
 // Backend defines pluggable implementations for JPEG 12/16-bit profiles.
 // Baseline 8-bit continues to use the built-in pure-Go implementation.
 type Backend interface {
 	Name() string
+	SupportedTransferSyntaxUIDs() []string
 	Decode12(encoded []byte, output []byte) error
 	Encode12(raw []byte, width uint16, height uint16, samples uint16, mode int) ([]byte, error)
 	Decode16(encoded []byte, output []byte) error
 	Encode16(raw []byte, width uint16, height uint16, samples uint16, mode int) ([]byte, error)
+}
+
+type contextBackend interface {
+	Decode12Context(ctx context.Context, encoded []byte, output []byte) error
+	Encode12Context(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, mode int) ([]byte, error)
+	Decode16Context(ctx context.Context, encoded []byte, output []byte) error
+	Encode16Context(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, mode int) ([]byte, error)
+}
+
+type readinessBackend interface {
+	Ready() error
 }
 
 type passthroughBackend struct{}
@@ -28,12 +52,14 @@ func (passthroughBackend) Name() string {
 	return "passthrough"
 }
 
+func (passthroughBackend) SupportedTransferSyntaxUIDs() []string {
+	return SupportedTransferSyntaxUIDs()
+}
+
 func (passthroughBackend) Decode12(encoded []byte, output []byte) error {
-	if len(encoded) > len(output) {
-		return errors.New("ERROR, Decode12, JPEG failed")
-	}
-	copy(output[:len(encoded)], encoded)
-	return nil
+	_ = encoded
+	_ = output
+	return errBackendUnavailable
 }
 
 func (passthroughBackend) Encode12(raw []byte, _ uint16, _ uint16, _ uint16, _ int) ([]byte, error) {
@@ -43,11 +69,9 @@ func (passthroughBackend) Encode12(raw []byte, _ uint16, _ uint16, _ uint16, _ i
 }
 
 func (passthroughBackend) Decode16(encoded []byte, output []byte) error {
-	if len(encoded) > len(output) {
-		return errors.New("ERROR, Decode16, JPEG failed")
-	}
-	copy(output[:len(encoded)], encoded)
-	return nil
+	_ = encoded
+	_ = output
+	return errBackendUnavailable
 }
 
 func (passthroughBackend) Encode16(raw []byte, _ uint16, _ uint16, _ uint16, _ int) ([]byte, error) {
@@ -67,6 +91,41 @@ var (
 
 func init() {
 	registerNativeBackends()
+	selectDefaultBackend()
+}
+
+func selectDefaultBackend() {
+	backendMu.Lock()
+	defer backendMu.Unlock()
+
+	preferred := preferredBackendNameLocked()
+	if preferred == "passthrough" {
+		return
+	}
+	factory := backendFactories[preferred]
+	if factory == nil {
+		return
+	}
+	backend := factory()
+	if backend == nil {
+		return
+	}
+	currentBackend = backend
+	currentName = preferred
+}
+
+func preferredBackendNameLocked() string {
+	nativeNames := make([]string, 0, len(backendFactories))
+	for name := range backendFactories {
+		if name == "passthrough" {
+			continue
+		}
+		nativeNames = append(nativeNames, name)
+	}
+	if len(nativeNames) != 1 {
+		return "passthrough"
+	}
+	return nativeNames[0]
 }
 
 // SetBackend overrides the active JPEG backend for 12/16-bit paths.
@@ -137,19 +196,90 @@ func AvailableBackends() []string {
 	return names
 }
 
+func ValidateBackend(name string) error {
+	backendMu.RLock()
+	if name == currentName {
+		backend := currentBackend
+		backendMu.RUnlock()
+		if ready, ok := backend.(readinessBackend); ok {
+			return ready.Ready()
+		}
+		return nil
+	}
+	factory, exists := backendFactories[name]
+	backendMu.RUnlock()
+	if !exists {
+		return errors.New("backend not registered")
+	}
+	backend := factory()
+	if backend == nil {
+		return errors.New("backend factory returned nil")
+	}
+	if ready, ok := backend.(readinessBackend); ok {
+		return ready.Ready()
+	}
+	return nil
+}
+
 func activeBackend() Backend {
 	backendMu.RLock()
 	defer backendMu.RUnlock()
 	return currentBackend
 }
 
-// DIJG8decode decodes baseline 8-bit JPEG into raw pixel bytes.
-func DIJG8decode(jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
+func SupportedTransferSyntaxUIDs() []string {
+	out := make([]string, len(supportedTransferSyntaxUIDs))
+	copy(out, supportedTransferSyntaxUIDs)
+	return out
+}
+
+func decode12WithContext(ctx context.Context, encoded []byte, output []byte) error {
+	backend := activeBackend()
+	if withContext, ok := backend.(contextBackend); ok {
+		return withContext.Decode12Context(ctx, encoded, output)
+	}
+	return backend.Decode12(encoded, output)
+}
+
+func encode12WithContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, mode int) ([]byte, error) {
+	backend := activeBackend()
+	if withContext, ok := backend.(contextBackend); ok {
+		return withContext.Encode12Context(ctx, raw, width, height, samples, mode)
+	}
+	return backend.Encode12(raw, width, height, samples, mode)
+}
+
+func decode16WithContext(ctx context.Context, encoded []byte, output []byte) error {
+	backend := activeBackend()
+	if withContext, ok := backend.(contextBackend); ok {
+		return withContext.Decode16Context(ctx, encoded, output)
+	}
+	return backend.Decode16(encoded, output)
+}
+
+func encode16WithContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, mode int) ([]byte, error) {
+	backend := activeBackend()
+	if withContext, ok := backend.(contextBackend); ok {
+		return withContext.Encode16Context(ctx, raw, width, height, samples, mode)
+	}
+	return backend.Encode16(raw, width, height, samples, mode)
+}
+
+func DIJG8decodeContext(_ context.Context, jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
+	if jpegSize > uint32(len(jpegData)) || outputSize > uint32(len(outputData)) {
+		return errors.New("ERROR, Decode8, JPEG failed")
+	}
 	if len(jpegData) == 0 || len(outputData) == 0 {
 		return errors.New("ERROR, Decode8, JPEG failed")
 	}
+	if jpegSize > maxCodecPayloadBytes || outputSize > maxCodecPayloadBytes {
+		return errors.New("ERROR, Decode8, JPEG failed")
+	}
 
-	img, err := jpeg.Decode(bytes.NewReader(jpegData[:jpegSize]))
+	jpegData = jpegData[:jpegSize]
+	outputData = outputData[:outputSize]
+
+	img, err := jpeg.Decode(bytes.NewReader(jpegData))
 	if err != nil {
 		return err
 	}
@@ -157,7 +287,7 @@ func DIJG8decode(jpegData []byte, jpegSize uint32, outputData []byte, outputSize
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
 
-	if w*h == int(outputSize) {
+	if w*h == len(outputData) {
 		for y := 0; y < h; y++ {
 			for x := 0; x < w; x++ {
 				g := color.GrayModel.Convert(img.At(bounds.Min.X+x, bounds.Min.Y+y)).(color.Gray)
@@ -167,7 +297,7 @@ func DIJG8decode(jpegData []byte, jpegSize uint32, outputData []byte, outputSize
 		return nil
 	}
 
-	if w*h*3 > int(outputSize) {
+	if w*h*3 > len(outputData) {
 		return errors.New("ERROR, Decode8, JPEG failed")
 	}
 
@@ -182,6 +312,11 @@ func DIJG8decode(jpegData []byte, jpegSize uint32, outputData []byte, outputSize
 		}
 	}
 	return nil
+}
+
+// DIJG8decode decodes baseline 8-bit JPEG into raw pixel bytes.
+func DIJG8decode(jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
+	return DIJG8decodeContext(context.Background(), jpegData, jpegSize, outputData, outputSize)
 }
 
 // EIJG8encode encodes raw pixel bytes to baseline JPEG.
@@ -239,20 +374,34 @@ func EIJG8encode(rawData []byte, width uint16, height uint16, samples uint16, ou
 }
 
 func DIJG12decode(jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
+	return DIJG12decodeContext(context.Background(), jpegData, jpegSize, outputData, outputSize)
+}
+
+func DIJG12decodeContext(ctx context.Context, jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
 	if jpegSize > uint32(len(jpegData)) {
 		return errors.New("ERROR, Decode12, JPEG failed")
 	}
 	if outputSize > uint32(len(outputData)) {
 		return errors.New("ERROR, Decode12, JPEG failed")
 	}
-	return activeBackend().Decode12(jpegData[:jpegSize], outputData[:outputSize])
+	if jpegSize > maxCodecPayloadBytes || outputSize > maxCodecPayloadBytes {
+		return errors.New("ERROR, Decode12, JPEG failed")
+	}
+	return decode12WithContext(ctx, jpegData[:jpegSize], outputData[:outputSize])
 }
 
 func EIJG12encode(rawData []uint8, width uint16, height uint16, samples uint16, outData *[]byte, outSize *int, mode int) error {
+	return EIJG12encodeContext(context.Background(), rawData, width, height, samples, outData, outSize, mode)
+}
+
+func EIJG12encodeContext(ctx context.Context, rawData []uint8, width uint16, height uint16, samples uint16, outData *[]byte, outSize *int, mode int) error {
 	if outData == nil || outSize == nil {
 		return errors.New("ERROR, Encode12, JPEG failed")
 	}
-	encoded, err := activeBackend().Encode12(rawData, width, height, samples, mode)
+	if len(rawData) > maxCodecPayloadBytes {
+		return errors.New("ERROR, Encode12, JPEG failed")
+	}
+	encoded, err := encode12WithContext(ctx, rawData, width, height, samples, mode)
 	if err != nil {
 		return err
 	}
@@ -262,20 +411,34 @@ func EIJG12encode(rawData []uint8, width uint16, height uint16, samples uint16, 
 }
 
 func DIJG16decode(jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
+	return DIJG16decodeContext(context.Background(), jpegData, jpegSize, outputData, outputSize)
+}
+
+func DIJG16decodeContext(ctx context.Context, jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
 	if jpegSize > uint32(len(jpegData)) {
 		return errors.New("ERROR, Decode16, JPEG failed")
 	}
 	if outputSize > uint32(len(outputData)) {
 		return errors.New("ERROR, Decode16, JPEG failed")
 	}
-	return activeBackend().Decode16(jpegData[:jpegSize], outputData[:outputSize])
+	if jpegSize > maxCodecPayloadBytes || outputSize > maxCodecPayloadBytes {
+		return errors.New("ERROR, Decode16, JPEG failed")
+	}
+	return decode16WithContext(ctx, jpegData[:jpegSize], outputData[:outputSize])
 }
 
 func EIJG16encode(rawData []uint8, width uint16, height uint16, samples uint16, outData *[]byte, outSize *int, mode int) error {
+	return EIJG16encodeContext(context.Background(), rawData, width, height, samples, outData, outSize, mode)
+}
+
+func EIJG16encodeContext(ctx context.Context, rawData []uint8, width uint16, height uint16, samples uint16, outData *[]byte, outSize *int, mode int) error {
 	if outData == nil || outSize == nil {
 		return errors.New("ERROR, Encode16, JPEG failed")
 	}
-	encoded, err := activeBackend().Encode16(rawData, width, height, samples, mode)
+	if len(rawData) > maxCodecPayloadBytes {
+		return errors.New("ERROR, Encode16, JPEG failed")
+	}
+	encoded, err := encode16WithContext(ctx, rawData, width, height, samples, mode)
 	if err != nil {
 		return err
 	}

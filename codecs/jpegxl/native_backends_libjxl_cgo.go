@@ -4,12 +4,13 @@ package jpegxl
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"unicode"
 
 	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
@@ -33,8 +34,23 @@ func (libjxlBackend) Name() string {
 	return "libjxl"
 }
 
+func (libjxlBackend) Ready() error {
+	return ensureLibJXLTools()
+}
+
+func (libjxlBackend) SupportedTransferSyntaxUIDs() []string {
+	return SupportedTransferSyntaxUIDs()
+}
+
 func (libjxlBackend) Decode(encoded []byte, output []byte) error {
+	return libjxlBackend{}.DecodeContext(context.Background(), encoded, output)
+}
+
+func (libjxlBackend) DecodeContext(ctx context.Context, encoded []byte, output []byte) error {
 	if len(encoded) == 0 || len(output) == 0 {
+		return errInvalidJXLPayload
+	}
+	if len(encoded) > maxCodecPayloadBytes || len(output) > maxCodecPayloadBytes {
 		return errInvalidJXLPayload
 	}
 	if err := ensureLibJXLTools(); err != nil {
@@ -53,7 +69,7 @@ func (libjxlBackend) Decode(encoded []byte, output []byte) error {
 		return fmt.Errorf("write jxl payload: %w", err)
 	}
 
-	cmd := exec.Command(resolvedDJXL, inPath, outPath)
+	cmd := nativeenv.CommandContext(ctx, resolvedDJXL, inPath, outPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("djxl failed: %w: %s", err, stringsTrim(string(out)))
 	}
@@ -75,7 +91,14 @@ func (libjxlBackend) Decode(encoded []byte, output []byte) error {
 }
 
 func (libjxlBackend) Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, lossless bool) ([]byte, error) {
+	return libjxlBackend{}.EncodeContext(context.Background(), raw, width, height, samples, bitsa, lossless)
+}
+
+func (libjxlBackend) EncodeContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, lossless bool) ([]byte, error) {
 	if len(raw) == 0 {
+		return nil, errInvalidJXLPayload
+	}
+	if len(raw) > maxCodecPayloadBytes {
 		return nil, errInvalidJXLPayload
 	}
 	if err := ensureLibJXLTools(); err != nil {
@@ -103,7 +126,7 @@ func (libjxlBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 	if lossless {
 		args = append(args, "--distance=0")
 	}
-	cmd := exec.Command(resolvedCJXL, args...)
+	cmd := nativeenv.CommandContext(ctx, resolvedCJXL, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("cjxl failed: %w: %s", err, stringsTrim(string(out)))
 	}
@@ -119,25 +142,28 @@ func (libjxlBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 }
 
 var (
-	resolvedCJXL string
-	resolvedDJXL string
+	resolvedCJXL     string
+	resolvedDJXL     string
+	libjxlToolsOnce  sync.Once
+	libjxlToolsError error
 )
 
 func ensureLibJXLTools() error {
-	if resolvedCJXL != "" && resolvedDJXL != "" {
-		return nil
-	}
-	p, err := exec.LookPath("cjxl")
-	if err != nil {
-		return errLibJXLToolingUnavailable
-	}
-	q, err := exec.LookPath("djxl")
-	if err != nil {
-		return errLibJXLToolingUnavailable
-	}
-	resolvedCJXL = p
-	resolvedDJXL = q
-	return nil
+	libjxlToolsOnce.Do(func() {
+		p, err := nativeenv.LookPath("cjxl")
+		if err != nil {
+			libjxlToolsError = errLibJXLToolingUnavailable
+			return
+		}
+		q, err := nativeenv.LookPath("djxl")
+		if err != nil {
+			libjxlToolsError = errLibJXLToolingUnavailable
+			return
+		}
+		resolvedCJXL = p
+		resolvedDJXL = q
+	})
+	return libjxlToolsError
 }
 
 func encodePNM(raw []byte, width int, height int, samples int, bits int) ([]byte, error) {
@@ -234,11 +260,14 @@ func parsePNM(payload []byte) (width int, height int, samples int, raw []byte, e
 	if err != nil {
 		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
 	}
+	if width <= 0 || height <= 0 {
+		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
+	}
 	maxVal, err := strconv.Atoi(mToken)
 	if err != nil {
 		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
 	}
-	if maxVal != 255 && maxVal != 65535 {
+	if maxVal != 255 && maxVal != 4095 && maxVal != 65535 {
 		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
 	}
 

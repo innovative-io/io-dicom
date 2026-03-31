@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -63,14 +64,15 @@ type DICOMObject interface {
 	GetTransferSyntax() *transfersyntax.TransferSyntax
 	SetTransferSyntax(ts *transfersyntax.TransferSyntax)
 	ChangeTransferSyntax(ts *transfersyntax.TransferSyntax) error
+	ChangeTransferSyntaxContext(ctx context.Context, ts *transfersyntax.TransferSyntax) error
 	TagCount() int
 	CreateSR(study DICOMStudy, SeriesInstanceUID string, SOPInstanceUID string)
 	CreatePDF(study DICOMStudy, SeriesInstanceUID string, SOPInstanceUID string, fileName string)
 	WriteToBytes() []byte
 	WriteToFile(fileName string) error
 	dumpSeq(indent int)
-	compress(i *int, img []byte, RGB bool, cols uint16, rows uint16, bitss uint16, bitsa uint16, pixelrep uint16, planar uint16, frames uint32, outTS string) error
-	uncompress(i int, img []byte, size uint32, frames uint32, bitsa uint16, PhotoInt string) error
+	compress(ctx context.Context, i *int, img []byte, RGB bool, cols uint16, rows uint16, bitss uint16, bitsa uint16, pixelrep uint16, planar uint16, frames uint32, outTS string) error
+	uncompress(ctx context.Context, i int, img []byte, size uint32, frames uint32, bitsa uint16, PhotoInt string) error
 }
 
 type dicomObject struct {
@@ -638,6 +640,14 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 }
 
 func (obj *dicomObject) ChangeTransferSyntax(outTS *transfersyntax.TransferSyntax) error {
+	return obj.ChangeTransferSyntaxContext(context.Background(), outTS)
+}
+
+func (obj *dicomObject) ChangeTransferSyntaxContext(ctx context.Context, outTS *transfersyntax.TransferSyntax) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	flag := false
 
 	var i int
@@ -713,7 +723,7 @@ func (obj *dicomObject) ChangeTransferSyntax(outTS *transfersyntax.TransferSynta
 				size = uint32(sizePx)
 				img := make([]byte, size)
 				if tag.Length == 0xFFFFFFFF {
-					if err := obj.uncompress(i, img, size, frames, bitsa, PhotoInt); err != nil {
+					if err := obj.uncompress(ctx, i, img, size, frames, bitsa, PhotoInt); err != nil {
 						return fmt.Errorf("DICOMObject::ConvertTransferSyntax, decompress failed: %w", err)
 					}
 				} else { // Uncompressed
@@ -733,7 +743,7 @@ func (obj *dicomObject) ChangeTransferSyntax(outTS *transfersyntax.TransferSynta
 						copy(img, tag.Data)
 					}
 				}
-				if err := obj.compress(&i, img, RGB, cols, rows, bitss, bitsa, pixelrep, planar, frames, outTS.UID); err != nil {
+				if err := obj.compress(ctx, &i, img, RGB, cols, rows, bitss, bitsa, pixelrep, planar, frames, outTS.UID); err != nil {
 					return err
 				} else {
 					flag = true
@@ -885,7 +895,7 @@ func (obj *dicomObject) CreatePDF(study DICOMStudy, SeriesInstanceUID string, SO
 	obj.WriteString(tags.MIMETypeOfEncapsulatedDocument, "application/pdf")
 }
 
-func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows uint16, bitss uint16, bitsa uint16, pixelrep uint16, planar uint16, frames uint32, outTS string) error {
+func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bool, cols uint16, rows uint16, bitss uint16, bitsa uint16, pixelrep uint16, planar uint16, frames uint32, outTS string) error {
 	var offset, size, jpeg_size, j uint32
 	var JPEGData []byte
 	var JPEGBytes, index int
@@ -1083,7 +1093,7 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 					}
 				}
 			} else {
-				if err := jpeg.EIJG16encode(img[offset/2:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
+				if err := jpeg.EIJG16encodeContext(ctx, img[offset/2:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
 					return err
 				}
 			}
@@ -1141,7 +1151,7 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 						return err
 					}
 				} else {
-					if err := jpeg.EIJG12encode(img[offset:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
+					if err := jpeg.EIJG12encodeContext(ctx, img[offset:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
 						return err
 					}
 				}
@@ -1190,7 +1200,7 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 		for j = 0; j < frames; j++ {
 			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if err := jpeg.EIJG12encode(img[offset/2:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
+			if err := jpeg.EIJG12encodeContext(ctx, img[offset/2:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
 				return err
 			}
 			newtag = &DICOMTag{
@@ -1240,11 +1250,11 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
-				if err := jpegls.JLSencode(img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGLSNearLossless.UID); err != nil {
+				if err := jpegls.JLSencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGLSNearLossless.UID); err != nil {
 					return err
 				}
 			} else {
-				if err := jpegls.JLSencode(img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGLSNearLossless.UID); err != nil {
+				if err := jpegls.JLSencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGLSNearLossless.UID); err != nil {
 					return err
 				}
 			}
@@ -1298,11 +1308,11 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
-				if err := jpeg2000.J2Kencode(img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, 0); err != nil {
+				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, 0); err != nil {
 					return err
 				}
 			} else {
-				if err := jpeg2000.J2Kencode(img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, 0); err != nil {
+				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, 0); err != nil {
 					return err
 				}
 			}
@@ -1355,11 +1365,11 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
-				if err := jpeg2000.J2Kencode(img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, 10); err != nil {
+				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, 10); err != nil {
 					return err
 				}
 			} else {
-				if err := jpeg2000.J2Kencode(img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, 10); err != nil {
+				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, 10); err != nil {
 					return err
 				}
 			}
@@ -1412,11 +1422,11 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
-				if err := jpegxl.JXLencode(img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGXLLossless.UID); err != nil {
+				if err := jpegxl.JXLencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGXLLossless.UID); err != nil {
 					return err
 				}
 			} else {
-				if err := jpegxl.JXLencode(img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGXLLossless.UID); err != nil {
+				if err := jpegxl.JXLencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGXLLossless.UID); err != nil {
 					return err
 				}
 			}
@@ -1466,11 +1476,11 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
-				if err := jpip.JPIPencode(img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+				if err := jpip.JPIPencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
 					return err
 				}
 			} else {
-				if err := jpip.JPIPencode(img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+				if err := jpip.JPIPencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
 					return err
 				}
 			}
@@ -1548,11 +1558,11 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
-				if err := mpeg.MPEGencode(img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+				if err := mpeg.MPEGencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
 					return err
 				}
 			} else {
-				if err := mpeg.MPEGencode(img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+				if err := mpeg.MPEGencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
 					return err
 				}
 			}
@@ -1604,11 +1614,11 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
-				if err := smpte2110.SMPTE2110encode(img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+				if err := smpte2110.SMPTE2110encodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
 					return err
 				}
 			} else {
-				if err := smpte2110.SMPTE2110encode(img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+				if err := smpte2110.SMPTE2110encodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
 					return err
 				}
 			}
@@ -1651,7 +1661,7 @@ func (obj *dicomObject) compress(i *int, img []byte, RGB bool, cols uint16, rows
 	return nil
 }
 
-func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32, bitsa uint16, PhotoInt string) error {
+func (obj *dicomObject) uncompress(ctx context.Context, i int, img []byte, size uint32, frames uint32, bitsa uint16, PhotoInt string) error {
 	var j, offset, single uint32
 	single = size / frames
 
@@ -1706,11 +1716,11 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG lossless frame %d", j)
 			}
 			if bitsa == 8 {
-				if err := jpeg.DIJG8decode(tag.Data, tag.Length, img[offset:], single); err != nil {
+				if err := jpeg.DIJG8decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
 					return err
 				}
 			} else {
-				if err := jpeg.DIJG16decode(tag.Data, tag.Length, img[offset:], single); err != nil {
+				if err := jpeg.DIJG16decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
 					return err
 				}
 			}
@@ -1725,11 +1735,11 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG baseline frame %d", j)
 			}
 			if bitsa == 8 {
-				if err := jpeg.DIJG8decode(tag.Data, tag.Length, img[offset:], single); err != nil {
+				if err := jpeg.DIJG8decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
 					return err
 				}
 			} else {
-				if err := jpeg.DIJG12decode(tag.Data, tag.Length, img[offset:], single); err != nil {
+				if err := jpeg.DIJG12decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
 					return err
 				}
 			}
@@ -1743,7 +1753,7 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 			if tag == nil {
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG extended frame %d", j)
 			}
-			if err := jpeg.DIJG12decode(tag.Data, tag.Length, img[offset:], single); err != nil {
+			if err := jpeg.DIJG12decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
 				return err
 			}
 			obj.DelTag(i + 1)
@@ -1758,7 +1768,7 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 			if tag == nil {
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG-LS frame %d", j)
 			}
-			if err := jpegls.JLSdecode(tag.Data, tag.Length, img[offset:]); err != nil {
+			if err := jpegls.JLSdecodeContext(ctx, tag.Data, tag.Length, img[offset:]); err != nil {
 				return err
 			}
 			obj.DelTag(i + 1)
@@ -1777,7 +1787,7 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 			if tag == nil {
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG 2000 lossless frame %d", j)
 			}
-			if err := jpeg2000.J2Kdecode(tag.Data, tag.Length, img[offset:]); err != nil {
+			if err := jpeg2000.J2KdecodeContext(ctx, tag.Data, tag.Length, img[offset:]); err != nil {
 				return err
 			}
 			obj.DelTag(i + 1)
@@ -1794,7 +1804,7 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 			if tag == nil {
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG 2000 frame %d", j)
 			}
-			if err := jpeg2000.J2Kdecode(tag.Data, tag.Length, img[offset:]); err != nil {
+			if err := jpeg2000.J2KdecodeContext(ctx, tag.Data, tag.Length, img[offset:]); err != nil {
 				return err
 			}
 			obj.DelTag(i + 1)
@@ -1811,7 +1821,7 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 			if tag == nil {
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG XL frame %d", j)
 			}
-			if err := jpegxl.JXLdecode(tag.Data, tag.Length, img[offset:]); err != nil {
+			if err := jpegxl.JXLdecodeContext(ctx, tag.Data, tag.Length, img[offset:]); err != nil {
 				return err
 			}
 			obj.DelTag(i + 1)
@@ -1826,7 +1836,7 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 			if tag == nil {
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPIP frame %d", j)
 			}
-			if err := jpip.JPIPdecode(tag.Data, tag.Length, img[offset:], obj.TransferSyntax.UID); err != nil {
+			if err := jpip.JPIPdecodeContext(ctx, tag.Data, tag.Length, img[offset:], obj.TransferSyntax.UID); err != nil {
 				return err
 			}
 			obj.DelTag(i + 1)
@@ -1869,7 +1879,7 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 			if tag == nil {
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing MPEG frame %d", j)
 			}
-			if err := mpeg.MPEGdecode(tag.Data, tag.Length, img[offset:], obj.TransferSyntax.UID); err != nil {
+			if err := mpeg.MPEGdecodeContext(ctx, tag.Data, tag.Length, img[offset:], obj.TransferSyntax.UID); err != nil {
 				return err
 			}
 			obj.DelTag(i + 1)
@@ -1886,7 +1896,7 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 			if tag == nil {
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing SMPTE frame %d", j)
 			}
-			if err := smpte2110.SMPTE2110decode(tag.Data, tag.Length, img[offset:], obj.TransferSyntax.UID); err != nil {
+			if err := smpte2110.SMPTE2110decodeContext(ctx, tag.Data, tag.Length, img[offset:], obj.TransferSyntax.UID); err != nil {
 				return err
 			}
 			obj.DelTag(i + 1)

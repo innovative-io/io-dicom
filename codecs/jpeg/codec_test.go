@@ -2,6 +2,8 @@ package jpeg
 
 import "testing"
 
+var mockSupportedTransferSyntaxUIDs = []string{"1.2.840.10008.1.2.4.51", "1.2.840.10008.1.2.4.70"}
+
 type mockBackend struct {
 	name           string
 	decode12Bytes  int
@@ -12,6 +14,12 @@ type mockBackend struct {
 
 func (m *mockBackend) Name() string {
 	return m.name
+}
+
+func (m *mockBackend) SupportedTransferSyntaxUIDs() []string {
+	out := make([]string, len(mockSupportedTransferSyntaxUIDs))
+	copy(out, mockSupportedTransferSyntaxUIDs)
+	return out
 }
 
 func (m *mockBackend) Decode12(encoded []byte, output []byte) error {
@@ -87,7 +95,7 @@ func TestBaseline8RoundTripGray(t *testing.T) {
 	}
 }
 
-func TestJPEG12RoundTripPassthrough(t *testing.T) {
+func TestJPEG12PassthroughDecodeFails(t *testing.T) {
 	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
 
@@ -98,12 +106,12 @@ func TestJPEG12RoundTripPassthrough(t *testing.T) {
 		t.Fatalf("EIJG12encode failed: %v", err)
 	}
 	decoded := make([]byte, len(raw))
-	if err := DIJG12decode(encoded, uint32(encodedSize), decoded, uint32(len(decoded))); err != nil {
-		t.Fatalf("DIJG12decode failed: %v", err)
+	if err := DIJG12decode(encoded, uint32(encodedSize), decoded, uint32(len(decoded))); err == nil {
+		t.Fatal("expected DIJG12decode to fail without native backend")
 	}
 }
 
-func TestJPEG16RoundTripPassthrough(t *testing.T) {
+func TestJPEG16PassthroughDecodeFails(t *testing.T) {
 	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
 
@@ -114,8 +122,8 @@ func TestJPEG16RoundTripPassthrough(t *testing.T) {
 		t.Fatalf("EIJG16encode failed: %v", err)
 	}
 	decoded := make([]byte, len(raw))
-	if err := DIJG16decode(encoded, uint32(encodedSize), decoded, uint32(len(decoded))); err != nil {
-		t.Fatalf("DIJG16decode failed: %v", err)
+	if err := DIJG16decode(encoded, uint32(encodedSize), decoded, uint32(len(decoded))); err == nil {
+		t.Fatal("expected DIJG16decode to fail without native backend")
 	}
 }
 
@@ -128,6 +136,9 @@ func TestJPEG12And16Validation(t *testing.T) {
 	}
 	if err := DIJG16decode([]byte{1, 2, 3}, 3, make([]byte, 2), 3); err == nil {
 		t.Fatal("expected Decode16 size validation error")
+	}
+	if err := DIJG8decode([]byte{1, 2, 3}, 3, make([]byte, 2), 3); err == nil {
+		t.Fatal("expected Decode8 size validation error")
 	}
 	var out []byte
 	var outSize int

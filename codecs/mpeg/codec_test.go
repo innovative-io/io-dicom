@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+var mockSupportedTransferSyntaxUIDs = []string{"1.2.840.10008.1.2.4.100", "1.2.840.10008.1.2.4.102"}
+
 type mockBackend struct {
 	name         string
 	decodedBytes int
@@ -13,6 +15,12 @@ type mockBackend struct {
 
 func (m *mockBackend) Name() string {
 	return m.name
+}
+
+func (m *mockBackend) SupportedTransferSyntaxUIDs() []string {
+	out := make([]string, len(mockSupportedTransferSyntaxUIDs))
+	copy(out, mockSupportedTransferSyntaxUIDs)
+	return out
 }
 
 func (m *mockBackend) Decode(encoded []byte, output []byte, _ string) error {
@@ -33,7 +41,7 @@ func (m *mockBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uint16,
 	return out, nil
 }
 
-func TestMPEGPassthroughRoundTrip(t *testing.T) {
+func TestMPEGPassthroughDecodeFails(t *testing.T) {
 	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
 
@@ -52,13 +60,8 @@ func TestMPEGPassthroughRoundTrip(t *testing.T) {
 	}
 
 	decoded := make([]byte, len(raw))
-	if err := MPEGdecode(out, uint32(outSize), decoded, "1.2.840.10008.1.2.4.102"); err != nil {
-		t.Fatalf("unexpected MPEGdecode error: %v", err)
-	}
-	for i := range raw {
-		if decoded[i] != raw[i] {
-			t.Fatalf("decoded[%d]=%d, want %d", i, decoded[i], raw[i])
-		}
+	if err := MPEGdecode(out, uint32(outSize), decoded, "1.2.840.10008.1.2.4.102"); err == nil {
+		t.Fatal("expected MPEGdecode to fail without native backend")
 	}
 }
 

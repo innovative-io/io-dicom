@@ -4,12 +4,14 @@ package jpeg2000
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"math/bits"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"unicode"
 
 	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
@@ -33,8 +35,23 @@ func (openjpegBackend) Name() string {
 	return "openjpeg"
 }
 
+func (openjpegBackend) Ready() error {
+	return ensureOpenJPEGTools()
+}
+
+func (openjpegBackend) SupportedTransferSyntaxUIDs() []string {
+	return SupportedTransferSyntaxUIDs()
+}
+
 func (openjpegBackend) Decode(encoded []byte, output []byte) error {
+	return openjpegBackend{}.DecodeContext(context.Background(), encoded, output)
+}
+
+func (openjpegBackend) DecodeContext(ctx context.Context, encoded []byte, output []byte) error {
 	if len(encoded) == 0 || len(output) == 0 {
+		return errInvalidJ2KPayload
+	}
+	if len(encoded) > maxCodecPayloadBytes || len(output) > maxCodecPayloadBytes {
 		return errInvalidJ2KPayload
 	}
 	if err := ensureOpenJPEGTools(); err != nil {
@@ -53,7 +70,7 @@ func (openjpegBackend) Decode(encoded []byte, output []byte) error {
 		return fmt.Errorf("write j2k payload: %w", err)
 	}
 
-	cmd := exec.Command(resolvedOPJDecompress, "-i", inPath, "-o", outPath)
+	cmd := nativeenv.CommandContext(ctx, resolvedOPJDecompress, "-i", inPath, "-o", outPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("opj_decompress failed: %w: %s", err, stringsTrim(string(out)))
 	}
@@ -75,7 +92,14 @@ func (openjpegBackend) Decode(encoded []byte, output []byte) error {
 }
 
 func (openjpegBackend) Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, ratio int) ([]byte, error) {
+	return openjpegBackend{}.EncodeContext(context.Background(), raw, width, height, samples, bitsa, ratio)
+}
+
+func (openjpegBackend) EncodeContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, ratio int) ([]byte, error) {
 	if len(raw) == 0 {
+		return nil, errInvalidJ2KPayload
+	}
+	if len(raw) > maxCodecPayloadBytes {
 		return nil, errInvalidJ2KPayload
 	}
 	if err := ensureOpenJPEGTools(); err != nil {
@@ -100,10 +124,11 @@ func (openjpegBackend) Encode(raw []byte, width uint16, height uint16, samples u
 	}
 
 	args := []string{"-i", inPath, "-o", outPath}
+	args = append(args, "-n", strconv.Itoa(openjpegResolutionCount(width, height)))
 	if ratio > 0 {
 		args = append(args, "-r", strconv.Itoa(ratio))
 	}
-	cmd := exec.Command(resolvedOPJCompress, args...)
+	cmd := nativeenv.CommandContext(ctx, resolvedOPJCompress, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("opj_compress failed: %w: %s", err, stringsTrim(string(out)))
 	}
@@ -121,23 +146,41 @@ func (openjpegBackend) Encode(raw []byte, width uint16, height uint16, samples u
 var (
 	resolvedOPJCompress   string
 	resolvedOPJDecompress string
+	openjpegToolsOnce     sync.Once
+	openjpegToolsError    error
 )
 
 func ensureOpenJPEGTools() error {
-	if resolvedOPJCompress != "" && resolvedOPJDecompress != "" {
-		return nil
+	openjpegToolsOnce.Do(func() {
+		p, err := nativeenv.LookPath("opj_compress")
+		if err != nil {
+			openjpegToolsError = errOpenJPEGToolingUnavailable
+			return
+		}
+		q, err := nativeenv.LookPath("opj_decompress")
+		if err != nil {
+			openjpegToolsError = errOpenJPEGToolingUnavailable
+			return
+		}
+		resolvedOPJCompress = p
+		resolvedOPJDecompress = q
+	})
+	return openjpegToolsError
+}
+
+func openjpegResolutionCount(width uint16, height uint16) int {
+	minDim := int(width)
+	if int(height) < minDim {
+		minDim = int(height)
 	}
-	p, err := exec.LookPath("opj_compress")
-	if err != nil {
-		return errOpenJPEGToolingUnavailable
+	if minDim <= 1 {
+		return 1
 	}
-	q, err := exec.LookPath("opj_decompress")
-	if err != nil {
-		return errOpenJPEGToolingUnavailable
+	resolutions := bits.Len(uint(minDim))
+	if resolutions > 6 {
+		return 6
 	}
-	resolvedOPJCompress = p
-	resolvedOPJDecompress = q
-	return nil
+	return resolutions
 }
 
 func encodePNM(raw []byte, width int, height int, samples int, bits int) ([]byte, error) {
@@ -234,11 +277,14 @@ func parsePNM(payload []byte) (width int, height int, samples int, raw []byte, e
 	if err != nil {
 		return 0, 0, 0, nil, errOpenJPEGUnsupportedPNM
 	}
+	if width <= 0 || height <= 0 {
+		return 0, 0, 0, nil, errOpenJPEGUnsupportedPNM
+	}
 	maxVal, err := strconv.Atoi(mToken)
 	if err != nil {
 		return 0, 0, 0, nil, errOpenJPEGUnsupportedPNM
 	}
-	if maxVal != 255 && maxVal != 65535 {
+	if maxVal != 255 && maxVal != 4095 && maxVal != 65535 {
 		return 0, 0, 0, nil, errOpenJPEGUnsupportedPNM
 	}
 

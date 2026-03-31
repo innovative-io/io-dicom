@@ -76,6 +76,7 @@ build_openjpeg() {
 
   cmake -S "$src" -B "$build" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_INSTALL_LIBDIR=lib \
     -DBUILD_SHARED_LIBS=ON \
@@ -94,8 +95,17 @@ build_jpegxl() {
   fetch_tarball "https://github.com/libjxl/libjxl/archive/refs/tags/v${JPEGXL_VERSION}.tar.gz" "$tarball"
   extract_tarball "$tarball" "$src"
 
+  # GitHub source archives do not contain libjxl's vendored third_party tree.
+  # Bootstrap it before CMake configure so tagged CI builds stay self-contained.
+  (cd "$src" && bash ./deps.sh)
+
+  # Vendored sjpeg still declares a CMake minimum that CMake 4 rejects.
+  perl -0pi -e 's/cmake_minimum_required\(VERSION 2\.8\.7\)/cmake_minimum_required(VERSION 3.5)/' \
+    "$src/third_party/sjpeg/CMakeLists.txt"
+
   cmake -S "$src" -B "$build" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_INSTALL_LIBDIR=lib \
     -DBUILD_SHARED_LIBS=ON \

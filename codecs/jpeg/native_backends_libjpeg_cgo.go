@@ -4,12 +4,13 @@ package jpeg
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"unicode"
 
 	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
@@ -32,15 +33,30 @@ func (libjpegBackend) Name() string {
 	return "libjpeg"
 }
 
+func (libjpegBackend) Ready() error {
+	return ensureLibJPEGTools()
+}
+
+func (libjpegBackend) SupportedTransferSyntaxUIDs() []string {
+	return SupportedTransferSyntaxUIDs()
+}
+
 func (libjpegBackend) Decode12(encoded []byte, output []byte) error {
+	return libjpegBackend{}.Decode12Context(context.Background(), encoded, output)
+}
+
+func (libjpegBackend) Decode12Context(ctx context.Context, encoded []byte, output []byte) error {
 	if len(encoded) == 0 || len(output) == 0 {
+		return errLibJPEGInvalidPayload
+	}
+	if len(encoded) > maxCodecPayloadBytes || len(output) > maxCodecPayloadBytes {
 		return errLibJPEGInvalidPayload
 	}
 	if err := ensureLibJPEGTools(); err != nil {
 		return err
 	}
 
-	raw, err := decodeLosslessToRaw(encoded)
+	raw, err := decodeLosslessToRaw(ctx, encoded)
 	if err != nil {
 		return fmt.Errorf("libjpeg decode12: %w", err)
 	}
@@ -51,29 +67,43 @@ func (libjpegBackend) Decode12(encoded []byte, output []byte) error {
 	return nil
 }
 
-func (libjpegBackend) Encode12(raw []byte, width uint16, height uint16, samples uint16, _ int) ([]byte, error) {
+func (libjpegBackend) Encode12(raw []byte, width uint16, height uint16, samples uint16, mode int) ([]byte, error) {
+	return libjpegBackend{}.Encode12Context(context.Background(), raw, width, height, samples, mode)
+}
+
+func (libjpegBackend) Encode12Context(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, _ int) ([]byte, error) {
+	if len(raw) > maxCodecPayloadBytes {
+		return nil, errLibJPEGInvalidPayload
+	}
 	if err := ensureLibJPEGTools(); err != nil {
 		return nil, err
 	}
-	encoded, err := encodeRawLossless(raw, int(width), int(height), int(samples), 12)
+	encoded, err := encodeRawLossless(ctx, raw, int(width), int(height), int(samples), 12)
 	if err != nil {
 		return nil, fmt.Errorf("libjpeg encode12: %w", err)
 	}
-	if decoded, derr := decodeLosslessToRaw(encoded); derr != nil || len(decoded) != len(raw) {
+	if decoded, derr := decodeLosslessToRaw(ctx, encoded); derr != nil || len(decoded) != len(raw) {
 		return nil, fmt.Errorf("libjpeg encode12: roundtrip verification failed")
 	}
 	return encoded, nil
 }
 
 func (libjpegBackend) Decode16(encoded []byte, output []byte) error {
+	return libjpegBackend{}.Decode16Context(context.Background(), encoded, output)
+}
+
+func (libjpegBackend) Decode16Context(ctx context.Context, encoded []byte, output []byte) error {
 	if len(encoded) == 0 || len(output) == 0 {
+		return errors.New("ERROR, Decode16, JPEG failed")
+	}
+	if len(encoded) > maxCodecPayloadBytes || len(output) > maxCodecPayloadBytes {
 		return errors.New("ERROR, Decode16, JPEG failed")
 	}
 	if err := ensureLibJPEGTools(); err != nil {
 		return err
 	}
 
-	raw, err := decodeLosslessToRaw(encoded)
+	raw, err := decodeLosslessToRaw(ctx, encoded)
 	if err != nil {
 		return fmt.Errorf("libjpeg decode16: %w", err)
 	}
@@ -84,43 +114,53 @@ func (libjpegBackend) Decode16(encoded []byte, output []byte) error {
 	return nil
 }
 
-func (libjpegBackend) Encode16(raw []byte, width uint16, height uint16, samples uint16, _ int) ([]byte, error) {
+func (libjpegBackend) Encode16(raw []byte, width uint16, height uint16, samples uint16, mode int) ([]byte, error) {
+	return libjpegBackend{}.Encode16Context(context.Background(), raw, width, height, samples, mode)
+}
+
+func (libjpegBackend) Encode16Context(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, _ int) ([]byte, error) {
+	if len(raw) > maxCodecPayloadBytes {
+		return nil, errors.New("ERROR, Encode16, JPEG failed")
+	}
 	if err := ensureLibJPEGTools(); err != nil {
 		return nil, err
 	}
-	encoded, err := encodeRawLossless(raw, int(width), int(height), int(samples), 16)
+	encoded, err := encodeRawLossless(ctx, raw, int(width), int(height), int(samples), 16)
 	if err != nil {
 		return nil, fmt.Errorf("libjpeg encode16: %w", err)
 	}
-	if decoded, derr := decodeLosslessToRaw(encoded); derr != nil || len(decoded) != len(raw) {
+	if decoded, derr := decodeLosslessToRaw(ctx, encoded); derr != nil || len(decoded) != len(raw) {
 		return nil, fmt.Errorf("libjpeg encode16: roundtrip verification failed")
 	}
 	return encoded, nil
 }
 
 var (
-	resolvedCJPEG string
-	resolvedDJPEG string
+	resolvedCJPEG     string
+	resolvedDJPEG     string
+	libjpegToolsOnce  sync.Once
+	libjpegToolsError error
 )
 
 func ensureLibJPEGTools() error {
-	if resolvedCJPEG != "" && resolvedDJPEG != "" {
-		return nil
-	}
-	p, err := exec.LookPath("cjpeg")
-	if err != nil {
-		return errLibJPEGToolsMissing
-	}
-	q, err := exec.LookPath("djpeg")
-	if err != nil {
-		return errLibJPEGToolsMissing
-	}
-	resolvedCJPEG = p
-	resolvedDJPEG = q
-	return nil
+	libjpegToolsOnce.Do(func() {
+		p, err := nativeenv.LookPath("cjpeg")
+		if err != nil {
+			libjpegToolsError = errLibJPEGToolsMissing
+			return
+		}
+		q, err := nativeenv.LookPath("djpeg")
+		if err != nil {
+			libjpegToolsError = errLibJPEGToolsMissing
+			return
+		}
+		resolvedCJPEG = p
+		resolvedDJPEG = q
+	})
+	return libjpegToolsError
 }
 
-func encodeRawLossless(raw []byte, width int, height int, samples int, bits int) ([]byte, error) {
+func encodeRawLossless(ctx context.Context, raw []byte, width int, height int, samples int, bits int) ([]byte, error) {
 	pnm, err := encodePNM(raw, width, height, samples, bits)
 	if err != nil {
 		return nil, err
@@ -138,7 +178,8 @@ func encodeRawLossless(raw []byte, width int, height int, samples int, bits int)
 		return nil, err
 	}
 
-	cmd := exec.Command(
+	cmd := nativeenv.CommandContext(
+		ctx,
 		resolvedCJPEG,
 		"-lossless", "1",
 		"-precision", strconv.Itoa(bits),
@@ -159,7 +200,7 @@ func encodeRawLossless(raw []byte, width int, height int, samples int, bits int)
 	return encoded, nil
 }
 
-func decodeLosslessToRaw(encoded []byte) ([]byte, error) {
+func decodeLosslessToRaw(ctx context.Context, encoded []byte) ([]byte, error) {
 	tmpDir, err := os.MkdirTemp("", "io-dicom-libjpeg-decode-*")
 	if err != nil {
 		return nil, err
@@ -172,7 +213,7 @@ func decodeLosslessToRaw(encoded []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	cmd := exec.Command(resolvedDJPEG, "-pnm", "-outfile", outPath, inPath)
+	cmd := nativeenv.CommandContext(ctx, resolvedDJPEG, "-pnm", "-outfile", outPath, inPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("djpeg failed: %w: %s", err, string(bytes.TrimSpace(out)))
 	}
@@ -283,9 +324,15 @@ func parsePNM(payload []byte) (width int, height int, samples int, raw []byte, e
 	if err != nil {
 		return 0, 0, 0, nil, err
 	}
+	if width <= 0 || height <= 0 {
+		return 0, 0, 0, nil, errors.New("invalid pnm")
+	}
 	maxVal, err := strconv.Atoi(mToken)
 	if err != nil {
 		return 0, 0, 0, nil, err
+	}
+	if maxVal != 255 && maxVal != 4095 && maxVal != 65535 {
+		return 0, 0, 0, nil, errors.New("invalid pnm")
 	}
 
 	for i < len(payload) && unicode.IsSpace(rune(payload[i])) {

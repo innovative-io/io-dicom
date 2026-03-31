@@ -4,8 +4,9 @@ package jpegxl
 
 import (
 	"bytes"
-	"os/exec"
 	"testing"
+
+	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
 )
 
 func TestLibJXLBackendSelection(t *testing.T) {
@@ -19,10 +20,10 @@ func TestLibJXLBackendSelection(t *testing.T) {
 		t.Fatalf("unexpected backend name: %s", BackendName())
 	}
 
-	if _, err := exec.LookPath("cjxl"); err != nil {
+	if _, err := nativeenv.LookPath("cjxl"); err != nil {
 		t.Skip("cjxl not found in PATH")
 	}
-	if _, err := exec.LookPath("djxl"); err != nil {
+	if _, err := nativeenv.LookPath("djxl"); err != nil {
 		t.Skip("djxl not found in PATH")
 	}
 

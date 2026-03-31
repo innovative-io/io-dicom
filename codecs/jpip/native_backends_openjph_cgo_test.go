@@ -4,9 +4,30 @@ package jpip
 
 import (
 	"bytes"
-	"os/exec"
 	"testing"
+
+	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
 )
+
+func TestOpenJPEGResolutionCount(t *testing.T) {
+	tests := []struct {
+		width  uint16
+		height uint16
+		want   int
+	}{
+		{width: 1, height: 1, want: 1},
+		{width: 2, height: 2, want: 2},
+		{width: 3, height: 3, want: 2},
+		{width: 4, height: 4, want: 3},
+		{width: 64, height: 64, want: 6},
+	}
+
+	for _, tt := range tests {
+		if got := openjpegResolutionCount(tt.width, tt.height); got != tt.want {
+			t.Fatalf("openjpegResolutionCount(%d, %d) = %d, want %d", tt.width, tt.height, got, tt.want)
+		}
+	}
+}
 
 func TestOpenJPHBackendSelection(t *testing.T) {
 	SetBackend(nil)
@@ -20,14 +41,14 @@ func TestOpenJPHBackendSelection(t *testing.T) {
 	}
 
 	haveOpenJPH := false
-	if _, err := exec.LookPath("ojph_compress"); err == nil {
-		if _, derr := exec.LookPath("ojph_decompress"); derr == nil {
+	if _, err := nativeenv.LookPath("ojph_compress"); err == nil {
+		if _, derr := nativeenv.LookPath("ojph_decompress"); derr == nil {
 			haveOpenJPH = true
 		}
 	}
 	haveOpenJPEG := false
-	if _, err := exec.LookPath("opj_compress"); err == nil {
-		if _, derr := exec.LookPath("opj_decompress"); derr == nil {
+	if _, err := nativeenv.LookPath("opj_compress"); err == nil {
+		if _, derr := nativeenv.LookPath("opj_decompress"); derr == nil {
 			haveOpenJPEG = true
 		}
 	}

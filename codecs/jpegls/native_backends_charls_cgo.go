@@ -116,6 +116,14 @@ func (charlsBackend) Name() string {
 	return "charls"
 }
 
+func (charlsBackend) Ready() error {
+	return nil
+}
+
+func (charlsBackend) SupportedTransferSyntaxUIDs() []string {
+	return SupportedTransferSyntaxUIDs()
+}
+
 func (charlsBackend) Decode(encoded []byte, output []byte) error {
 	if len(encoded) == 0 || len(output) == 0 {
 		return errCharLSInputSize
@@ -137,8 +145,8 @@ func (charlsBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 		return nil, errCharLSInputSize
 	}
 
-	// CharLS output is bounded, but sizing via raw payload keeps implementation simple and safe.
-	capEstimate := len(raw) + (len(raw) / 8) + 1024
+	// Keep destination sizing conservative to avoid spurious encoder failures on wide images.
+	capEstimate := len(raw)*2 + int(height)*4 + 4096
 	out := make([]byte, capEstimate)
 
 	near := C.int32_t(0)

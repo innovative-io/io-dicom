@@ -38,14 +38,16 @@ See `docs/migration-vNext.md` for full upgrade steps and bulk rewrite examples.
 
 - Pure-Go supported:
   - JPEG Baseline 8-bit encode/decode (`codecs/jpeg`)
-  - JPEG 12-bit / 16-bit passthrough encode/decode helpers (`codecs/jpeg`)
+  - JPEG 12-bit / 16-bit passthrough encode helpers (`codecs/jpeg`)
   - RLE Lossless encode/decode (`transcoder`)
-  - JPEG-LS passthrough encode/decode (`codecs/jpegls`)
-  - JPEG XL passthrough encode/decode (`codecs/jpegxl`)
-  - JPEG 2000 / HTJ2K passthrough encode/decode (`codecs/jpeg2000`)
-  - SMPTE ST 2110 passthrough encode/decode (`codecs/smpte2110`)
-  - JPIP HTJ2K passthrough encode/decode (`codecs/jpip`)
-  - MPEG-2 / MPEG-4 AVC / HEVC passthrough encode/decode (`codecs/mpeg`)
+  - JPEG-LS passthrough encode helpers (`codecs/jpegls`)
+  - JPEG XL passthrough encode helpers (`codecs/jpegxl`)
+  - JPEG 2000 / HTJ2K passthrough encode helpers (`codecs/jpeg2000`)
+  - SMPTE ST 2110 passthrough encode helpers (`codecs/smpte2110`)
+  - JPIP HTJ2K passthrough encode helpers (`codecs/jpip`)
+  - MPEG-2 / MPEG-4 AVC / HEVC passthrough encode helpers (`codecs/mpeg`)
+
+- Decode behavior without the matching native backend now fails explicitly instead of returning compressed payload bytes as if they were decoded pixels. Build with the matching tag (`libjpeg`, `openjpeg`, `charls`, `libjxl`, `openjph`, `ffmpeg`, `st2110`) for production decode/transcode paths.
 
 ## Codec-Backed Transfer Syntaxes
 
@@ -129,6 +131,7 @@ the supported syntax families.
 - `codecs/jpip` now supports pluggable backends via `SetBackend`.
 - `codecs/smpte2110` now supports pluggable backends via `SetBackend`.
 - Default behavior remains pure-Go passthrough for no-cgo environments.
+- Builds that register exactly one native backend for a codec family now select it automatically during package initialization.
 - `codecs/jpeg` also supports named backend registration and selection for
   12/16-bit paths via `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
 - `codecs/jpeg` now includes a build-tagged `libjpeg` backend registration path
@@ -199,7 +202,16 @@ the supported syntax families.
     - FFmpeg CLI tools must be installed (`ffmpeg`, `ffprobe`).
 - The root `codecs` package exposes a central manager with `UseBackends` and
   `AvailableBackends` to configure all codec families from one call.
+- The root `codecs` package also exposes `AvailableTransferSyntaxUIDs` and
+  `ResolveBackendForUID` to inspect transfer syntax routing without duplicating
+  per-family UID switches.
+- The root `codecs` package also exposes `NativeDefaults`, `UseNativeDefaults`,
+  `ValidateBackends`, and `ValidateCurrentBackends` so applications can fail fast
+  during startup when required native tooling is unavailable.
 - A real JPEG-LS backend can be registered without changing call sites in `media/dicom_object.go`.
+
+Applications that need request-scoped cancellation for transcode operations can call
+`ChangeTransferSyntaxContext` to propagate `context.Context` through native codec execution.
 
 ### Tagged Backend Validation
 
@@ -219,10 +231,14 @@ go test -tags openjpeg ./media -run TestRepresentativePixelTransferSyntaxRoundTr
 
 ```bash
 make deps-from-source
+make build-native
 make test-tags
 make transfer-syntax-matrix
 make contract-check
 ```
+
+- `make build-native` runs source dependency build into a workspace-local prefix,
+  compiles with all native codec tags enabled, and executes `make contract-check`.
 
 - `make contract-check` runs transfer syntax doc generation, targeted conformance/media tests,
   tagged codec backend tests, and the full untagged suite in one command.
@@ -260,6 +276,12 @@ PREFIX=$PWD/.local/codec-deps JOBS=8 ./tools/build_codec_deps_from_source.sh
   to avoid unnecessary source rebuilds when dependency definitions do not change.
 - Source dependency builds explicitly disable CMake tests (including GTest lookup)
   to keep CI deterministic and avoid test-only third-party requirements.
+- The source-build script also bootstraps libjxl's `third_party` tree via
+  `deps.sh`, because GitHub release archives do not include those fetched
+  dependencies by default.
+- The libjxl source-build step also patches vendored `sjpeg` CMake metadata and
+  sets an explicit policy minimum so it continues to configure under newer
+  CMake releases.
 
 ## Install
 

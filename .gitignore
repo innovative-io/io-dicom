@@ -11,3 +11,5 @@ Gopkg.toml
 datastore
 .gitconfig
 .venv
+.build
+.local

@@ -3,13 +3,14 @@
 package mpeg
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
 )
@@ -32,8 +33,23 @@ func (ffmpegBackend) Name() string {
 	return "ffmpeg"
 }
 
+func (ffmpegBackend) Ready() error {
+	return ensureFFmpegTools()
+}
+
+func (ffmpegBackend) SupportedTransferSyntaxUIDs() []string {
+	return SupportedTransferSyntaxUIDs()
+}
+
 func (ffmpegBackend) Decode(encoded []byte, output []byte, transferSyntaxUID string) error {
+	return ffmpegBackend{}.DecodeContext(context.Background(), encoded, output, transferSyntaxUID)
+}
+
+func (ffmpegBackend) DecodeContext(ctx context.Context, encoded []byte, output []byte, transferSyntaxUID string) error {
 	if len(encoded) == 0 || len(output) == 0 {
+		return errors.New("invalid MPEG payload size")
+	}
+	if len(encoded) > maxCodecPayloadBytes || len(output) > maxCodecPayloadBytes {
 		return errors.New("invalid MPEG payload size")
 	}
 	if err := ensureFFmpegTools(); err != nil {
@@ -52,7 +68,7 @@ func (ffmpegBackend) Decode(encoded []byte, output []byte, transferSyntaxUID str
 		return fmt.Errorf("write video payload: %w", err)
 	}
 
-	width, height, err := probeDimensions(inPath)
+	width, height, err := probeDimensions(ctx, inPath)
 	if err != nil {
 		return err
 	}
@@ -77,7 +93,7 @@ func (ffmpegBackend) Decode(encoded []byte, output []byte, transferSyntaxUID str
 		"-pix_fmt", pixFmt,
 		outPath,
 	}
-	cmd := exec.Command(resolvedFFmpeg, args...)
+	cmd := nativeenv.CommandContext(ctx, resolvedFFmpeg, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg decode failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -94,7 +110,14 @@ func (ffmpegBackend) Decode(encoded []byte, output []byte, transferSyntaxUID str
 }
 
 func (ffmpegBackend) Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, transferSyntaxUID string) ([]byte, error) {
+	return ffmpegBackend{}.EncodeContext(context.Background(), raw, width, height, samples, bitsa, transferSyntaxUID)
+}
+
+func (ffmpegBackend) EncodeContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, transferSyntaxUID string) ([]byte, error) {
 	if len(raw) == 0 {
+		return nil, errors.New("invalid MPEG payload size")
+	}
+	if len(raw) > maxCodecPayloadBytes {
 		return nil, errors.New("invalid MPEG payload size")
 	}
 	if err := ensureFFmpegTools(); err != nil {
@@ -142,7 +165,7 @@ func (ffmpegBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 		"-f", "mpegts",
 		outPath,
 	}
-	cmd := exec.Command(resolvedFFmpeg, args...)
+	cmd := nativeenv.CommandContext(ctx, resolvedFFmpeg, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("ffmpeg encode failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -158,25 +181,28 @@ func (ffmpegBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 }
 
 var (
-	resolvedFFmpeg  string
-	resolvedFFprobe string
+	resolvedFFmpeg   string
+	resolvedFFprobe  string
+	ffmpegToolsOnce  sync.Once
+	ffmpegToolsError error
 )
 
 func ensureFFmpegTools() error {
-	if resolvedFFmpeg != "" && resolvedFFprobe != "" {
-		return nil
-	}
-	p, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		return errFFmpegToolingUnavailable
-	}
-	q, err := exec.LookPath("ffprobe")
-	if err != nil {
-		return errFFmpegToolingUnavailable
-	}
-	resolvedFFmpeg = p
-	resolvedFFprobe = q
-	return nil
+	ffmpegToolsOnce.Do(func() {
+		p, err := nativeenv.LookPath("ffmpeg")
+		if err != nil {
+			ffmpegToolsError = errFFmpegToolingUnavailable
+			return
+		}
+		q, err := nativeenv.LookPath("ffprobe")
+		if err != nil {
+			ffmpegToolsError = errFFmpegToolingUnavailable
+			return
+		}
+		resolvedFFmpeg = p
+		resolvedFFprobe = q
+	})
+	return ffmpegToolsError
 }
 
 func pixelFormatForLayout(samples int, bits int) (string, int, error) {
@@ -217,8 +243,9 @@ func codecForUID(uid string) (string, error) {
 	}
 }
 
-func probeDimensions(path string) (int, int, error) {
-	cmd := exec.Command(
+func probeDimensions(ctx context.Context, path string) (int, int, error) {
+	cmd := nativeenv.CommandContext(
+		ctx,
 		resolvedFFprobe,
 		"-v", "error",
 		"-select_streams", "v:0",
@@ -230,8 +257,14 @@ func probeDimensions(path string) (int, int, error) {
 	if err != nil {
 		return 0, 0, fmt.Errorf("ffprobe failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	parts := strings.Split(strings.TrimSpace(string(out)), "x")
-	if len(parts) != 2 {
+	return parseProbeDimensionsOutput(string(out))
+}
+
+func parseProbeDimensionsOutput(output string) (int, int, error) {
+	parts := strings.FieldsFunc(strings.TrimSpace(output), func(r rune) bool {
+		return r < '0' || r > '9'
+	})
+	if len(parts) < 2 {
 		return 0, 0, errors.New("unexpected ffprobe dimension output")
 	}
 	width, err := strconv.Atoi(parts[0])
