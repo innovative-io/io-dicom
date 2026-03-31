@@ -1,6 +1,7 @@
 package media
 
 import (
+	"os"
 	"testing"
 
 	"github.com/innovative-io/io-dicom/codecs"
@@ -662,5 +663,210 @@ func TestRepresentativePixelTransferSyntaxRoundTrips(t *testing.T) {
 			}
 			assertRoundTripByMode(t, obj, tt.want, tt.passthroughMode)
 		})
+	}
+}
+
+// ── DICOMTag.WriteSeq / ReadSeq ───────────────────────────────────────────────
+
+func TestDICOMTag_WriteSeq_NonEmpty(t *testing.T) {
+	inner := NewEmptyDCMObj()
+	inner.WriteString(tags.PatientID, "PAT001")
+
+	tag := &DICOMTag{}
+	tag.WriteSeq(0x0040, 0xA043, inner)
+
+	if tag.Group != 0x0040 || tag.Element != 0xA043 {
+		t.Errorf("WriteSeq: unexpected group/element %04X/%04X", tag.Group, tag.Element)
+	}
+	if tag.VR != "SQ" {
+		t.Errorf("WriteSeq: VR = %q, want SQ", tag.VR)
+	}
+	if tag.Length == 0 {
+		t.Error("WriteSeq: Length should be > 0 for non-empty sequence")
+	}
+}
+
+func TestDICOMTag_WriteSeq_FFFEGroup_HasNoVR(t *testing.T) {
+	inner := NewEmptyDCMObj()
+	inner.WriteString(tags.PatientID, "X")
+
+	tag := &DICOMTag{}
+	tag.WriteSeq(0xFFFE, 0xE000, inner)
+
+	if tag.VR != "" {
+		t.Errorf("WriteSeq: FFFE group should have empty VR, got %q", tag.VR)
+	}
+}
+
+func TestDICOMTag_WriteSeq_EvenLength(t *testing.T) {
+	inner := NewEmptyDCMObj()
+	inner.WriteString(tags.PatientID, "A") // odd-length value → padding required
+
+	tag := &DICOMTag{}
+	tag.WriteSeq(0x0010, 0x0020, inner)
+
+	if tag.Length%2 != 0 {
+		t.Errorf("WriteSeq: Length %d should be even (padded)", tag.Length)
+	}
+}
+
+func TestDICOMTag_ReadSeq_RoundTrip(t *testing.T) {
+	inner := NewEmptyDCMObj()
+	inner.WriteString(tags.PatientID, "PAT123")
+
+	tag := &DICOMTag{}
+	tag.WriteSeq(0x0040, 0xA043, inner)
+
+	result := tag.ReadSeq(false)
+	if result == nil {
+		t.Fatal("ReadSeq: returned nil")
+	}
+	if result.TagCount() == 0 {
+		t.Error("ReadSeq: should have at least one tag")
+	}
+}
+
+// ── AddConceptNameSeq ─────────────────────────────────────────────────────────
+
+func TestAddConceptNameSeq_AddsTag(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	before := obj.TagCount()
+
+	obj.AddConceptNameSeq(0x0040, 0xA043, "1111", "Radiology Report")
+
+	if obj.TagCount() <= before {
+		t.Error("AddConceptNameSeq: no tag was added to object")
+	}
+}
+
+func TestAddConceptNameSeq_TagGroupElement(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.AddConceptNameSeq(0x0040, 0xA043, "CODE1", "Test Concept")
+
+	tag := obj.GetTagAt(obj.TagCount() - 1)
+	if tag.Group != 0x0040 || tag.Element != 0xA043 {
+		t.Errorf("AddConceptNameSeq: tag at %04X/%04X, want 0040/A043", tag.Group, tag.Element)
+	}
+}
+
+// ── AddSRText ─────────────────────────────────────────────────────────────────
+
+func TestAddSRText_AddsTag(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	before := obj.TagCount()
+
+	obj.AddSRText("This is the report body.")
+
+	if obj.TagCount() <= before {
+		t.Error("AddSRText: no tag was added to object")
+	}
+}
+
+func TestAddSRText_EmptyText(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.AddSRText("")
+	if obj.TagCount() == 0 {
+		t.Error("AddSRText: should have added at least one tag even for empty text")
+	}
+}
+
+// ── CreateSR ──────────────────────────────────────────────────────────────────
+
+func testStudy() DICOMStudy {
+	return DICOMStudy{
+		PatientID:          "P001",
+		PatientName:        "Doe^John",
+		PatientBirthDate:   "19800101",
+		PatientSex:         "M",
+		ReferringPhysician: "Dr. Smith",
+		StudyDate:          "20240101",
+		AccessionNumber:    "ACC001",
+		InstitutionName:    "Test Hospital",
+		Description:        "Chest X-Ray",
+		StudyInstanceUID:   "1.2.3.4.5.6",
+		ReportText:         "Normal study.",
+		ObserverName:       "Dr. Observer",
+	}
+}
+
+func TestCreateSR_PopulatesRequiredTags(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.CreateSR(testStudy(), "1.2.3.4.5.6.1", "1.2.3.4.5.6.1.1")
+
+	if uid := obj.GetString(tags.SOPInstanceUID); uid != "1.2.3.4.5.6.1.1" {
+		t.Errorf("CreateSR: SOPInstanceUID = %q", uid)
+	}
+	if patID := obj.GetString(tags.PatientID); patID != "P001" {
+		t.Errorf("CreateSR: PatientID = %q", patID)
+	}
+	if mod := obj.GetString(tags.Modality); mod != "SR" {
+		t.Errorf("CreateSR: Modality = %q, want SR", mod)
+	}
+	if obj.TagCount() == 0 {
+		t.Error("CreateSR: no tags created")
+	}
+}
+
+func TestCreateSR_SeriesAndStudyUIDs(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.CreateSR(testStudy(), "9.8.7.6", "9.8.7.6.1")
+
+	if series := obj.GetString(tags.SeriesInstanceUID); series != "9.8.7.6" {
+		t.Errorf("CreateSR: SeriesInstanceUID = %q, want 9.8.7.6", series)
+	}
+	if study := obj.GetString(tags.StudyInstanceUID); study != "1.2.3.4.5.6" {
+		t.Errorf("CreateSR: StudyInstanceUID = %q", study)
+	}
+}
+
+// ── CreatePDF ─────────────────────────────────────────────────────────────────
+
+func TestCreatePDF_PopulatesRequiredTags(t *testing.T) {
+	f, err := os.CreateTemp("", "test*.pdf")
+	if err != nil {
+		t.Fatalf("CreatePDF: failed to create temp file: %v", err)
+	}
+	defer os.Remove(f.Name())
+	f.Write([]byte{0x25, 0x50, 0x44, 0x46}) // %PDF
+	f.Close()
+
+	obj := NewEmptyDCMObj()
+	obj.CreatePDF(testStudy(), "1.2.3.100", "1.2.3.100.1", f.Name())
+
+	if patID := obj.GetString(tags.PatientID); patID != "P001" {
+		t.Errorf("CreatePDF: PatientID = %q", patID)
+	}
+	if mod := obj.GetString(tags.Modality); mod != "OT" {
+		t.Errorf("CreatePDF: Modality = %q, want OT", mod)
+	}
+	if obj.TagCount() == 0 {
+		t.Error("CreatePDF: no tags created")
+	}
+}
+
+func TestCreatePDF_OddLengthFileGetsZeroPadded(t *testing.T) {
+	f, err := os.CreateTemp("", "test*.pdf")
+	if err != nil {
+		t.Fatalf("CreatePDF: failed to create temp file: %v", err)
+	}
+	defer os.Remove(f.Name())
+	f.Write([]byte{0x01, 0x02, 0x03}) // odd length
+	f.Close()
+
+	obj := NewEmptyDCMObj()
+	obj.CreatePDF(testStudy(), "1.2.3.200", "1.2.3.200.1", f.Name())
+
+	if obj.TagCount() == 0 {
+		t.Error("CreatePDF: no tags created for odd-length file")
+	}
+}
+
+// ── GetStringGE edge case ─────────────────────────────────────────────────────
+
+func TestGetStringGE_ReturnsEmptyWhenTagAbsent(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	got := obj.GetStringGE(0x9999, 0x9999)
+	if got != "" {
+		t.Errorf("GetStringGE: want empty string for absent tag, got %q", got)
 	}
 }

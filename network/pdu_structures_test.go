@@ -1,0 +1,489 @@
+package network
+
+import (
+	"bufio"
+	"bytes"
+	"testing"
+
+	"github.com/innovative-io/io-dicom/media"
+)
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+// captureWrite flushes a Write call to a byte buffer and returns the bytes.
+func captureWrite(fn func(rw *bufio.ReadWriter) error) ([]byte, error) {
+	var buf bytes.Buffer
+	rw := bufio.NewReadWriter(bufio.NewReader(&buf), bufio.NewWriter(&buf))
+	if err := fn(rw); err != nil {
+		return nil, err
+	}
+	rw.Flush()
+	return buf.Bytes(), nil
+}
+
+// captureWriteBool is like captureWrite but for functions returning bool.
+func captureWriteBool(fn func(rw *bufio.ReadWriter) bool) ([]byte, bool) {
+	var buf bytes.Buffer
+	rw := bufio.NewReadWriter(bufio.NewReader(&buf), bufio.NewWriter(&buf))
+	ok := fn(rw)
+	rw.Flush()
+	return buf.Bytes(), ok
+}
+
+// ── AbortRequest ─────────────────────────────────────────────────────────────
+
+func TestAbortRequest_Size(t *testing.T) {
+	a := NewAbortRequest()
+	if got := a.Size(); got != 10 {
+		t.Errorf("AbortRequest.Size() = %d, want 10", got)
+	}
+}
+
+func TestAbortRequest_GetReason_Default(t *testing.T) {
+	a := NewAbortRequest()
+	if r := a.GetReason(); r == "" {
+		t.Error("AbortRequest.GetReason() should not be empty for reason 0")
+	}
+}
+
+func TestAbortRequest_WriteRead_Roundtrip(t *testing.T) {
+	a := NewAbortRequest()
+	data, err := captureWrite(a.Write)
+	if err != nil {
+		t.Fatalf("AbortRequest.Write: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("AbortRequest.Write produced no bytes")
+	}
+
+	ms := media.NewMemoryStreamFromBytes(data)
+	a2 := NewAbortRequest()
+	if err := a2.Read(ms); err != nil {
+		t.Fatalf("AbortRequest.Read: %v", err)
+	}
+}
+
+func TestAbortRequest_ReadDynamic_Roundtrip(t *testing.T) {
+	a := NewAbortRequest()
+	data, err := captureWrite(a.Write)
+	if err != nil {
+		t.Fatalf("AbortRequest.Write: %v", err)
+	}
+	// ReadDynamic skips the first ItemType byte
+	ms := media.NewMemoryStreamFromBytes(data[1:])
+	a2 := NewAbortRequest()
+	if err := a2.ReadDynamic(ms); err != nil {
+		t.Fatalf("AbortRequest.ReadDynamic: %v", err)
+	}
+}
+
+// ── AssociationReject ─────────────────────────────────────────────────────────
+
+func TestAssociationReject_Set_GetReason(t *testing.T) {
+	rj := NewAssociationReject()
+	rj.Set(1, 1, 7) // UL-service-user, Called AE not recognised
+	r := rj.GetReason()
+	if r != "Called AE not recognized" {
+		t.Errorf("AssociationReject.GetReason() = %q, want 'Called AE not recognized'", r)
+	}
+}
+
+func TestAssociationReject_Set_TransientReason(t *testing.T) {
+	rj := NewAssociationReject()
+	rj.Set(2, 2, 1) // transient, Temporary congestion
+	r := rj.GetReason()
+	if r != "Temporary congestion" {
+		t.Errorf("AssociationReject.GetReason() = %q, want 'Temporary congestion'", r)
+	}
+}
+
+func TestAssociationReject_Size(t *testing.T) {
+	rj := NewAssociationReject()
+	if got := rj.Size(); got != 10 {
+		t.Errorf("AssociationReject.Size() = %d, want 10", got)
+	}
+}
+
+func TestAssociationReject_WriteRead_Roundtrip(t *testing.T) {
+	rj := NewAssociationReject()
+	rj.Set(1, 1, 3)
+	data, err := captureWrite(rj.Write)
+	if err != nil {
+		t.Fatalf("AssociationReject.Write: %v", err)
+	}
+
+	ms := media.NewMemoryStreamFromBytes(data)
+	rj2 := NewAssociationReject()
+	if err := rj2.Read(ms); err != nil {
+		t.Fatalf("AssociationReject.Read: %v", err)
+	}
+	if rj2.GetReason() != rj.GetReason() {
+		t.Errorf("AssociationReject roundtrip: reason mismatch got %q want %q", rj2.GetReason(), rj.GetReason())
+	}
+}
+
+func TestAssociationReject_ReadDynamic_Roundtrip(t *testing.T) {
+	rj := NewAssociationReject()
+	data, err := captureWrite(rj.Write)
+	if err != nil {
+		t.Fatalf("AssociationReject.Write: %v", err)
+	}
+	ms := media.NewMemoryStreamFromBytes(data[1:])
+	rj2 := NewAssociationReject()
+	if err := rj2.ReadDynamic(ms); err != nil {
+		t.Fatalf("AssociationReject.ReadDynamic: %v", err)
+	}
+}
+
+// ── ReleaseRequest ────────────────────────────────────────────────────────────
+
+func TestReleaseRequest_Size(t *testing.T) {
+	r := NewReleaseRequest()
+	if got := r.Size(); got != 10 {
+		t.Errorf("ReleaseRequest.Size() = %d, want 10", got)
+	}
+}
+
+func TestReleaseRequest_WriteRead_Roundtrip(t *testing.T) {
+	r := NewReleaseRequest()
+	data, err := captureWrite(r.Write)
+	if err != nil {
+		t.Fatalf("ReleaseRequest.Write: %v", err)
+	}
+
+	ms := media.NewMemoryStreamFromBytes(data)
+	r2 := NewReleaseRequest()
+	if err := r2.Read(ms); err != nil {
+		t.Fatalf("ReleaseRequest.Read: %v", err)
+	}
+}
+
+func TestReleaseRequest_ReadDynamic_Roundtrip(t *testing.T) {
+	r := NewReleaseRequest()
+	data, err := captureWrite(r.Write)
+	if err != nil {
+		t.Fatalf("ReleaseRequest.Write: %v", err)
+	}
+	ms := media.NewMemoryStreamFromBytes(data[1:])
+	r2 := NewReleaseRequest()
+	if err := r2.ReadDynamic(ms); err != nil {
+		t.Fatalf("ReleaseRequest.ReadDynamic: %v", err)
+	}
+}
+
+// ── ReleaseResponse ───────────────────────────────────────────────────────────
+
+func TestReleaseResponse_Size(t *testing.T) {
+	r := NewReleaseResponse()
+	if got := r.Size(); got != 10 {
+		t.Errorf("ReleaseResponse.Size() = %d, want 10", got)
+	}
+}
+
+func TestReleaseResponse_WriteRead_Roundtrip(t *testing.T) {
+	r := NewReleaseResponse()
+	data, err := captureWrite(r.Write)
+	if err != nil {
+		t.Fatalf("ReleaseResponse.Write: %v", err)
+	}
+
+	ms := media.NewMemoryStreamFromBytes(data)
+	r2 := NewReleaseResponse()
+	if err := r2.Read(ms); err != nil {
+		t.Fatalf("ReleaseResponse.Read: %v", err)
+	}
+}
+
+func TestReleaseResponse_ReadDynamic_Roundtrip(t *testing.T) {
+	r := NewReleaseResponse()
+	data, err := captureWrite(r.Write)
+	if err != nil {
+		t.Fatalf("ReleaseResponse.Write: %v", err)
+	}
+	ms := media.NewMemoryStreamFromBytes(data[1:])
+	r2 := NewReleaseResponse()
+	if err := r2.ReadDynamic(ms); err != nil {
+		t.Fatalf("ReleaseResponse.ReadDynamic: %v", err)
+	}
+}
+
+// ── MaximumPDULength ──────────────────────────────────────────────────────────
+
+func TestMaximumPDULength_GetSetMaximumLength(t *testing.T) {
+	m := NewMaximumPDULength()
+	m.SetMaximumLength(65536)
+	if got := m.GetMaximumLength(); got != 65536 {
+		t.Errorf("MaximumPDULength.GetMaximumLength() = %d, want 65536", got)
+	}
+}
+
+func TestMaximumPDULength_Size(t *testing.T) {
+	m := NewMaximumPDULength()
+	if got := m.Size(); got != 8 {
+		t.Errorf("MaximumPDULength.Size() = %d, want 8", got)
+	}
+}
+
+func TestMaximumPDULength_WriteRead_Roundtrip(t *testing.T) {
+	m := NewMaximumPDULength()
+	m.SetMaximumLength(32768)
+
+	var buf bytes.Buffer
+	rw := bufio.NewReadWriter(bufio.NewReader(&buf), bufio.NewWriter(&buf))
+	if !m.Write(rw) {
+		t.Fatal("MaximumPDULength.Write returned false")
+	}
+	rw.Flush()
+
+	ms := media.NewMemoryStreamFromBytes(buf.Bytes())
+	m2 := NewMaximumPDULength()
+	if err := m2.Read(ms); err != nil {
+		t.Fatalf("MaximumPDULength.Read: %v", err)
+	}
+	if m2.GetMaximumLength() != 32768 {
+		t.Errorf("MaximumPDULength roundtrip: got %d want 32768", m2.GetMaximumLength())
+	}
+}
+
+func TestMaximumPDULength_ReadDynamic_Roundtrip(t *testing.T) {
+	m := NewMaximumPDULength()
+	m.SetMaximumLength(1024)
+
+	var buf bytes.Buffer
+	rw := bufio.NewReadWriter(bufio.NewReader(&buf), bufio.NewWriter(&buf))
+	m.Write(rw)
+	rw.Flush()
+
+	// ReadDynamic skips ItemType byte
+	ms := media.NewMemoryStreamFromBytes(buf.Bytes()[1:])
+	m2 := NewMaximumPDULength()
+	if err := m2.ReadDynamic(ms); err != nil {
+		t.Fatalf("MaximumPDULength.ReadDynamic: %v", err)
+	}
+	if m2.GetMaximumLength() != 1024 {
+		t.Errorf("MaximumPDULength ReadDynamic roundtrip: got %d want 1024", m2.GetMaximumLength())
+	}
+}
+
+// ── AsyncOperationWindow ──────────────────────────────────────────────────────
+
+func TestAsyncOperationWindow_Getters_ZeroDefault(t *testing.T) {
+	a := NewAsyncOperationWindow()
+	if a.GetMaxNumberOperationsInvoked() != 0 {
+		t.Error("AsyncOperationWindow: default MaxNumberOperationsInvoked should be 0")
+	}
+	if a.GetMaxNumberOperationsPerformed() != 0 {
+		t.Error("AsyncOperationWindow: default MaxNumberOperationsPerformed should be 0")
+	}
+}
+
+func TestAsyncOperationWindow_Size(t *testing.T) {
+	a := NewAsyncOperationWindow()
+	// Length=0 so Size()=4
+	if got := a.Size(); got != 4 {
+		t.Errorf("AsyncOperationWindow.Size() = %d, want 4", got)
+	}
+}
+
+func TestAsyncOperationWindow_ReadDynamic(t *testing.T) {
+	// Manually build the byte payload: reserved(1) + length(2) + invoked(2) + performed(2) = 7 bytes
+	data := []byte{
+		0x00,       // reserved1
+		0x00, 0x04, // length = 4
+		0x00, 0x05, // MaxNumberOperationsInvoked = 5
+		0x00, 0x03, // MaxNumberOperationsPerformed = 3
+	}
+	ms := media.NewMemoryStreamFromBytes(data)
+	a := NewAsyncOperationWindow()
+	if err := a.ReadDynamic(ms); err != nil {
+		t.Fatalf("AsyncOperationWindow.ReadDynamic: %v", err)
+	}
+	if a.GetMaxNumberOperationsInvoked() != 5 {
+		t.Errorf("AsyncOperationWindow: invoked = %d want 5", a.GetMaxNumberOperationsInvoked())
+	}
+	if a.GetMaxNumberOperationsPerformed() != 3 {
+		t.Errorf("AsyncOperationWindow: performed = %d want 3", a.GetMaxNumberOperationsPerformed())
+	}
+}
+
+func TestAsyncOperationWindow_Read(t *testing.T) {
+	// Full byte payload including ItemType byte
+	data := []byte{
+		0x53,       // ItemType
+		0x00,       // reserved1
+		0x00, 0x04, // length = 4
+		0x00, 0x02, // invoked = 2
+		0x00, 0x01, // performed = 1
+	}
+	ms := media.NewMemoryStreamFromBytes(data)
+	a := NewAsyncOperationWindow()
+	if err := a.Read(ms); err != nil {
+		t.Fatalf("AsyncOperationWindow.Read: %v", err)
+	}
+	if a.GetMaxNumberOperationsInvoked() != 2 {
+		t.Errorf("AsyncOperationWindow.Read: invoked = %d want 2", a.GetMaxNumberOperationsInvoked())
+	}
+}
+
+// ── RoleSelect ────────────────────────────────────────────────────────────────
+
+func TestRoleSelect_Size_Zero(t *testing.T) {
+	r := NewRoleSelect()
+	// Length=0, so Size()=4
+	if got := r.Size(); got != 4 {
+		t.Errorf("RoleSelect.Size() = %d, want 4", got)
+	}
+}
+
+func TestRoleSelect_WriteRead_Roundtrip(t *testing.T) {
+	r := NewRoleSelect()
+	data, ok := captureWriteBool(r.Write)
+	if !ok {
+		t.Fatal("RoleSelect.Write returned false")
+	}
+	if len(data) == 0 {
+		t.Fatal("RoleSelect.Write produced no bytes")
+	}
+
+	ms := media.NewMemoryStreamFromBytes(data)
+	r2 := NewRoleSelect()
+	if err := r2.Read(ms); err != nil {
+		t.Fatalf("RoleSelect.Read: %v", err)
+	}
+}
+
+func TestRoleSelect_ReadDynamic(t *testing.T) {
+	uid := "1.2.840.10008.5.1.4.1.1.2"
+	uidLen := uint16(len(uid))
+	// Build: reserved(1) + length(2) + uidLength(2) + uid + scuRole(1) + scpRole(1)
+	var buf bytes.Buffer
+	buf.WriteByte(0x00) // reserved
+	buf.WriteByte(byte((4 + uidLen + 2) >> 8))
+	buf.WriteByte(byte(4 + uidLen + 2)) // length
+	buf.WriteByte(byte(uidLen >> 8))
+	buf.WriteByte(byte(uidLen))
+	buf.WriteString(uid)
+	buf.WriteByte(0x01) // SCURole
+	buf.WriteByte(0x01) // SCPRole
+
+	ms := media.NewMemoryStreamFromBytes(buf.Bytes())
+	r := NewRoleSelect()
+	if err := r.ReadDynamic(ms); err != nil {
+		t.Fatalf("RoleSelect.ReadDynamic: %v", err)
+	}
+}
+
+// ── UIDItem extended ─────────────────────────────────────────────────────────
+
+func TestUIDItem_SettersGetters(t *testing.T) {
+	u := NewUIDItem("1.2.3", 0x10)
+	u.SetType(0x30)
+	u.SetReserved(0x01)
+	u.SetUID("9.8.7.6")
+	u.SetLength(7)
+
+	if u.GetType() != 0x30 {
+		t.Errorf("UIDItem.GetType() = %02X, want 0x30", u.GetType())
+	}
+	if u.GetReserved() != 0x01 {
+		t.Errorf("UIDItem.GetReserved() = %02X, want 0x01", u.GetReserved())
+	}
+	if u.GetUID() != "9.8.7.6" {
+		t.Errorf("UIDItem.GetUID() = %q, want '9.8.7.6'", u.GetUID())
+	}
+	if u.GetLength() != 7 {
+		t.Errorf("UIDItem.GetLength() = %d, want 7", u.GetLength())
+	}
+	if u.GetSize() != 11 { // length + 4
+		t.Errorf("UIDItem.GetSize() = %d, want 11", u.GetSize())
+	}
+}
+
+func TestUIDItem_WriteRead_Roundtrip(t *testing.T) {
+	uid := "1.2.840.10008.5.1.4.1.1.2"
+	u := NewUIDItem(uid, 0x10)
+	data, err := captureWrite(u.Write)
+	if err != nil {
+		t.Fatalf("UIDItem.Write: %v", err)
+	}
+
+	ms := media.NewMemoryStreamFromBytes(data)
+	u2 := NewUIDItem("", 0x00)
+	if err := u2.Read(ms); err != nil {
+		t.Fatalf("UIDItem.Read: %v", err)
+	}
+	if u2.GetUID() != uid {
+		t.Errorf("UIDItem roundtrip: UID = %q, want %q", u2.GetUID(), uid)
+	}
+}
+
+func TestUIDItem_ReadDynamic_Roundtrip(t *testing.T) {
+	uid := "1.2.3.4.5"
+	u := NewUIDItem(uid, 0x52)
+	data, err := captureWrite(u.Write)
+	if err != nil {
+		t.Fatalf("UIDItem.Write: %v", err)
+	}
+	// ReadDynamic skips ItemType byte
+	ms := media.NewMemoryStreamFromBytes(data[1:])
+	u2 := NewUIDItem("", 0x00)
+	if err := u2.ReadDynamic(ms); err != nil {
+		t.Fatalf("UIDItem.ReadDynamic: %v", err)
+	}
+	if u2.GetUID() != uid {
+		t.Errorf("UIDItem ReadDynamic roundtrip: got %q want %q", u2.GetUID(), uid)
+	}
+}
+
+// ── UserInformation extended ──────────────────────────────────────────────────
+
+func TestUserInformation_SetImplementationClassUID(t *testing.T) {
+	ui := NewUserInformation()
+	ui.SetImplementationClassUID("1.2.840.10008.5.1.4.34.5")
+	if uid := ui.GetImplementationClass().GetUID(); uid != "1.2.840.10008.5.1.4.34.5" {
+		t.Errorf("UserInformation.GetImplementationClass.GetUID() = %q", uid)
+	}
+}
+
+func TestUserInformation_SetImplementationVersionName(t *testing.T) {
+	ui := NewUserInformation()
+	ui.SetImplementationVersionName("IO-DICOM-2.0.0")
+	if ver := ui.GetImplementationVersion().GetUID(); ver != "IO-DICOM-2.0.0" {
+		t.Errorf("UserInformation.GetImplementationVersion.GetUID() = %q", ver)
+	}
+}
+
+func TestUserInformation_GetSetItemType(t *testing.T) {
+	ui := NewUserInformation()
+	ui.SetItemType(0x51)
+	if got := ui.GetItemType(); got != 0x51 {
+		t.Errorf("UserInformation.GetItemType() = 0x%X, want 0x51", got)
+	}
+}
+
+func TestUserInformation_SetMaxSubLength(t *testing.T) {
+	ui := NewUserInformation()
+	m := NewMaximumPDULength()
+	m.SetMaximumLength(16384)
+	ui.SetMaxSubLength(m)
+	if ui.GetMaxSubLength().GetMaximumLength() != 16384 {
+		t.Errorf("UserInformation MaxSubLength roundtrip failed")
+	}
+}
+
+func TestUserInformation_GetAsyncOperationWindow(t *testing.T) {
+	ui := NewUserInformation()
+	if ui.GetAsyncOperationWindow() == nil {
+		t.Error("UserInformation.GetAsyncOperationWindow() should not be nil")
+	}
+}
+
+func TestUserInformation_Size(t *testing.T) {
+	ui := NewUserInformation()
+	ui.SetImplementationClassUID("1.2.3")
+	ui.SetImplementationVersionName("v1")
+	sz := ui.Size()
+	if sz == 0 {
+		t.Error("UserInformation.Size() should not be zero")
+	}
+}
