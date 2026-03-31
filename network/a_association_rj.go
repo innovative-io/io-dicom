@@ -24,7 +24,9 @@ var transientRejectReasons = map[byte]string{
 // AssociationReject association reject struct
 type AssociationReject interface {
 	GetReason() string
-	Set(result byte, reason byte)
+	// Set configures the rejection fields. source must match DICOM PS3.8 Table 9-21:
+	// 1=UL-service-user, 2=UL-service-provider (ACSE), 3=UL-service-provider (presentation).
+	Set(result byte, source byte, reason byte)
 	Size() uint32
 	Write(rw *bufio.ReadWriter) error
 	Read(ms media.MemoryStream) (err error)
@@ -87,8 +89,9 @@ func (aarj *associationReject) Write(rw *bufio.ReadWriter) error {
 	return bd.Send(rw)
 }
 
-func (aarj *associationReject) Set(result byte, reason byte) {
+func (aarj *associationReject) Set(result byte, source byte, reason byte) {
 	aarj.Result = result
+	aarj.Source = source
 	aarj.Reason = reason
 }
 

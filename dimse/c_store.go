@@ -23,12 +23,14 @@ func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
+	// AffectedSOPInstanceUID (0000,1000) is required in C-STORE-RQ per PS3.7 §C.3.1.
+	// Always include it in CommandGroupLength regardless of even/odd length.
 	sopInstanceUID := dataObj.GetString(tags.SOPInstanceUID)
 	sopInstanceUIDLength := uint32(len(sopInstanceUID))
 	if sopInstanceUIDLength%2 == 1 {
 		sopInstanceUIDLength++
-		commandLength = commandLength + 8 + sopInstanceUIDLength
 	}
+	commandLength = commandLength + 8 + sopInstanceUIDLength
 
 	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
 	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
@@ -36,10 +38,7 @@ func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
 	commandObj.WriteUint16(tags.Priority, priority.Medium)
 	commandObj.WriteUint16(tags.CommandDataSetType, 0x0102)
-
-	if sopInstanceUIDLength > 0 {
-		commandObj.WriteString(tags.AffectedSOPInstanceUID, sopInstanceUID)
-	}
+	commandObj.WriteString(tags.AffectedSOPInstanceUID, sopInstanceUID)
 
 	if err := pdu.Write(commandObj, 0x01); err != nil {
 		return err
@@ -73,7 +72,8 @@ func CStoreWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject,
 		}
 
 		sopInstanceUID := requestCommandObj.GetString(tags.AffectedSOPInstanceUID)
-		sopInstanceUIDLength := uint16(len(sopClassUID))
+		// sopInstanceUIDLength must be computed from sopInstanceUID, not sopClassUID.
+		sopInstanceUIDLength := uint16(len(sopInstanceUID))
 		if sopInstanceUIDLength > 0 {
 			if sopInstanceUIDLength%2 == 1 {
 				sopInstanceUIDLength++

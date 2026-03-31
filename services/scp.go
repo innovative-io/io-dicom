@@ -224,7 +224,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 			if moveHandler == nil {
 				slog.Warn("scp: OnCMoveRequest not registered")
-				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.FailureUnableToProcess, 0x00); err != nil {
+				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.FailureUnableToProcess, 0, 0, 0, 0); err != nil {
 					slog.Error("scp: C-Move failed to write error response", "ERROR", err.Error())
 					return
 				}
@@ -233,7 +233,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 			moveLevel := ddo.GetString(tags.QueryRetrieveLevel)
 			status := moveHandler(pdu.GetAAssociationRQ(), moveLevel, ddo)
-			if err := dimse.CMoveWriteRSP(pdu, dco, status, 0x00); err != nil {
+			if err := dimse.CMoveWriteRSP(pdu, dco, status, 0, 0, 0, 0); err != nil {
 				slog.Error("scp: C-Move failed to write response", "ERROR", err.Error())
 				return
 			}

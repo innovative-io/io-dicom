@@ -67,8 +67,9 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 	return nil, status, nil
 }
 
-// CMoveWriteRSP CMove response write
-func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, status uint16, pending uint16) error {
+// CMoveWriteRSP CMove response write. Per DICOM PS3.7 §C.4.2.1.9, C-MOVE-RSP must carry
+// all four sub-operation count fields (Remaining, Completed, Failed, Warning).
+func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, status uint16, remaining, completed, failed, warnings uint16) error {
 	responseCommandObj := media.NewEmptyDCMObj()
 
 	responseCommandObj.SetTransferSyntax(requestCommandObj.GetTransferSyntax())
@@ -80,7 +81,12 @@ func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 			sopClassUIDLength++
 		}
 
-		commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2)
+		// commandLength includes all fields after CommandGroupLength:
+		// AffectedSOPClassUID + CommandField + MessageIDBeingRespondedTo +
+		// CommandDataSetType + Status +
+		// NumberOfRemainingSuboperations + NumberOfCompletedSuboperations +
+		// NumberOfFailedSuboperations + NumberOfWarningSuboperations
+		commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2)
 
 		responseCommandObj.WriteUint32(tags.CommandGroupLength, commandLength)
 		responseCommandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
@@ -89,7 +95,10 @@ func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 		responseCommandObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
 		responseCommandObj.WriteUint16(tags.CommandDataSetType, 0x101)
 		responseCommandObj.WriteUint16(tags.Status, status)
-		responseCommandObj.WriteUint16(tags.NumberOfRemainingSuboperations, pending)
+		responseCommandObj.WriteUint16(tags.NumberOfRemainingSuboperations, remaining)
+		responseCommandObj.WriteUint16(tags.NumberOfCompletedSuboperations, completed)
+		responseCommandObj.WriteUint16(tags.NumberOfFailedSuboperations, failed)
+		responseCommandObj.WriteUint16(tags.NumberOfWarningSuboperations, warnings)
 
 		return pdu.Write(responseCommandObj, 0x01)
 	}

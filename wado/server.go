@@ -265,6 +265,11 @@ func (s *wadoServer) searchStudies(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	// Per DICOM PS3.18 §10.6.3.3: respond 204 No Content when there are no matches.
+	if len(objects) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	writeJSONMetadata(w, objects)
 }
 
@@ -275,6 +280,10 @@ func (s *wadoServer) searchSeries(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	if len(objects) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	writeJSONMetadata(w, objects)
 }
 
@@ -283,6 +292,10 @@ func (s *wadoServer) searchInstances(w http.ResponseWriter, r *http.Request) {
 		r.PathValue("studyUID"), r.PathValue("seriesUID"), r.URL.Query())
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if len(objects) == 0 {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	writeJSONMetadata(w, objects)

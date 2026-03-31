@@ -60,11 +60,13 @@ func (m *mockStore) SearchStudies(_ context.Context, _ url.Values) ([]media.DICO
 }
 
 func (m *mockStore) SearchSeries(_ context.Context, studyUID string, _ url.Values) ([]media.DICOMObject, error) {
-	return m.RetrieveStudy(context.Background(), studyUID)
+	objs := m.studies[studyUID] // returns nil (not an error) when absent
+	return objs, nil
 }
 
 func (m *mockStore) SearchInstances(_ context.Context, studyUID, _ string, _ url.Values) ([]media.DICOMObject, error) {
-	return m.RetrieveStudy(context.Background(), studyUID)
+	objs := m.studies[studyUID]
+	return objs, nil
 }
 
 // ── test helpers ──────────────────────────────────────────────────────────────
@@ -237,11 +239,9 @@ func TestSearchStudies_Empty(t *testing.T) {
 	h, _ := newTestHandler(t)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/qido/rs/studies", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rec.Code)
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/dicom+json") {
-		t.Fatalf("want application/dicom+json, got %q", ct)
+	// Per DICOM PS3.18 §10.6.3.3, an empty result set must return 204 No Content.
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", rec.Code)
 	}
 }
 
@@ -265,6 +265,16 @@ func TestSearchSeries_OK(t *testing.T) {
 	}
 }
 
+func TestSearchSeries_Empty(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/qido/rs/studies/1.2.3/series", nil))
+	// Per DICOM PS3.18 §10.6.3.3, an empty result set must return 204 No Content.
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", rec.Code)
+	}
+}
+
 func TestSearchInstances_OK(t *testing.T) {
 	h, store := newTestHandler(t)
 	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
@@ -272,5 +282,15 @@ func TestSearchInstances_OK(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/qido/rs/studies/1.2.3/series/1.2.3.1/instances", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d", rec.Code)
+	}
+}
+
+func TestSearchInstances_Empty(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/qido/rs/studies/1.2.3/series/1.2.3.1/instances", nil))
+	// Per DICOM PS3.18 §10.6.3.3, an empty result set must return 204 No Content.
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", rec.Code)
 	}
 }

@@ -469,7 +469,9 @@ func (pdu *pduService) interogateAAssociateAC() bool {
 func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 	if pdu.OnAssociationRequest == nil || !pdu.OnAssociationRequest(pdu.AssocRQ) {
 		slog.Warn("pdu: rejecting association - rejected by application handler", "CalledAE", pdu.AssocRQ.GetCalledAE(), "CallingAE", pdu.AssocRQ.GetCallingAE())
-		pdu.AssocRJ.Set(1, 7)
+		// Result=1 (permanent), Source=1 (UL-service-user), Reason=7 (called AE not recognised)
+		// per DICOM PS3.8 Table 9-21.
+		pdu.AssocRJ.Set(1, 1, 7)
 		if err := pdu.AssocRJ.Write(rw); err != nil {
 			return err
 		}
