@@ -40,6 +40,7 @@ func main() {
 
 	cecho := flag.Bool("cecho", false, "Send C-Echo to the destination")
 	cfind := flag.Bool("cfind", false, "Send C-Find request to the destination")
+	cmwl := flag.Bool("mwl", false, "Send a Modality Worklist C-Find request to the destination")
 	cmove := flag.Bool("cmove", false, "Send C-Move request to the destination")
 	cstore := flag.Bool("cstore", false, "Sends a C-Store request to the destination")
 
@@ -188,6 +189,29 @@ func main() {
 
 		log.Println("CFind was successful")
 		log.Printf("Found %d results with status %d\n\n", count, status)
+		return
+	}
+	if *cmwl {
+		request := media.NewEmptyDCMObj()
+		// Add standard MWL matching keys with empty values (wildcard = match all).
+		request.WriteString(tags.PatientName, "")
+		request.WriteString(tags.PatientID, "")
+		request.WriteString(tags.AccessionNumber, "")
+		request.WriteString(tags.RequestedProcedureID, "")
+		scu := services.NewSCU(destination)
+		scu.SetOnCFindResult(func(result media.DICOMObject) {
+			log.Printf("Worklist item: patient=%s accession=%s\n",
+				result.GetString(tags.PatientID), result.GetString(tags.AccessionNumber))
+			result.DumpTags()
+		})
+
+		count, status, err := scu.WorklistSCU(request, 0)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		log.Println("MWL query was successful")
+		log.Printf("Found %d worklist items with status %d\n\n", count, status)
 		return
 	}
 	if *cmove {

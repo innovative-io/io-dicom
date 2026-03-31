@@ -79,6 +79,32 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 	SentSize := uint32(0)
 	TLength := pd.Length
 
+	// Edge case: empty dataset must still emit one terminating PDV so the remote
+	// peer sees the last-fragment bit and unblocks from its NextPDU read.
+	if TotalSize == 0 {
+		pd.MsgHeader = pd.MsgHeader | 0x02
+		pd.pdv.PresentationContextID = pd.PresentationContextID
+		pd.pdv.MsgHeader = pd.MsgHeader
+		pd.pdv.Length = 2 // 2 header bytes (PCID + MsgHeader), no payload
+		pd.Length = pd.pdv.Length + 4
+		pd.ItemType = 0x04
+		pd.Reserved1 = 0
+		bd := media.NewEmptyBufData()
+		bd.SetBigEndian(true)
+		bd.WriteByte(pd.ItemType)
+		bd.WriteByte(pd.Reserved1)
+		bd.WriteUint32(pd.Length)
+		bd.WriteUint32(pd.pdv.Length)
+		bd.WriteByte(pd.pdv.PresentationContextID)
+		bd.WriteByte(pd.MsgHeader)
+		if err := bd.Send(rw); err != nil {
+			return errors.New("pdata::Write, bd.Send(conn) failed")
+		}
+		rw.Flush()
+		pd.Length = TLength
+		return nil
+	}
+
 	for SentSize < TotalSize {
 		if (TotalSize - SentSize) < pd.BlockSize {
 			pd.BlockSize = TotalSize - SentSize

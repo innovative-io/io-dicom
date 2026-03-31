@@ -18,6 +18,7 @@ import (
 type SCU interface {
 	EchoSCU(timeout int) error
 	FindSCU(Query media.DICOMObject, timeout int) (int, uint16, error)
+	WorklistSCU(Query media.DICOMObject, timeout int) (int, uint16, error)
 	MoveSCU(destAET string, Query media.DICOMObject, timeout int) (uint16, error)
 	StoreSCU(FileName string, timeout int) error
 	SetOnCFindResult(f func(result media.DICOMObject))
@@ -77,6 +78,41 @@ func (d *scu) FindSCU(Query media.DICOMObject, timeout int) (int, uint16, error)
 			continue
 		}
 		// Success, Failure, Cancel, or Warning — loop is done.
+		break
+	}
+
+	return results, status, nil
+}
+
+// WorklistSCU sends a Modality Worklist C-FIND (SOP 1.2.840.10008.5.1.4.31)
+// and returns the match count, final status, and any error.
+func (d *scu) WorklistSCU(Query media.DICOMObject, timeout int) (int, uint16, error) {
+	results := 0
+	status := dicomstatus.Warning
+
+	pdu := network.NewPDUService()
+	defer pdu.Close()
+	if err := d.openAssociation(pdu, sopclass.ModalityWorklistInformationModelFind.UID, []string{}, timeout); err != nil {
+		return results, status, err
+	}
+
+	if err := dimse.CFindWriteRQ(pdu, Query); err != nil {
+		return results, status, err
+	}
+
+	for {
+		ddo, s, err := dimse.CFindReadRSP(pdu)
+		status = s
+		if err != nil {
+			return results, status, err
+		}
+		if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
+			results++
+			if d.onCFindResult != nil {
+				d.onCFindResult(ddo)
+			}
+			continue
+		}
 		break
 	}
 
