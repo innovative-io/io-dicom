@@ -11,11 +11,6 @@ import (
 	"github.com/innovative-io/io-dicom/network/priority"
 )
 
-// CMoveReadRQ CMove request read
-func CMoveReadRQ(pdu network.PDUService) (media.DICOMObject, error) {
-	return pdu.NextPDU()
-}
-
 // CMoveWriteRQ CMove request write
 func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destinationAETitle string) error {
 	commandObj := media.NewEmptyDCMObj()
@@ -25,10 +20,7 @@ func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destination
 		destinationAETitleLength++
 	}
 
-	sopClassUID := ""
-	for _, presContext := range pdu.GetAAssociationRQ().GetPresContexts() {
-		sopClassUID = presContext.GetAbstractSyntax().GetUID()
-	}
+	sopClassUID := sopClassUID(pdu)
 	sopClassUIDLength := uint16(len(sopClassUID))
 	if sopClassUIDLength%2 == 1 {
 		sopClassUIDLength++

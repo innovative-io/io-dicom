@@ -72,41 +72,19 @@ func (aaac *associationAccept) SetAppContext(context UIDItem) {
 }
 
 func (aaac *associationAccept) GetCallingAE() string {
-	temp := []byte{}
-	for _, b := range aaac.CallingAE {
-		if b != 0x00 && b != 0x20 {
-			temp = append(temp, b)
-		}
-	}
-	return string(temp)
+	return parseAETitle(aaac.CallingAE)
 }
 
 func (aaac *associationAccept) SetCallingAE(aeTitle string) {
-	copy(aaac.CallingAE[:], aeTitle)
-	for index, b := range aaac.CallingAE {
-		if b == 0x00 {
-			aaac.CallingAE[index] = 0x20
-		}
-	}
+	formatAETitle(&aaac.CallingAE, aeTitle)
 }
 
 func (aaac *associationAccept) GetCalledAE() string {
-	temp := []byte{}
-	for _, b := range aaac.CalledAE {
-		if b != 0x00 && b != 0x20 {
-			temp = append(temp, b)
-		}
-	}
-	return string(temp)
+	return parseAETitle(aaac.CalledAE)
 }
 
 func (aaac *associationAccept) SetCalledAE(aeTitle string) {
-	copy(aaac.CalledAE[:], aeTitle)
-	for index, b := range aaac.CalledAE {
-		if b == 0x00 {
-			aaac.CalledAE[index] = 0x20
-		}
-	}
+	formatAETitle(&aaac.CalledAE, aeTitle)
 }
 
 func (aaac *associationAccept) AddPresContextAccept(context PresentationContextAccept) {

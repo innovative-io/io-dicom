@@ -28,6 +28,12 @@ Innovative IO DICOM Golang Library
 
 See `docs/project-structure.md` for package boundaries and maintenance conventions.
 
+## DICOM Network Conformance Notes
+
+- AE titles are encoded as fixed 16-byte, space-padded fields. Internal spaces are preserved while only trailing padding is trimmed when read back.
+- Association presentation context negotiation now prefers `Explicit VR Little Endian`, then `Implicit VR Little Endian`, then `Explicit VR Big Endian` when multiple offered transfer syntaxes are known.
+- Association accept handling selects a default presentation context from accepted contexts using the same preference order and falls back to any accepted context when needed.
+
 ## Breaking Changes
 
 Latest architecture cleanup includes package path renames.

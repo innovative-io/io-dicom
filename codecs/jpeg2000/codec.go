@@ -3,8 +3,8 @@ package jpeg2000
 import (
 	"context"
 	"errors"
-	"sort"
-	"sync"
+
+	"github.com/innovative-io/io-dicom/codecs/internal/backendmgr"
 )
 
 var CGOEnabled = nativeBackendEnabled
@@ -38,10 +38,6 @@ type contextBackend interface {
 	EncodeContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, ratio int) ([]byte, error)
 }
 
-type readinessBackend interface {
-	Ready() error
-}
-
 type passthroughBackend struct{}
 
 func (passthroughBackend) Name() string {
@@ -52,9 +48,7 @@ func (passthroughBackend) SupportedTransferSyntaxUIDs() []string {
 	return SupportedTransferSyntaxUIDs()
 }
 
-func (passthroughBackend) Decode(encoded []byte, output []byte) error {
-	_ = encoded
-	_ = output
+func (passthroughBackend) Decode(_ []byte, _ []byte) error {
 	return errBackendUnavailable
 }
 
@@ -64,151 +58,38 @@ func (passthroughBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uin
 	return encoded, nil
 }
 
-var (
-	backendMu        sync.RWMutex
-	currentBackend   Backend = passthroughBackend{}
-	currentName              = "passthrough"
-	backendFactories         = map[string]func() Backend{
-		"passthrough": func() Backend { return passthroughBackend{} },
-	}
-)
+var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 
 func init() {
 	registerNativeBackends()
-	selectDefaultBackend()
+	mgr.SelectDefault()
 }
 
-func selectDefaultBackend() {
-	backendMu.Lock()
-	defer backendMu.Unlock()
-
-	preferred := preferredBackendNameLocked()
-	if preferred == "passthrough" {
-		return
-	}
-	factory := backendFactories[preferred]
-	if factory == nil {
-		return
-	}
-	backend := factory()
-	if backend == nil {
-		return
-	}
-	currentBackend = backend
-	currentName = preferred
-}
-
-func preferredBackendNameLocked() string {
-	nativeNames := make([]string, 0, len(backendFactories))
-	for name := range backendFactories {
-		if name == "passthrough" {
-			continue
-		}
-		nativeNames = append(nativeNames, name)
-	}
-	if len(nativeNames) != 1 {
-		return "passthrough"
-	}
-	return nativeNames[0]
-}
-
-// SetBackend overrides the active JPEG 2000 backend. Passing nil resets to default passthrough behavior.
+// SetBackend overrides the active JPEG 2000 backend. Passing nil resets to passthrough.
 func SetBackend(backend Backend) {
-	backendMu.Lock()
-	defer backendMu.Unlock()
 	if backend == nil {
-		currentBackend = passthroughBackend{}
-		currentName = "passthrough"
+		mgr.Reset()
 		return
 	}
-	currentBackend = backend
-	currentName = backend.Name()
+	mgr.Set(backend)
 }
 
 // BackendName returns the current JPEG 2000 backend name.
-func BackendName() string {
-	backendMu.RLock()
-	defer backendMu.RUnlock()
-	return currentName
-}
+func BackendName() string { return mgr.BackendName() }
 
-// RegisterBackend registers a named backend factory for runtime selection.
-func RegisterBackend(name string, factory func() Backend) error {
-	if name == "" {
-		return errors.New("backend name is required")
-	}
-	if factory == nil {
-		return errors.New("backend factory is required")
-	}
-
-	backendMu.Lock()
-	defer backendMu.Unlock()
-	if _, exists := backendFactories[name]; exists {
-		return errors.New("backend already registered")
-	}
-	backendFactories[name] = factory
-	return nil
-}
+// RegisterBackend registers a named factory for runtime selection.
+func RegisterBackend(name string, factory func() Backend) error { return mgr.Register(name, factory) }
 
 // UseBackend switches to a previously registered backend by name.
-func UseBackend(name string) error {
-	backendMu.Lock()
-	defer backendMu.Unlock()
-	factory, exists := backendFactories[name]
-	if !exists {
-		return errors.New("backend not registered")
-	}
-	backend := factory()
-	if backend == nil {
-		return errors.New("backend factory returned nil")
-	}
-	currentBackend = backend
-	currentName = name
-	return nil
-}
+func UseBackend(name string) error { return mgr.Use(name) }
 
-// AvailableBackends returns the list of registered backend names.
-func AvailableBackends() []string {
-	backendMu.RLock()
-	defer backendMu.RUnlock()
-	names := make([]string, 0, len(backendFactories))
-	for name := range backendFactories {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
+// AvailableBackends returns sorted names of all registered backends.
+func AvailableBackends() []string { return mgr.Available() }
 
-func ValidateBackend(name string) error {
-	backendMu.RLock()
-	if name == currentName {
-		backend := currentBackend
-		backendMu.RUnlock()
-		if ready, ok := backend.(readinessBackend); ok {
-			return ready.Ready()
-		}
-		return nil
-	}
-	factory, exists := backendFactories[name]
-	backendMu.RUnlock()
-	if !exists {
-		return errors.New("backend not registered")
-	}
-	backend := factory()
-	if backend == nil {
-		return errors.New("backend factory returned nil")
-	}
-	if ready, ok := backend.(readinessBackend); ok {
-		return ready.Ready()
-	}
-	return nil
-}
+// ValidateBackend probes whether a named backend is ready.
+func ValidateBackend(name string) error { return mgr.Validate(name) }
 
-func activeBackend() Backend {
-	backendMu.RLock()
-	defer backendMu.RUnlock()
-	return currentBackend
-}
+func activeBackend() Backend { return mgr.Active() }
 
 func SupportedTransferSyntaxUIDs() []string {
 	out := make([]string, len(supportedTransferSyntaxUIDs))

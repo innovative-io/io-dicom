@@ -19,10 +19,7 @@ func CEchoReadRQ(commandObj media.DICOMObject) bool {
 func CEchoWriteRQ(pdu network.PDUService) error {
 	commandObj := media.NewEmptyDCMObj()
 
-	sopClassUID := ""
-	for _, presContext := range pdu.GetAAssociationRQ().GetPresContexts() {
-		sopClassUID = presContext.GetAbstractSyntax().GetUID()
-	}
+	sopClassUID := sopClassUID(pdu)
 	sopClassUIDLength := uint16(len(sopClassUID))
 	if sopClassUIDLength%2 == 1 {
 		sopClassUIDLength++

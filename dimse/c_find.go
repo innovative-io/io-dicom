@@ -11,19 +11,11 @@ import (
 	"github.com/innovative-io/io-dicom/network/priority"
 )
 
-// CFindReadRQ CFind request read
-func CFindReadRQ(pdu network.PDUService) (media.DICOMObject, error) {
-	return pdu.NextPDU()
-}
-
 // CFindWriteRQ CFind request write
 func CFindWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	commandObj := media.NewEmptyDCMObj()
 
-	sopClassUID := ""
-	for _, presContext := range pdu.GetAAssociationRQ().GetPresContexts() {
-		sopClassUID = presContext.GetAbstractSyntax().GetUID()
-	}
+	sopClassUID := sopClassUID(pdu)
 	sopClassUIDLength := uint16(len(sopClassUID))
 	if sopClassUIDLength%2 == 1 {
 		sopClassUIDLength++
@@ -100,6 +92,7 @@ func CFindWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 		if responseDataObj.TagCount() > 0 {
 			return pdu.Write(responseDataObj, 0x00)
 		}
+		return nil
 	}
-	return errors.New("CFindReadRSP, unknown error")
+	return errors.New("CFindWriteRSP: AffectedSOPClassUID is empty")
 }

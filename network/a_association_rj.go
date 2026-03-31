@@ -7,8 +7,7 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 )
 
-// PermanentRejectReasons - Permanent association reject reasons
-var PermanentRejectReasons map[byte]string = map[byte]string{
+var permanentRejectReasons = map[byte]string{
 	0: "No reason given",
 	1: "No reason given",
 	2: "Application context not supported",
@@ -16,8 +15,7 @@ var PermanentRejectReasons map[byte]string = map[byte]string{
 	7: "Called AE not recognized",
 }
 
-// TransientRejectReasons - Transient association reject reasons
-var TransientRejectReasons map[byte]string = map[byte]string{
+var transientRejectReasons = map[byte]string{
 	0: "No reason given",
 	1: "Temporary congestion",
 	2: "Local limit exceeded",
@@ -58,10 +56,10 @@ func NewAssociationReject() AssociationReject {
 func (aarj *associationReject) GetReason() string {
 	reason := "No reason given"
 	if aarj.Result == 0x01 {
-		reason = PermanentRejectReasons[aarj.Reason]
+		reason = permanentRejectReasons[aarj.Reason]
 	}
 	if aarj.Result == 0x02 {
-		reason = TransientRejectReasons[aarj.Reason]
+		reason = transientRejectReasons[aarj.Reason]
 	}
 	return reason
 }

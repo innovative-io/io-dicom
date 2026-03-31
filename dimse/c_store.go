@@ -11,19 +11,11 @@ import (
 	"github.com/innovative-io/io-dicom/network/priority"
 )
 
-// CStoreReadRQ CStore request read
-func CStoreReadRQ(pdu network.PDUService, commandObj media.DICOMObject) (media.DICOMObject, error) {
-	return pdu.NextPDU()
-}
-
 // CStoreWriteRQ CStore request write
 func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	commandObj := media.NewEmptyDCMObj()
 
-	sopClassUID := ""
-	for _, presContext := range pdu.GetAAssociationRQ().GetPresContexts() {
-		sopClassUID = presContext.GetAbstractSyntax().GetUID()
-	}
+	sopClassUID := sopClassUID(pdu)
 	sopClassUIDLength := uint16(len(sopClassUID))
 	if sopClassUIDLength%2 == 1 {
 		sopClassUIDLength++

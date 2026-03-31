@@ -1,5 +1,7 @@
 package media
 
+import "github.com/innovative-io/io-dicom/dictionary/tags"
+
 // DICOMStudy study information structure
 type DICOMStudy struct {
 	PatientID          string
@@ -20,44 +22,25 @@ type DICOMStudy struct {
 	ObserverName       string
 }
 
-// GetInfo gets information
-func (study *DICOMStudy) GetStudy(obj DICOMObject) {
-	for i := 0; i < len(obj.GetTags()); i++ {
-		tag := obj.GetTagAt(i)
-		switch tag.Group {
-		case 0x08:
-			switch tag.Element {
-			case 0x20:
-				study.StudyDate = tag.GetString()
-			case 0x30:
-				study.StudyTime = tag.GetString()
-			case 0x50:
-				study.AccessionNumber = tag.GetString()
-			case 0x60:
-				study.Modality = tag.GetString()
-			case 0x80:
-				study.InstitutionName = tag.GetString()
-			case 0x90:
-				study.ReferringPhysician = tag.GetString()
-			case 0x1030:
-				study.Description = tag.GetString()
-			}
-		case 0x10:
-			switch tag.Element {
-			case 0x0010:
-				study.PatientName = tag.GetString()
-			case 0x0020:
-				study.PatientID = tag.GetString()
-			case 0x0030: //Patient Birth Date
-				study.PatientBirthDate = tag.GetString()
-			case 0x0040:
-				study.PatientSex = tag.GetString()
-			}
-		case 0x20:
-			switch tag.Element {
-			case 0x000D:
-				study.StudyInstanceUID = tag.GetString()
-			}
-		}
+func getTagString(obj DICOMObject, tag *tags.Tag) string {
+	if t := obj.GetTag(tag); t != nil {
+		return t.GetString()
 	}
+	return ""
+}
+
+// GetStudy populates study fields from the DICOM object.
+func (study *DICOMStudy) GetStudy(obj DICOMObject) {
+	study.StudyDate = getTagString(obj, tags.StudyDate)
+	study.StudyTime = getTagString(obj, tags.StudyTime)
+	study.AccessionNumber = getTagString(obj, tags.AccessionNumber)
+	study.Modality = getTagString(obj, tags.Modality)
+	study.InstitutionName = getTagString(obj, tags.InstitutionName)
+	study.ReferringPhysician = getTagString(obj, tags.ReferringPhysicianName)
+	study.Description = getTagString(obj, tags.StudyDescription)
+	study.PatientName = getTagString(obj, tags.PatientName)
+	study.PatientID = getTagString(obj, tags.PatientID)
+	study.PatientBirthDate = getTagString(obj, tags.PatientBirthDate)
+	study.PatientSex = getTagString(obj, tags.PatientSex)
+	study.StudyInstanceUID = getTagString(obj, tags.StudyInstanceUID)
 }

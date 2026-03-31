@@ -1,24 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"encoding/xml"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/innovative-io/io-dicom/clients/httpclient"
 )
 
 const dictionaryURL string = "https://raw.githubusercontent.com/fo-dicom/fo-dicom/development/FO-DICOM.Core/Dictionaries/DICOM%20Dictionary.xml"
-
-const codingSchemesFile string = "../../dictionary/codingscheme/coding_schemes.go"
-
-const dicomTagsFile string = "../../dictionary/tags/dicom_tags.go"
-
-const sopClassesFile string = "../../dictionary/sopclass/sop_classes.go"
-
-const transferSyntaxesFile string = "../../dictionary/transfersyntax/transfer_syntaxes.go"
 
 type xmlDictionary struct {
 	XMLName xml.Name           `xml:"dictionary"`
@@ -43,11 +37,30 @@ type xmlDictionaryUID struct {
 }
 
 func main() {
+	root := findModuleRoot()
 	tags, uids := downloadDictionary()
-	writeCopdingSchemesFile(uids)
-	writeDicomTags(tags)
-	writeSOPClassesFile(uids)
-	writeTransferSyntaxesFile(uids)
+	writeCodingSchemesFile(filepath.Join(root, "dictionary/codingscheme/coding_schemes.go"), uids)
+	writeDicomTags(filepath.Join(root, "dictionary/tags/dicom_tags.go"), tags)
+	writeSOPClassesFile(filepath.Join(root, "dictionary/sopclass/sop_classes.go"), uids)
+	writeTransferSyntaxesFile(filepath.Join(root, "dictionary/transfersyntax/transfer_syntaxes.go"), uids)
+}
+
+// findModuleRoot walks up from the current directory to find the go.mod file.
+func findModuleRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			log.Fatal("could not find module root (no go.mod found)")
+		}
+		dir = parent
+	}
 }
 
 func downloadDictionary() ([]xmlDictionaryTag, []xmlDictionaryUID) {
@@ -57,192 +70,177 @@ func downloadDictionary() ([]xmlDictionaryTag, []xmlDictionaryUID) {
 	client := httpclient.NewHTTPClient(params)
 	response, err := client.Get()
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 
 	dict := new(xmlDictionary)
 	err = xml.Unmarshal(response, dict)
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 	return dict.Tags, dict.UIDs
 }
 
-func writeCopdingSchemesFile(uids []xmlDictionaryUID) {
-	if FileExists(codingSchemesFile) {
-		err := os.Remove(codingSchemesFile)
-		if err != nil {
-			log.Panic(err)
-		}
-	}
-	f, err := os.Create(codingSchemesFile)
+func writeCodingSchemesFile(path string, uids []xmlDictionaryUID) {
+	f, err := os.Create(path)
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 	defer f.Close()
 
-	f.WriteString("package codingscheme\n\n")
-
+	w := bufio.NewWriter(f)
 	codingSchemes := make([]string, 0)
+
+	fmt.Fprintln(w, "package codingscheme")
+	fmt.Fprintln(w)
 
 	for _, uid := range uids {
 		if uid.Type != "Coding Scheme" {
 			continue
 		}
 		codingSchemes = append(codingSchemes, uid.Keyword)
-		f.WriteString(fmt.Sprintf("// %s - (%s) %s\n", uid.Keyword, uid.UID, uid.Name))
-		f.WriteString(fmt.Sprintf("var %s = &CodingScheme{\n", uid.Keyword))
-		f.WriteString(fmt.Sprintf("  UID: \"%s\",\n", uid.UID))
-		f.WriteString(fmt.Sprintf("  Name: \"%s\",\n", uid.Keyword))
-
+		fmt.Fprintf(w, "// %s - (%s) %s\n", uid.Keyword, uid.UID, uid.Name)
+		fmt.Fprintf(w, "var %s = &CodingScheme{\n", uid.Keyword)
+		fmt.Fprintf(w, "  UID: \"%s\",\n", uid.UID)
+		fmt.Fprintf(w, "  Name: \"%s\",\n", uid.Keyword)
 		uid.Name = strings.ReplaceAll(uid.Name, " (Retired)", "")
-		f.WriteString(fmt.Sprintf("  Description: \"%s\",\n", uid.Name))
-		f.WriteString(fmt.Sprintf("  Type: \"%s\",\n", uid.Type))
-		f.WriteString("}\n\n")
+		fmt.Fprintf(w, "  Description: \"%s\",\n", uid.Name)
+		fmt.Fprintf(w, "  Type: \"%s\",\n", uid.Type)
+		fmt.Fprintln(w, "}")
+		fmt.Fprintln(w)
 	}
 
-	f.WriteString("var codingSchemes = []*CodingScheme{\n")
+	fmt.Fprintln(w, "var codingSchemes = []*CodingScheme{")
 	for _, cs := range codingSchemes {
-		f.WriteString(fmt.Sprintf("  %s,\n", cs))
+		fmt.Fprintf(w, "  %s,\n", cs)
 	}
-	f.WriteString("}\n")
-	f.Sync()
+	fmt.Fprintln(w, "}")
+
+	if err := w.Flush(); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func writeDicomTags(tags []xmlDictionaryTag) {
-	if FileExists(dicomTagsFile) {
-		err := os.Remove(dicomTagsFile)
-		if err != nil {
-			log.Panic(err)
-		}
-	}
-	f, err := os.Create(dicomTagsFile)
+func writeDicomTags(path string, tags []xmlDictionaryTag) {
+	f, err := os.Create(path)
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 	defer f.Close()
 
-	f.WriteString("package tags\n\n")
-
+	w := bufio.NewWriter(f)
 	dicomTags := make([]string, 0)
+
+	fmt.Fprintln(w, "package tags")
+	fmt.Fprintln(w)
 
 	for _, tag := range tags {
 		if strings.Contains(tag.Group, "x") || strings.Contains(tag.Element, "x") {
 			continue
 		}
 		dicomTags = append(dicomTags, tag.Keyword)
-		f.WriteString(fmt.Sprintf("// %s - (%s,%s) %s\n", tag.Keyword, tag.Group, tag.Element, tag.Name))
-		f.WriteString(fmt.Sprintf("var %s = &Tag{\n", tag.Keyword))
-		f.WriteString(fmt.Sprintf("  Group: 0x%s,\n", tag.Group))
-		f.WriteString(fmt.Sprintf("  Element: 0x%s,\n", tag.Element))
-		f.WriteString(fmt.Sprintf("  VR: \"%s\",\n", tag.VR))
-		f.WriteString(fmt.Sprintf("  VM: \"%s\",\n", tag.VM))
-		f.WriteString(fmt.Sprintf("  Name: \"%s\",\n", tag.Keyword))
-
+		fmt.Fprintf(w, "// %s - (%s,%s) %s\n", tag.Keyword, tag.Group, tag.Element, tag.Name)
+		fmt.Fprintf(w, "var %s = &Tag{\n", tag.Keyword)
+		fmt.Fprintf(w, "  Group: 0x%s,\n", tag.Group)
+		fmt.Fprintf(w, "  Element: 0x%s,\n", tag.Element)
+		fmt.Fprintf(w, "  VR: \"%s\",\n", tag.VR)
+		fmt.Fprintf(w, "  VM: \"%s\",\n", tag.VM)
+		fmt.Fprintf(w, "  Name: \"%s\",\n", tag.Keyword)
 		tag.Name = strings.ReplaceAll(tag.Name, " (Trial)", "")
 		tag.Name = strings.ReplaceAll(tag.Name, " (Retired)", "")
-		f.WriteString(fmt.Sprintf("  Description: \"%s\",\n", tag.Name))
-		f.WriteString("}\n\n")
+		fmt.Fprintf(w, "  Description: \"%s\",\n", tag.Name)
+		fmt.Fprintln(w, "}")
+		fmt.Fprintln(w)
 	}
 
-	f.WriteString("var tags = []*Tag{\n")
+	fmt.Fprintln(w, "var tags = []*Tag{")
 	for _, tag := range dicomTags {
-		f.WriteString(fmt.Sprintf("  %s,\n", tag))
+		fmt.Fprintf(w, "  %s,\n", tag)
 	}
-	f.WriteString("}\n")
+	fmt.Fprintln(w, "}")
 
-	f.Sync()
+	if err := w.Flush(); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func writeSOPClassesFile(uids []xmlDictionaryUID) {
-	if FileExists(sopClassesFile) {
-		err := os.Remove(sopClassesFile)
-		if err != nil {
-			log.Panic(err)
-		}
-	}
-	f, err := os.Create(sopClassesFile)
+func writeSOPClassesFile(path string, uids []xmlDictionaryUID) {
+	f, err := os.Create(path)
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 	defer f.Close()
 
-	f.WriteString("package sopclass\n\n")
-
+	w := bufio.NewWriter(f)
 	sopClasses := make([]string, 0)
+
+	fmt.Fprintln(w, "package sopclass")
+	fmt.Fprintln(w)
 
 	for _, uid := range uids {
 		if uid.Type != "SOP Class" && uid.Type != "Application Context Name" {
 			continue
 		}
-
 		sopClasses = append(sopClasses, uid.Keyword)
-		f.WriteString(fmt.Sprintf("// %s - (%s) %s\n", uid.Keyword, uid.UID, uid.Name))
-		f.WriteString(fmt.Sprintf("var %s = &SOPClass{\n", uid.Keyword))
-		f.WriteString(fmt.Sprintf("  UID: \"%s\",\n", uid.UID))
-		f.WriteString(fmt.Sprintf("  Name: \"%s\",\n", uid.Keyword))
-
+		fmt.Fprintf(w, "// %s - (%s) %s\n", uid.Keyword, uid.UID, uid.Name)
+		fmt.Fprintf(w, "var %s = &SOPClass{\n", uid.Keyword)
+		fmt.Fprintf(w, "  UID: \"%s\",\n", uid.UID)
+		fmt.Fprintf(w, "  Name: \"%s\",\n", uid.Keyword)
 		uid.Name = strings.ReplaceAll(uid.Name, " (Retired)", "")
-		f.WriteString(fmt.Sprintf("  Description: \"%s\",\n", uid.Name))
-		f.WriteString(fmt.Sprintf("  Type: \"%s\",\n", uid.Type))
-		f.WriteString("}\n\n")
+		fmt.Fprintf(w, "  Description: \"%s\",\n", uid.Name)
+		fmt.Fprintf(w, "  Type: \"%s\",\n", uid.Type)
+		fmt.Fprintln(w, "}")
+		fmt.Fprintln(w)
 	}
 
-	f.WriteString("var sopClasses = []*SOPClass{\n")
+	fmt.Fprintln(w, "var sopClasses = []*SOPClass{")
 	for _, sopClass := range sopClasses {
-		f.WriteString(fmt.Sprintf("  %s,\n", sopClass))
+		fmt.Fprintf(w, "  %s,\n", sopClass)
 	}
-	f.WriteString("}\n")
-	f.Sync()
+	fmt.Fprintln(w, "}")
+
+	if err := w.Flush(); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func writeTransferSyntaxesFile(uids []xmlDictionaryUID) {
-	if FileExists(transferSyntaxesFile) {
-		err := os.Remove(transferSyntaxesFile)
-		if err != nil {
-			log.Panic(err)
-		}
-	}
-	f, err := os.Create(transferSyntaxesFile)
+func writeTransferSyntaxesFile(path string, uids []xmlDictionaryUID) {
+	f, err := os.Create(path)
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 	defer f.Close()
 
-	f.WriteString("package transfersyntax\n\n")
-
+	w := bufio.NewWriter(f)
 	transferSyntaxes := make([]string, 0)
+
+	fmt.Fprintln(w, "package transfersyntax")
+	fmt.Fprintln(w)
 
 	for _, uid := range uids {
 		if uid.Type != "Transfer Syntax" {
 			continue
 		}
-
 		transferSyntaxes = append(transferSyntaxes, uid.Keyword)
-		f.WriteString(fmt.Sprintf("// %s - (%s) %s\n", uid.Keyword, uid.UID, uid.Name))
-		f.WriteString(fmt.Sprintf("var %s = &TransferSyntax{\n", uid.Keyword))
-		f.WriteString(fmt.Sprintf("  UID: \"%s\",\n", uid.UID))
-		f.WriteString(fmt.Sprintf("  Name: \"%s\",\n", uid.Keyword))
-
+		fmt.Fprintf(w, "// %s - (%s) %s\n", uid.Keyword, uid.UID, uid.Name)
+		fmt.Fprintf(w, "var %s = &TransferSyntax{\n", uid.Keyword)
+		fmt.Fprintf(w, "  UID: \"%s\",\n", uid.UID)
+		fmt.Fprintf(w, "  Name: \"%s\",\n", uid.Keyword)
 		uid.Name = strings.ReplaceAll(uid.Name, " (Retired)", "")
 		description := strings.Split(uid.Name, ":")
-		f.WriteString(fmt.Sprintf("  Description: \"%s\",\n", description[0]))
-		f.WriteString(fmt.Sprintf("  Type: \"%s\",\n", uid.Type))
-		f.WriteString("}\n\n")
+		fmt.Fprintf(w, "  Description: \"%s\",\n", description[0])
+		fmt.Fprintf(w, "  Type: \"%s\",\n", uid.Type)
+		fmt.Fprintln(w, "}")
+		fmt.Fprintln(w)
 	}
 
-	f.WriteString("var transferSyntaxes = []*TransferSyntax{\n")
+	fmt.Fprintln(w, "var transferSyntaxes = []*TransferSyntax{")
 	for _, ts := range transferSyntaxes {
-		f.WriteString(fmt.Sprintf("  %s,\n", ts))
+		fmt.Fprintf(w, "  %s,\n", ts)
 	}
-	f.WriteString("}\n")
-	f.Sync()
-}
+	fmt.Fprintln(w, "}")
 
-func FileExists(filename string) bool {
-	info, err := os.Stat(filename)
-	if os.IsNotExist(err) {
-		return false
+	if err := w.Flush(); err != nil {
+		log.Fatal(err)
 	}
-	return !info.IsDir()
 }

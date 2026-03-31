@@ -70,23 +70,41 @@ type DICOMObject interface {
 	CreatePDF(study DICOMStudy, SeriesInstanceUID string, SOPInstanceUID string, fileName string)
 	WriteToBytes() []byte
 	WriteToFile(fileName string) error
-	dumpSeq(indent int)
-	compress(ctx context.Context, i *int, img []byte, RGB bool, cols uint16, rows uint16, bitss uint16, bitsa uint16, pixelrep uint16, planar uint16, frames uint32, outTS string) error
-	uncompress(ctx context.Context, i int, img []byte, size uint32, frames uint32, bitsa uint16, PhotoInt string) error
 }
 
 type dicomObject struct {
 	Tags           []*DICOMTag
+	tagIndex       map[uint32]*DICOMTag
 	TransferSyntax *transfersyntax.TransferSyntax
 	ExplicitVR     bool
 	BigEndian      bool
 	SQtag          *DICOMTag
 }
 
+// tagKey encodes group and element into a single uint32 map key.
+func tagKey(group, element uint16) uint32 {
+	return uint32(group)<<16 | uint32(element)
+}
+
+// ensureTagIndex rebuilds the tag lookup map if it has been invalidated.
+func (obj *dicomObject) ensureTagIndex() {
+	if obj.tagIndex != nil {
+		return
+	}
+	obj.tagIndex = make(map[uint32]*DICOMTag, len(obj.Tags))
+	for _, t := range obj.Tags {
+		k := tagKey(t.Group, t.Element)
+		if _, exists := obj.tagIndex[k]; !exists {
+			obj.tagIndex[k] = t
+		}
+	}
+}
+
 // NewEmptyDCMObj - Create as an interface to a new empty dicomObject
 func NewEmptyDCMObj() DICOMObject {
 	return &dicomObject{
 		Tags:           make([]*DICOMTag, 0),
+		tagIndex:       make(map[uint32]*DICOMTag),
 		TransferSyntax: nil,
 		ExplicitVR:     false,
 		BigEndian:      false,
@@ -98,10 +116,7 @@ func NewEmptyDCMObj() DICOMObject {
 func NewDCMObjFromFile(fileName string) (DICOMObject, error) {
 	bufdata, err := NewBufDataFromFile(fileName)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, errors.New("DICOMObject::Read, file does not exist")
-		}
-		return nil, err
+		return nil, fmt.Errorf("media: NewDCMObjFromFile %q: %w", fileName, err)
 	}
 
 	return parseBufData(bufdata)
@@ -122,6 +137,7 @@ func parseBufData(bufdata DICOMBuffer) (DICOMObject, error) {
 
 	dicomObj := &dicomObject{
 		Tags:           make([]*DICOMTag, 0),
+		tagIndex:       make(map[uint32]*DICOMTag),
 		TransferSyntax: transferSyntax,
 		ExplicitVR:     false,
 		BigEndian:      false,
@@ -203,27 +219,20 @@ func (obj *dicomObject) GetTagAt(index int) *DICOMTag {
 }
 
 func (obj *dicomObject) GetTag(dictTag *tags.Tag) *DICOMTag {
-	for _, currentTag := range obj.Tags {
-		if currentTag.Group == dictTag.Group && currentTag.Element == dictTag.Element {
-			return currentTag
-		}
-	}
-	return nil
+	obj.ensureTagIndex()
+	return obj.tagIndex[tagKey(dictTag.Group, dictTag.Element)]
 }
 
 func (obj *dicomObject) GetTagGE(group uint16, element uint16) *DICOMTag {
-	for _, currentTag := range obj.Tags {
-		if currentTag.Group == group && currentTag.Element == element {
-			return currentTag
-		}
-	}
-	return nil
+	obj.ensureTagIndex()
+	return obj.tagIndex[tagKey(group, element)]
 }
 
 func (obj *dicomObject) SetTag(index int, tag *DICOMTag) {
 	FillTag(tag)
 	if index >= 0 && index < obj.TagCount() {
 		obj.Tags[index] = tag
+		obj.tagIndex = nil // invalidate; rebuilt on next lookup
 	}
 }
 
@@ -234,6 +243,7 @@ func (obj *dicomObject) InsertTag(index int, tag *DICOMTag) {
 	}
 	obj.Tags = append(obj.Tags[:index+1], obj.Tags[index:]...)
 	obj.Tags[index] = tag
+	obj.tagIndex = nil // invalidate; rebuilt on next lookup
 }
 
 func (obj *dicomObject) GetTags() []*DICOMTag {
@@ -242,61 +252,84 @@ func (obj *dicomObject) GetTags() []*DICOMTag {
 
 func (obj *dicomObject) DelTag(index int) {
 	obj.Tags = append(obj.Tags[:index], obj.Tags[index+1:]...)
+	obj.tagIndex = nil // invalidate; rebuilt on next lookup
 }
 
 func (obj *dicomObject) DumpTags() {
-	for _, tag := range obj.Tags {
-		if tag.VR == "SQ" {
-			fmt.Printf("\t(%04X,%04X) %s - %s\n", tag.Group, tag.Element, tag.VR, tag.Description)
-			seq := tag.ReadSeq(obj.IsExplicitVR())
-			seq.dumpSeq(1)
-			continue
-		}
-		if tag.Length > 128 {
-			fmt.Printf("\t(%04X,%04X) %s - %s : (Not displayed)\n", tag.Group, tag.Element, tag.VR, tag.Description)
-			continue
-		}
-		switch tag.VR {
-		case "US":
-			if len(tag.Data) >= 2 {
-				fmt.Printf("\t(%04X,%04X) %s - %s : %d\n", tag.Group, tag.Element, tag.VR, tag.Description, binary.LittleEndian.Uint16(tag.Data))
-			} else {
-				fmt.Printf("\t(%04X,%04X) %s - %s : (invalid)\n", tag.Group, tag.Element, tag.VR, tag.Description)
-			}
-		default:
-			fmt.Printf("\t(%04X,%04X) %s - %s : %s\n", tag.Group, tag.Element, tag.VR, tag.Description, tag.Data)
-		}
+	ts := "<none>"
+	if obj.TransferSyntax != nil {
+		ts = obj.TransferSyntax.Name
 	}
+	fmt.Printf("Transfer Syntax : %s\n", ts)
+	fmt.Printf("Tags            : %d\n", len(obj.Tags))
+	obj.dumpSeq(0)
 	fmt.Println()
 }
 
 func (obj *dicomObject) dumpSeq(indent int) {
-	indentTabs := "\t"
-	for level := 0; level < indent; level++ {
-		indentTabs += "\t"
-	}
+	prefix := strings.Repeat("  ", indent)
 
 	for _, tag := range obj.Tags {
-		if tag.VR == "SQ" {
-			fmt.Printf("%s(%04X,%04X) %s - %s\n", indentTabs, tag.Group, tag.Element, tag.VR, tag.Description)
-			seq := tag.ReadSeq(obj.IsExplicitVR())
-			seq.dumpSeq(indent + 1)
-			continue
-		}
-		if tag.Length > 128 {
-			fmt.Printf("%s(%04X,%04X) %s - %s : (Not displayed)\n", indentTabs, tag.Group, tag.Element, tag.VR, tag.Description)
-			continue
-		}
-		switch tag.VR {
-		case "US":
-			if len(tag.Data) >= 2 {
-				fmt.Printf("%s(%04X,%04X) %s - %s : %d\n", indentTabs, tag.Group, tag.Element, tag.VR, tag.Description, binary.LittleEndian.Uint16(tag.Data))
-			} else {
-				fmt.Printf("%s(%04X,%04X) %s - %s : (invalid)\n", indentTabs, tag.Group, tag.Element, tag.VR, tag.Description)
+		// Sequence delimiter / item boundary tags — print a visual separator
+		if tag.Group == 0xFFFE {
+			switch tag.Element {
+			case 0xE000:
+				fmt.Printf("%s--- item ---\n", prefix)
+			case 0xE00D, 0xE0DD:
+				// item/sequence end — omit, nesting already expressed by indent
 			}
-		default:
-			fmt.Printf("%s(%04X,%04X) %s - %s : %s\n", indentTabs, tag.Group, tag.Element, tag.VR, tag.Description, tag.Data)
+			continue
 		}
+
+		if tag.VR == "SQ" {
+			fmt.Printf("%s(%04X,%04X) SQ  %s\n", prefix, tag.Group, tag.Element, tag.Description)
+			if seq, ok := tag.ReadSeq(obj.IsExplicitVR()).(*dicomObject); ok {
+				seq.dumpSeq(indent + 1)
+			}
+			continue
+		}
+
+		if tag.Length > 128 || tag.Length == 0xFFFFFFFF {
+			fmt.Printf("%s(%04X,%04X) %-4s %s : (%d bytes)\n", prefix, tag.Group, tag.Element, tag.VR, tag.Description, tag.Length)
+			continue
+		}
+
+		value := obj.formatTagValue(tag)
+		fmt.Printf("%s(%04X,%04X) %-4s %s : %s\n", prefix, tag.Group, tag.Element, tag.VR, tag.Description, value)
+	}
+}
+
+// formatTagValue returns a human-readable string for a tag's value.
+func (obj *dicomObject) formatTagValue(tag *DICOMTag) string {
+	switch tag.VR {
+	case "US":
+		if len(tag.Data) >= 2 {
+			return fmt.Sprintf("%d", tag.GetUShort())
+		}
+		return "(invalid)"
+	case "UL":
+		if len(tag.Data) >= 4 {
+			return fmt.Sprintf("%d", tag.GetUInt())
+		}
+		return "(invalid)"
+	case "SS":
+		if len(tag.Data) >= 2 {
+			v := binary.LittleEndian.Uint16(tag.Data)
+			return fmt.Sprintf("%d", int16(v))
+		}
+		return "(invalid)"
+	case "SL":
+		if len(tag.Data) >= 4 {
+			v := binary.LittleEndian.Uint32(tag.Data)
+			return fmt.Sprintf("%d", int32(v))
+		}
+		return "(invalid)"
+	case "FL":
+		return fmt.Sprintf("%g", tag.GetFloat())
+	case "OB", "OW", "UN":
+		return fmt.Sprintf("(%d bytes)", tag.Length)
+	default:
+		return tag.GetString()
 	}
 }
 
@@ -396,6 +429,12 @@ func (obj *dicomObject) GetStringGE(group uint16, element uint16) string {
 // Add - add a new DICOM Tag to a DICOM Object
 func (obj *dicomObject) Add(tag *DICOMTag) {
 	obj.Tags = append(obj.Tags, tag)
+	if obj.tagIndex != nil {
+		k := tagKey(tag.Group, tag.Element)
+		if _, exists := obj.tagIndex[k]; !exists {
+			obj.tagIndex[k] = tag
+		}
+	}
 }
 
 func (obj *dicomObject) WriteToBytes() []byte {
@@ -472,6 +511,12 @@ func (obj *dicomObject) WriteUint16GE(group uint16, element uint16, vr string, v
 	}
 	FillTag(tag)
 	obj.Tags = append(obj.Tags, tag)
+	if obj.tagIndex != nil {
+		k := tagKey(tag.Group, tag.Element)
+		if _, exists := obj.tagIndex[k]; !exists {
+			obj.tagIndex[k] = tag
+		}
+	}
 }
 
 // WriteUint32GE - Writes a Uint32 to a DICOM tag
@@ -493,6 +538,12 @@ func (obj *dicomObject) WriteUint32GE(group uint16, element uint16, vr string, v
 	}
 	FillTag(tag)
 	obj.Tags = append(obj.Tags, tag)
+	if obj.tagIndex != nil {
+		k := tagKey(tag.Group, tag.Element)
+		if _, exists := obj.tagIndex[k]; !exists {
+			obj.tagIndex[k] = tag
+		}
+	}
 }
 
 // WriteStringGE - Writes a String to a DICOM tag
@@ -517,6 +568,12 @@ func (obj *dicomObject) WriteStringGE(group uint16, element uint16, vr string, c
 	}
 	FillTag(tag)
 	obj.Tags = append(obj.Tags, tag)
+	if obj.tagIndex != nil {
+		k := tagKey(tag.Group, tag.Element)
+		if _, exists := obj.tagIndex[k]; !exists {
+			obj.tagIndex[k] = tag
+		}
+	}
 }
 
 func (obj *dicomObject) GetTransferSyntax() *transfersyntax.TransferSyntax {
@@ -895,10 +952,55 @@ func (obj *dicomObject) CreatePDF(study DICOMStudy, SeriesInstanceUID string, SO
 	obj.WriteString(tags.MIMETypeOfEncapsulatedDocument, "application/pdf")
 }
 
+func (obj *dicomObject) beginEncapsulatedPixelData(index int) int {
+	tag := obj.GetTagAt(index)
+	tag.VR = "OB"
+	tag.Length = 0xFFFFFFFF
+	tag.Data = nil
+	obj.SetTag(index, tag)
+
+	index++
+	obj.InsertTag(index, &DICOMTag{
+		Group:     0xFFFE,
+		Element:   0xE000,
+		Length:    0,
+		VR:        "DL",
+		Data:      nil,
+		BigEndian: obj.IsBigEndian(),
+	})
+	return index
+}
+
+func (obj *dicomObject) appendEncapsulatedFrame(index int, payload []byte) int {
+	index++
+	obj.InsertTag(index, &DICOMTag{
+		Group:     0xFFFE,
+		Element:   0xE000,
+		Length:    uint32(len(payload)),
+		VR:        "DL",
+		Data:      payload,
+		BigEndian: obj.IsBigEndian(),
+	})
+	return index
+}
+
+func (obj *dicomObject) endEncapsulatedPixelData(index int) int {
+	index++
+	obj.InsertTag(index, &DICOMTag{
+		Group:     0xFFFE,
+		Element:   0xE0DD,
+		Length:    0,
+		VR:        "DL",
+		Data:      nil,
+		BigEndian: obj.IsBigEndian(),
+	})
+	return index
+}
+
 func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bool, cols uint16, rows uint16, bitss uint16, bitsa uint16, pixelrep uint16, planar uint16, frames uint32, outTS string) error {
-	var offset, size, jpeg_size, j uint32
+	var offset, size, j uint32
 	var JPEGData []byte
-	var JPEGBytes, index int
+	var JPEGBytes int
 
 	single := uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 	frameSize := single
@@ -908,118 +1010,36 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 		size = frameSize * frames
 	}
 
-	index = *i
+	index := *i
 	tag := obj.GetTagAt(index)
 
 	switch outTS {
 	case transfersyntax.DeflatedImageFrameCompression.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		tag.Data = nil
-		obj.SetTag(index, tag)
-		index++
-
-		offsetTableTag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, offsetTableTag)
+		index = obj.beginEncapsulatedPixelData(index)
 
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * frameSize
 			deflated, err := transcoder.DeflateFrame(img[offset : offset+frameSize])
 			if err != nil {
 				return err
 			}
-
-			frameTag := &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(len(deflated)),
-				VR:        "DL",
-				Data:      deflated,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, frameTag)
+			index = obj.appendEncapsulatedFrame(index, deflated)
 		}
-
-		index++
-		sequenceEndTag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, sequenceEndTag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		tag.Data = nil
-		obj.SetTag(index, tag)
-		index++
-
-		offsetTableTag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, offsetTableTag)
+		index = obj.beginEncapsulatedPixelData(index)
 
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * frameSize
 			frameData := make([]byte, frameSize)
 			copy(frameData, img[offset:offset+frameSize])
-
-			frameTag := &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(len(frameData)),
-				VR:        "DL",
-				Data:      frameData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, frameTag)
+			index = obj.appendEncapsulatedFrame(index, frameData)
 		}
-
-		index++
-		sequenceEndTag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, sequenceEndTag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.RLELossless.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		tag.Data = nil
-		obj.SetTag(index, tag)
-		index++
-
-		offsetTableTag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, offsetTableTag)
+		index = obj.beginEncapsulatedPixelData(index)
 
 		samplesPerPixel := uint16(1)
 		if RGB {
@@ -1027,57 +1047,20 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 		}
 
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * frameSize
 			rleData, err := transcoder.RLEencode(img[offset:offset+frameSize], rows, cols, bitsa, samplesPerPixel)
 			if err != nil {
 				return err
 			}
-
-			frameTag := &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(len(rleData)),
-				VR:        "DL",
-				Data:      rleData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, frameTag)
+			index = obj.appendEncapsulatedFrame(index, rleData)
 		}
-
-		index++
-
-		sequenceEndTag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, sequenceEndTag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.JPEGLosslessSV1.UID:
 		fallthrough
 	case transfersyntax.JPEGLossless.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		if tag.Data != nil {
-			tag.Data = nil
-		}
-		obj.SetTag(index, tag)
-		index++
-		newtag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.beginEncapsulatedPixelData(index)
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
@@ -1097,48 +1080,14 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 					return err
 				}
 			}
-			newtag = &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(JPEGBytes),
-				VR:        "DL",
-				Data:      JPEGData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, newtag)
+			index = obj.appendEncapsulatedFrame(index, JPEGData)
 			JPEGData = nil
 		}
-		index++
-		newtag = &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.JPEGBaseline8Bit.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		if tag.Data != nil {
-			tag.Data = nil
-		}
-		obj.SetTag(index, tag)
-		index++
-		newtag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
-		jpeg_size = 0
+		index = obj.beginEncapsulatedPixelData(index)
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
@@ -1156,97 +1105,28 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 					}
 				}
 			}
-			newtag = &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(JPEGBytes),
-				VR:        "DL",
-				Data:      JPEGData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, newtag)
+			index = obj.appendEncapsulatedFrame(index, JPEGData)
 			JPEGData = nil
-			jpeg_size = jpeg_size + uint32(JPEGBytes)
 		}
-		index++
-		newtag = &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.JPEGExtended12Bit.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		if tag.Data != nil {
-			tag.Data = nil
-		}
-		obj.SetTag(index, tag)
-		index++
-		newtag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
-		jpeg_size = 0
+		index = obj.beginEncapsulatedPixelData(index)
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if err := jpeg.EIJG12encodeContext(ctx, img[offset/2:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
 				return err
 			}
-			newtag = &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(JPEGBytes),
-				VR:        "DL",
-				Data:      JPEGData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, newtag)
+			index = obj.appendEncapsulatedFrame(index, JPEGData)
 			JPEGData = nil
-			jpeg_size = jpeg_size + uint32(JPEGBytes)
 		}
-		index++
-		newtag = &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.JPEGLSLossless.UID:
 		fallthrough
 	case transfersyntax.JPEGLSNearLossless.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		if tag.Data != nil {
-			tag.Data = nil
-		}
-		obj.SetTag(index, tag)
-		index++
-		newtag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.beginEncapsulatedPixelData(index)
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
@@ -1258,27 +1138,10 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 					return err
 				}
 			}
-			newtag = &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(JPEGBytes),
-				VR:        "DL",
-				Data:      JPEGData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, newtag)
+			index = obj.appendEncapsulatedFrame(index, JPEGData)
 			JPEGData = nil
 		}
-		index++
-		newtag = &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.JPEG2000Lossless.UID:
 		fallthrough
@@ -1287,24 +1150,8 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 	case transfersyntax.HTJ2KLossless.UID:
 		fallthrough
 	case transfersyntax.HTJ2KLosslessRPCL.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		if tag.Data != nil {
-			tag.Data = nil
-		}
-		obj.SetTag(index, tag)
-		index++
-		newtag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.beginEncapsulatedPixelData(index)
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
@@ -1316,52 +1163,18 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 					return err
 				}
 			}
-			newtag = &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(JPEGBytes),
-				VR:        "DL",
-				Data:      JPEGData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, newtag)
+			index = obj.appendEncapsulatedFrame(index, JPEGData)
 			JPEGData = nil
 		}
-		index++
-		newtag = &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.JPEG2000.UID:
 		fallthrough
 	case transfersyntax.JPEG2000MC.UID:
 		fallthrough
 	case transfersyntax.HTJ2K.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		if tag.Data != nil {
-			tag.Data = nil
-		}
-		obj.SetTag(index, tag)
-		index++
-		newtag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
-		jpeg_size = 0
+		index = obj.beginEncapsulatedPixelData(index)
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
@@ -1373,52 +1186,18 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 					return err
 				}
 			}
-			newtag = &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(JPEGBytes),
-				VR:        "DL",
-				Data:      JPEGData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, newtag)
+			index = obj.appendEncapsulatedFrame(index, JPEGData)
 			JPEGData = nil
-			jpeg_size = jpeg_size + uint32(JPEGBytes)
 		}
-		index++
-		newtag = &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.JPEGXLLossless.UID:
 		fallthrough
 	case transfersyntax.JPEGXLJPEGRecompression.UID:
 		fallthrough
 	case transfersyntax.JPEGXL.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		if tag.Data != nil {
-			tag.Data = nil
-		}
-		obj.SetTag(index, tag)
-		index++
-		newtag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.beginEncapsulatedPixelData(index)
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
@@ -1430,49 +1209,16 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 					return err
 				}
 			}
-			newtag = &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(JPEGBytes),
-				VR:        "DL",
-				Data:      JPEGData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, newtag)
+			index = obj.appendEncapsulatedFrame(index, JPEGData)
 			JPEGData = nil
 		}
-		index++
-		newtag = &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.JPIPHTJ2KReferenced.UID:
 		fallthrough
 	case transfersyntax.JPIPHTJ2KReferencedDeflate.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		if tag.Data != nil {
-			tag.Data = nil
-		}
-		obj.SetTag(index, tag)
-		index++
-		newtag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.beginEncapsulatedPixelData(index)
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
@@ -1484,27 +1230,10 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 					return err
 				}
 			}
-			newtag = &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(JPEGBytes),
-				VR:        "DL",
-				Data:      JPEGData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, newtag)
+			index = obj.appendEncapsulatedFrame(index, JPEGData)
 			JPEGData = nil
 		}
-		index++
-		newtag = &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.MPEG2MPML.UID:
 		fallthrough
@@ -1537,24 +1266,8 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 	case transfersyntax.HEVCMP51.UID:
 		fallthrough
 	case transfersyntax.HEVCM10P51.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		if tag.Data != nil {
-			tag.Data = nil
-		}
-		obj.SetTag(index, tag)
-		index++
-		newtag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.beginEncapsulatedPixelData(index)
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
@@ -1566,51 +1279,18 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 					return err
 				}
 			}
-			newtag = &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(JPEGBytes),
-				VR:        "DL",
-				Data:      JPEGData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, newtag)
+			index = obj.appendEncapsulatedFrame(index, JPEGData)
 			JPEGData = nil
 		}
-		index++
-		newtag = &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	case transfersyntax.SMPTEST211020UncompressedProgressiveActiveVideo.UID:
 		fallthrough
 	case transfersyntax.SMPTEST211020UncompressedInterlacedActiveVideo.UID:
 		fallthrough
 	case transfersyntax.SMPTEST211030PCMDigitalAudio.UID:
-		tag.VR = "OB"
-		tag.Length = 0xFFFFFFFF
-		if tag.Data != nil {
-			tag.Data = nil
-		}
-		obj.SetTag(index, tag)
-		index++
-		newtag := &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE000,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.beginEncapsulatedPixelData(index)
 		for j = 0; j < frames; j++ {
-			index++
 			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
 			if RGB {
 				offset = 3 * offset
@@ -1622,27 +1302,10 @@ func (obj *dicomObject) compress(ctx context.Context, i *int, img []byte, RGB bo
 					return err
 				}
 			}
-			newtag = &DICOMTag{
-				Group:     0xFFFE,
-				Element:   0xE000,
-				Length:    uint32(JPEGBytes),
-				VR:        "DL",
-				Data:      JPEGData,
-				BigEndian: obj.IsBigEndian(),
-			}
-			obj.InsertTag(index, newtag)
+			index = obj.appendEncapsulatedFrame(index, JPEGData)
 			JPEGData = nil
 		}
-		index++
-		newtag = &DICOMTag{
-			Group:     0xFFFE,
-			Element:   0xE0DD,
-			Length:    0,
-			VR:        "DL",
-			Data:      nil,
-			BigEndian: obj.IsBigEndian(),
-		}
-		obj.InsertTag(index, newtag)
+		index = obj.endEncapsulatedPixelData(index)
 		*i = index
 	default:
 		if bitss == 8 {

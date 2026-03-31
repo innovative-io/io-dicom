@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"os"
 	"strconv"
+	"sync"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 )
@@ -25,6 +26,7 @@ type privateDictionaryTag struct {
 var codes []*tags.Tag
 var codeByKey map[uint32]*tags.Tag
 var codeVRByKey map[uint32]string
+var initOnce sync.Once
 
 func dictionaryKey(group uint16, element uint16) uint32 {
 	return uint32(group)<<16 | uint32(element)
@@ -61,12 +63,7 @@ func FillTag(tag *DICOMTag) {
 
 // GetDictionaryTag - get tag from Dictionary
 func GetDictionaryTag(group uint16, element uint16) *tags.Tag {
-	if codes == nil {
-		InitDict()
-	}
-	if codeByKey == nil {
-		buildDictionaryIndex()
-	}
+	InitDict()
 	if tag, ok := codeByKey[dictionaryKey(group, element)]; ok {
 		return tag
 	}
@@ -82,12 +79,7 @@ func GetDictionaryTag(group uint16, element uint16) *tags.Tag {
 
 // GetDictionaryVR - get info from Dictionary
 func GetDictionaryVR(group uint16, element uint16) string {
-	if codes == nil {
-		InitDict()
-	}
-	if codeVRByKey == nil {
-		buildDictionaryIndex()
-	}
+	InitDict()
 	if vr, ok := codeVRByKey[dictionaryKey(group, element)]; ok {
 		return vr
 	}
@@ -130,7 +122,9 @@ func loadPrivateDictionary() {
 
 // InitDict Initialize Dictionary
 func InitDict() {
-	codes = tags.GetTags()
-	loadPrivateDictionary()
-	buildDictionaryIndex()
+	initOnce.Do(func() {
+		codes = tags.GetTags()
+		loadPrivateDictionary()
+		buildDictionaryIndex()
+	})
 }

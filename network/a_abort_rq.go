@@ -31,14 +31,14 @@ func NewAbortRequest() AbortRequest {
 		ItemType:  0x07,
 		Reserved1: 0x00,
 		Reserved2: 0x00,
-		Reserved3: 0x01,
-		Source:    0x03,
-		Reason:    0x01,
+		Reserved3: 0x00, // must be 0x00 per DICOM PS3.8 Table 9-26
+		Source:    0x00, // 0x00 = service-user per DICOM PS3.8 Table 9-26
+		Reason:    0x00, // 0x00 = no reason given
 	}
 }
 
 func (aarq *abortRequest) GetReason() string {
-	return PermanentRejectReasons[aarq.Reason]
+	return permanentRejectReasons[aarq.Reason]
 }
 
 func (aarq *abortRequest) Size() uint32 {

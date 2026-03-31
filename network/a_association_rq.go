@@ -74,41 +74,19 @@ func (aarq *associationRequest) SetAppContext(context UIDItem) {
 }
 
 func (aarq *associationRequest) GetCallingAE() string {
-	temp := []byte{}
-	for _, b := range aarq.CallingAE {
-		if b != 0x00 && b != 0x20 {
-			temp = append(temp, b)
-		}
-	}
-	return string(temp)
+	return parseAETitle(aarq.CallingAE)
 }
 
 func (aarq *associationRequest) SetCallingAE(aeTitle string) {
-	copy(aarq.CallingAE[:], aeTitle)
-	for index, b := range aarq.CallingAE {
-		if b == 0x00 {
-			aarq.CallingAE[index] = 0x20
-		}
-	}
+	formatAETitle(&aarq.CallingAE, aeTitle)
 }
 
 func (aarq *associationRequest) GetCalledAE() string {
-	temp := []byte{}
-	for _, b := range aarq.CalledAE {
-		if b != 0x00 && b != 0x20 {
-			temp = append(temp, b)
-		}
-	}
-	return string(temp)
+	return parseAETitle(aarq.CalledAE)
 }
 
 func (aarq *associationRequest) SetCalledAE(aeTitle string) {
-	copy(aarq.CalledAE[:], aeTitle)
-	for index, b := range aarq.CalledAE {
-		if b == 0x00 {
-			aarq.CalledAE[index] = 0x20
-		}
-	}
+	formatAETitle(&aarq.CalledAE, aeTitle)
 }
 
 func (aarq *associationRequest) GetPresContexts() []PresentationContext {

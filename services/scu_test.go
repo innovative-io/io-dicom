@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"testing"
@@ -216,7 +217,7 @@ func Test_scu_StoreSCU(t *testing.T) {
 func StartSCP(t testing.TB, port int) (func(t testing.TB), SCP) {
 	testSCP := NewSCP(port)
 	go func() {
-		if err := testSCP.Start(); err != nil {
+		if err := testSCP.Start(context.Background()); err != nil {
 			t.Logf("SCP stopped: %v", err)
 		}
 	}()

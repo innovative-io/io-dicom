@@ -2,7 +2,6 @@ package codecs
 
 import (
 	"fmt"
-	"sort"
 
 	jpegcodec "github.com/innovative-io/io-dicom/codecs/jpeg"
 	jpeg2000codec "github.com/innovative-io/io-dicom/codecs/jpeg2000"
@@ -12,6 +11,29 @@ import (
 	mpegcodec "github.com/innovative-io/io-dicom/codecs/mpeg"
 	smptecodec "github.com/innovative-io/io-dicom/codecs/smpte2110"
 )
+
+// uidToFamily maps every static transfer syntax UID to its codec family name.
+// Built once at init time; ResolveBackendForUID lookups are O(1).
+var uidToFamily map[string]string
+
+func init() {
+	raw := map[string][]string{
+		"jpeg":      jpegcodec.SupportedTransferSyntaxUIDs(),
+		"jpegls":    jpeglscodec.SupportedTransferSyntaxUIDs(),
+		"jpeg2000":  jpeg2000codec.SupportedTransferSyntaxUIDs(),
+		"jpegxl":    jpegxlcodec.SupportedTransferSyntaxUIDs(),
+		"mpeg":      mpegcodec.SupportedTransferSyntaxUIDs(),
+		"jpip":      jpipcodec.SupportedTransferSyntaxUIDs(),
+		"smpte2110": smptecodec.SupportedTransferSyntaxUIDs(),
+	}
+	m := make(map[string]string)
+	for family, uids := range raw {
+		for _, uid := range uids {
+			m[uid] = family
+		}
+	}
+	uidToFamily = m
+}
 
 // BackendConfig defines backend names by codec family.
 // Empty values leave the current backend unchanged.
@@ -94,14 +116,15 @@ func AvailableTransferSyntaxUIDs() map[string][]string {
 // NativeDefaults returns the single native backend, when one is registered for a family.
 // Families with no native backend or multiple native choices are left unchanged.
 func NativeDefaults() BackendConfig {
+	available := AvailableBackends()
 	return BackendConfig{
-		JPEG:      nativeDefault(AvailableBackends()["jpeg"]),
-		JPEGLS:    nativeDefault(AvailableBackends()["jpegls"]),
-		JPEG2000:  nativeDefault(AvailableBackends()["jpeg2000"]),
-		JPEGXL:    nativeDefault(AvailableBackends()["jpegxl"]),
-		MPEG:      nativeDefault(AvailableBackends()["mpeg"]),
-		JPIP:      nativeDefault(AvailableBackends()["jpip"]),
-		SMPTE2110: nativeDefault(AvailableBackends()["smpte2110"]),
+		JPEG:      nativeDefault(available["jpeg"]),
+		JPEGLS:    nativeDefault(available["jpegls"]),
+		JPEG2000:  nativeDefault(available["jpeg2000"]),
+		JPEGXL:    nativeDefault(available["jpegxl"]),
+		MPEG:      nativeDefault(available["mpeg"]),
+		JPIP:      nativeDefault(available["jpip"]),
+		SMPTE2110: nativeDefault(available["smpte2110"]),
 	}
 }
 
@@ -183,19 +206,8 @@ func ValidateCurrentBackends() error {
 }
 
 // ResolveBackendForUID returns the codec family that handles the transfer syntax UID.
+// Lookup is O(1) via a map built at package init time.
 func ResolveBackendForUID(uid string) (string, bool) {
-	available := AvailableTransferSyntaxUIDs()
-	families := make([]string, 0, len(available))
-	for family := range available {
-		families = append(families, family)
-	}
-	sort.Strings(families)
-	for _, family := range families {
-		for _, supportedUID := range available[family] {
-			if supportedUID == uid {
-				return family, true
-			}
-		}
-	}
-	return "", false
+	family, ok := uidToFamily[uid]
+	return family, ok
 }

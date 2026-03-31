@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"strings"
+	"syscall"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/media"
@@ -15,7 +17,6 @@ import (
 	"github.com/innovative-io/io-dicom/utils"
 )
 
-var destination *network.Destination
 var version string
 
 func main() {
@@ -38,8 +39,6 @@ func main() {
 	cfind := flag.Bool("cfind", false, "Send C-Find request to the destination")
 	cmove := flag.Bool("cmove", false, "Send C-Move request to the destination")
 	cstore := flag.Bool("cstore", false, "Sends a C-Store request to the destination")
-
-	query := flag.String("query", "", "Comma seperated query to be sent with request ex: 00080020=test")
 
 	dump := flag.Bool("dump", false, "Dump contents of DICOM file to stdout")
 
@@ -79,7 +78,7 @@ func main() {
 		})
 
 		scp.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
-			log.Printf("INFO, C-Store recieved %s", data.GetString(tags.SOPInstanceUID))
+			log.Printf("INFO, C-Store received %s", data.GetString(tags.SOPInstanceUID))
 			directory := filepath.Join(*datastore, data.GetString(tags.PatientID), data.GetString(tags.StudyInstanceUID), data.GetString(tags.SeriesInstanceUID))
 			os.MkdirAll(directory, 0755)
 
@@ -92,14 +91,15 @@ func main() {
 			return dicomstatus.Success
 		})
 
-		err := scp.Start()
-		if err != nil {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := scp.Start(ctx); err != nil {
 			log.Fatal(err)
 		}
-		os.Exit(0)
+		return
 	}
 
-	destination = &network.Destination{
+	destination := &network.Destination{
 		Name:      *hostName,
 		HostName:  *hostName,
 		CalledAE:  *calledAE,
@@ -127,17 +127,6 @@ func main() {
 			result.DumpTags()
 		})
 
-		if *query != "" {
-			parts := strings.Split(*query, ",")
-			for _, part := range parts {
-				log.Println(part)
-				// p := strings.Split(part, "=")
-				// tag := media.DICOMTag{
-
-				// }
-			}
-		}
-
 		count, status, err := scu.FindSCU(request, 0)
 		if err != nil {
 			log.Fatalln(err)
@@ -145,7 +134,7 @@ func main() {
 
 		log.Println("CFind was successful")
 		log.Printf("Found %d results with status %d\n\n", count, status)
-		os.Exit(0)
+		return
 	}
 	if *cmove {
 		if *destinationAE == "" {
@@ -163,7 +152,7 @@ func main() {
 			log.Fatalln(err)
 		}
 		log.Println("CMove was successful")
-		os.Exit(0)
+		return
 	}
 	if *cstore {
 		if *fileName == "" {
@@ -175,7 +164,7 @@ func main() {
 			log.Fatalln(err)
 		}
 		log.Printf("CStore of %s was successful", *fileName)
-		os.Exit(0)
+		return
 	}
 	if *dump {
 		if *fileName == "" {
@@ -183,9 +172,9 @@ func main() {
 		}
 		obj, err := media.NewDCMObjFromFile(*fileName)
 		if err != nil {
-			log.Panicln(err)
+			log.Fatal(err)
 		}
 		obj.DumpTags()
-		os.Exit(0)
+		return
 	}
 }

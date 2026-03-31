@@ -5,9 +5,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"log"
+	"log/slog"
 
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
+	"github.com/innovative-io/io-dicom/implementation"
 )
 
 // DICOMBuffer - is an interface to buffer manipulation class
@@ -347,9 +348,9 @@ func (bd *dicomBuffer) WriteMeta(SOPClassUID string, SOPInstanceUID string, Tran
 	bd.WriteStringTag(0x02, 0x10, "UI", TransferSyntax, explicitVR)
 
 	// Implementation Class UID
-	bd.WriteStringTag(0x02, 0x12, "UI", "123456", explicitVR)
+	bd.WriteStringTag(0x02, 0x12, "UI", implementation.GetImplementationClassUID(), explicitVR)
 	// Implementation Version Name
-	bd.WriteStringTag(0x02, 0x13, "SH", "odb", explicitVR)
+	bd.WriteStringTag(0x02, 0x13, "SH", implementation.GetImplementationVersion(), explicitVR)
 
 	// calculate group length and go Back to group size tag
 	ptr := bd.GetPosition()
@@ -371,7 +372,7 @@ func (bd *dicomBuffer) ReadObj(obj DICOMObject) error {
 			tag.VR = GetDictionaryVR(tag.Group, tag.Element)
 		}
 		if tag.Length%2 != 0 && tag.VR != "SQ" && tag.Length != 0xffffffff {
-			log.Printf("%s is odd", tag.Name)
+			slog.Warn("media: odd-length tag", "name", tag.Name, "group", tag.Group, "element", tag.Element)
 		}
 		obj.Add(tag)
 	}

@@ -17,6 +17,16 @@ const maxCodecPayloadBytes = 512 << 20
 
 var errBackendUnavailable = errors.New("jpeg 12/16-bit decode requires the libjpeg native backend (build with -tags libjpeg)")
 
+var (
+	errPayloadTooLarge    = errors.New("jpeg: payload exceeds maximum allowed size")
+	errPayloadTruncated   = errors.New("jpeg: declared size exceeds slice length")
+	errOutputTooSmall     = errors.New("jpeg: output buffer too small")
+	errInvalidDimensions  = errors.New("jpeg: invalid image dimensions")
+	errInputTooSmall      = errors.New("jpeg: input buffer too small")
+	errUnsupportedSamples = errors.New("jpeg: unsupported number of samples per pixel")
+	errNilOutputPointers  = errors.New("jpeg: nil output pointers")
+)
+
 var supportedTransferSyntaxUIDs = []string{
 	"1.2.840.10008.1.2.4.50",
 	"1.2.840.10008.1.2.4.51",
@@ -56,9 +66,7 @@ func (passthroughBackend) SupportedTransferSyntaxUIDs() []string {
 	return SupportedTransferSyntaxUIDs()
 }
 
-func (passthroughBackend) Decode12(encoded []byte, output []byte) error {
-	_ = encoded
-	_ = output
+func (passthroughBackend) Decode12(_ []byte, _ []byte) error {
 	return errBackendUnavailable
 }
 
@@ -68,9 +76,7 @@ func (passthroughBackend) Encode12(raw []byte, _ uint16, _ uint16, _ uint16, _ i
 	return encoded, nil
 }
 
-func (passthroughBackend) Decode16(encoded []byte, output []byte) error {
-	_ = encoded
-	_ = output
+func (passthroughBackend) Decode16(_ []byte, _ []byte) error {
 	return errBackendUnavailable
 }
 
@@ -267,13 +273,13 @@ func encode16WithContext(ctx context.Context, raw []byte, width uint16, height u
 
 func DIJG8decodeContext(_ context.Context, jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
 	if jpegSize > uint32(len(jpegData)) || outputSize > uint32(len(outputData)) {
-		return errors.New("ERROR, Decode8, JPEG failed")
+		return errPayloadTruncated
 	}
 	if len(jpegData) == 0 || len(outputData) == 0 {
-		return errors.New("ERROR, Decode8, JPEG failed")
+		return errInputTooSmall
 	}
 	if jpegSize > maxCodecPayloadBytes || outputSize > maxCodecPayloadBytes {
-		return errors.New("ERROR, Decode8, JPEG failed")
+		return errPayloadTooLarge
 	}
 
 	jpegData = jpegData[:jpegSize]
@@ -298,7 +304,7 @@ func DIJG8decodeContext(_ context.Context, jpegData []byte, jpegSize uint32, out
 	}
 
 	if w*h*3 > len(outputData) {
-		return errors.New("ERROR, Decode8, JPEG failed")
+		return errOutputTooSmall
 	}
 
 	idx := 0
@@ -323,7 +329,7 @@ func DIJG8decode(jpegData []byte, jpegSize uint32, outputData []byte, outputSize
 func EIJG8encode(rawData []byte, width uint16, height uint16, samples uint16, outData *[]byte, outSize *int, mode int) error {
 	w, h := int(width), int(height)
 	if w <= 0 || h <= 0 {
-		return errors.New("ERROR, Encode8, JPEG failed")
+		return errInvalidDimensions
 	}
 
 	var img image.Image
@@ -331,7 +337,7 @@ func EIJG8encode(rawData []byte, width uint16, height uint16, samples uint16, ou
 	case 1:
 		expected := w * h
 		if len(rawData) < expected {
-			return errors.New("ERROR, Encode8, JPEG failed")
+			return errInputTooSmall
 		}
 		gray := image.NewGray(image.Rect(0, 0, w, h))
 		copy(gray.Pix, rawData[:expected])
@@ -339,7 +345,7 @@ func EIJG8encode(rawData []byte, width uint16, height uint16, samples uint16, ou
 	case 3:
 		expected := w * h * 3
 		if len(rawData) < expected {
-			return errors.New("ERROR, Encode8, JPEG failed")
+			return errInputTooSmall
 		}
 		rgba := image.NewRGBA(image.Rect(0, 0, w, h))
 		src := rawData[:expected]
@@ -356,7 +362,7 @@ func EIJG8encode(rawData []byte, width uint16, height uint16, samples uint16, ou
 		}
 		img = rgba
 	default:
-		return errors.New("ERROR, Encode8, JPEG failed")
+		return errUnsupportedSamples
 	}
 
 	quality := 95
@@ -379,13 +385,13 @@ func DIJG12decode(jpegData []byte, jpegSize uint32, outputData []byte, outputSiz
 
 func DIJG12decodeContext(ctx context.Context, jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
 	if jpegSize > uint32(len(jpegData)) {
-		return errors.New("ERROR, Decode12, JPEG failed")
+		return errPayloadTruncated
 	}
 	if outputSize > uint32(len(outputData)) {
-		return errors.New("ERROR, Decode12, JPEG failed")
+		return errOutputTooSmall
 	}
 	if jpegSize > maxCodecPayloadBytes || outputSize > maxCodecPayloadBytes {
-		return errors.New("ERROR, Decode12, JPEG failed")
+		return errPayloadTooLarge
 	}
 	return decode12WithContext(ctx, jpegData[:jpegSize], outputData[:outputSize])
 }
@@ -396,10 +402,10 @@ func EIJG12encode(rawData []uint8, width uint16, height uint16, samples uint16, 
 
 func EIJG12encodeContext(ctx context.Context, rawData []uint8, width uint16, height uint16, samples uint16, outData *[]byte, outSize *int, mode int) error {
 	if outData == nil || outSize == nil {
-		return errors.New("ERROR, Encode12, JPEG failed")
+		return errNilOutputPointers
 	}
 	if len(rawData) > maxCodecPayloadBytes {
-		return errors.New("ERROR, Encode12, JPEG failed")
+		return errPayloadTooLarge
 	}
 	encoded, err := encode12WithContext(ctx, rawData, width, height, samples, mode)
 	if err != nil {
@@ -416,13 +422,13 @@ func DIJG16decode(jpegData []byte, jpegSize uint32, outputData []byte, outputSiz
 
 func DIJG16decodeContext(ctx context.Context, jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
 	if jpegSize > uint32(len(jpegData)) {
-		return errors.New("ERROR, Decode16, JPEG failed")
+		return errPayloadTruncated
 	}
 	if outputSize > uint32(len(outputData)) {
-		return errors.New("ERROR, Decode16, JPEG failed")
+		return errOutputTooSmall
 	}
 	if jpegSize > maxCodecPayloadBytes || outputSize > maxCodecPayloadBytes {
-		return errors.New("ERROR, Decode16, JPEG failed")
+		return errPayloadTooLarge
 	}
 	return decode16WithContext(ctx, jpegData[:jpegSize], outputData[:outputSize])
 }
@@ -433,10 +439,10 @@ func EIJG16encode(rawData []uint8, width uint16, height uint16, samples uint16, 
 
 func EIJG16encodeContext(ctx context.Context, rawData []uint8, width uint16, height uint16, samples uint16, outData *[]byte, outSize *int, mode int) error {
 	if outData == nil || outSize == nil {
-		return errors.New("ERROR, Encode16, JPEG failed")
+		return errNilOutputPointers
 	}
 	if len(rawData) > maxCodecPayloadBytes {
-		return errors.New("ERROR, Encode16, JPEG failed")
+		return errPayloadTooLarge
 	}
 	encoded, err := encode16WithContext(ctx, rawData, width, height, samples, mode)
 	if err != nil {
