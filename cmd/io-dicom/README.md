@@ -49,3 +49,23 @@ The server (`-scp`) responds to SIGINT/SIGTERM for graceful shutdown.
 
   -studyuid string
     	Study Instance UID added to the request (used with -cfind, -cmove)
+
+  -tls
+    	Enable TLS. For -scp: requires -tlscert and -tlskey. For SCU operations:
+    	uses the system certificate pool unless -tlsca is provided.
+
+  -tlscert string
+    	Path to a PEM-encoded TLS certificate file (required when -scp -tls is set;
+    	also used as the client certificate for mutual TLS SCU connections)
+
+  -tlskey string
+    	Path to a PEM-encoded TLS private key file (required when -scp -tls is set)
+
+  -tlsca string
+    	Path to a PEM-encoded CA certificate file used to verify the remote peer.
+    	For -scp: enables mutual TLS (RequireAndVerifyClientCert).
+    	For SCU: overrides the system certificate pool.
+
+  -tlsinsecure
+    	Skip TLS certificate verification for outbound SCU connections.
+    	Do not use in production.

@@ -3,6 +3,7 @@ package services
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -38,10 +39,11 @@ type SCP interface {
 }
 
 type scp struct {
-	Port     int
-	listener net.Listener
-	wg       sync.WaitGroup
-	mu       sync.RWMutex
+	Port      int
+	tlsConfig *tls.Config
+	listener  net.Listener
+	wg        sync.WaitGroup
+	mu        sync.RWMutex
 
 	onAssociationRequest func(request network.AssociationRequest) bool
 	onCFindRequest       func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16)
@@ -50,7 +52,7 @@ type scp struct {
 	onCEchoRequest       func(request network.AssociationRequest) bool
 }
 
-// NewSCP - Creates an interface to scp
+// NewSCP creates a plain-TCP DICOM SCP listening on port.
 func NewSCP(port int) SCP {
 	media.InitDict()
 
@@ -59,9 +61,24 @@ func NewSCP(port int) SCP {
 	}
 }
 
+// NewSCPWithTLS creates a TLS-enabled DICOM SCP listening on port.
+// cfg must contain at least one certificate (e.g. loaded with tls.LoadX509KeyPair).
+func NewSCPWithTLS(port int, cfg *tls.Config) SCP {
+	media.InitDict()
+
+	return &scp{
+		Port:      port,
+		tlsConfig: cfg,
+	}
+}
+
 func (s *scp) Start(ctx context.Context) error {
 	var err error
-	s.listener, err = net.Listen("tcp", fmt.Sprintf(":%d", s.Port))
+	if s.tlsConfig != nil {
+		s.listener, err = tls.Listen("tcp", fmt.Sprintf(":%d", s.Port), s.tlsConfig)
+	} else {
+		s.listener, err = net.Listen("tcp", fmt.Sprintf(":%d", s.Port))
+	}
 	if err != nil {
 		return err
 	}
@@ -121,7 +138,9 @@ func (s *scp) handleConnection(conn net.Conn) {
 	for {
 		dco, err := pdu.NextPDU()
 		if err != nil {
-			if !errors.Is(err, network.ErrAssociationReleased) && !errors.Is(err, network.ErrAssociationAborted) {
+			if !errors.Is(err, network.ErrAssociationReleased) &&
+				!errors.Is(err, network.ErrAssociationAborted) &&
+				!errors.Is(err, network.ErrAssociationRejected) {
 				slog.Error("scp: network error", "ERROR", err)
 			}
 			return

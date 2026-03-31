@@ -34,6 +34,8 @@ See `docs/project-structure.md` for package boundaries and maintenance conventio
 - AE titles are encoded as fixed 16-byte, space-padded fields. Internal spaces are preserved while only trailing padding is trimmed when read back.
 - Association presentation context negotiation now prefers `Explicit VR Little Endian`, then `Implicit VR Little Endian`, then `Explicit VR Big Endian` when multiple offered transfer syntaxes are known.
 - Association accept handling selects a default presentation context from accepted contexts using the same preference order and falls back to any accepted context when needed.
+- Rejecting an incoming A-ASSOCIATE-RQ closes the transport connection immediately after sending A-ASSOCIATE-RJ, conforming to DICOM PS 3.8 §9.3.4.
+- TLS 1.2+ is supported for both the SCP listener (`NewSCPWithTLS`) and SCU outbound connections (`Destination.IsTLS` + `Destination.TLSConfig`). Pure-Go builds with no `crypto/tls` overhead remain the default when `IsTLS` is false.
 
 ## Breaking Changes
 
@@ -372,6 +374,57 @@ scu := services.NewSCU(destination)
 _, err := scu.MoveSCU(destinationAE, request, 0)
 if err != nil {
   log.Fatalln(err)
+}
+```
+
+### Start a TLS-enabled SCP Server
+
+```golang
+import "crypto/tls"
+
+cert, err := tls.LoadX509KeyPair("server.crt", "server.key")
+if err != nil {
+  log.Fatal(err)
+}
+tlsCfg := &tls.Config{
+  Certificates: []tls.Certificate{cert},
+  MinVersion:   tls.VersionTLS12,
+}
+
+scp := services.NewSCPWithTLS(port, tlsCfg)
+// Register handlers exactly as with NewSCP …
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+defer stop()
+if err := scp.Start(ctx); err != nil {
+  log.Fatal(err)
+}
+```
+
+### Connect an SCU over TLS
+
+Set `IsTLS: true` and supply a `*tls.Config` in the `Destination`. The SCU
+calls `ConnectTLS` automatically when the flag is set.
+
+```golang
+pool, _ := x509.SystemCertPool()
+tlsCfg := &tls.Config{
+  RootCAs:    pool,
+  ServerName: "dicom.example.com",
+  MinVersion: tls.VersionTLS12,
+}
+
+destination := &network.Destination{
+  HostName:  "dicom.example.com",
+  CalledAE:  "REMOTE_AE",
+  CallingAE: "MY_AE",
+  Port:      1043,
+  IsTLS:     true,
+  TLSConfig: tlsCfg,
+}
+
+scu := services.NewSCU(destination)
+if err := scu.EchoSCU(30); err != nil {
+  log.Fatal(err)
 }
 ```
 

@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -46,6 +49,13 @@ func main() {
 
 	startSCP := flag.Bool("scp", false, "Start a SCP")
 
+	// TLS flags — apply to both the SCP listener and SCU outbound connections.
+	tlsEnabled := flag.Bool("tls", false, "Enable TLS. For SCP: requires -tlscert and -tlskey. For SCU: uses system cert pool unless -tlsca is set")
+	tlsCert := flag.String("tlscert", "", "Path to TLS certificate file (PEM) — required for -scp -tls")
+	tlsKey := flag.String("tlskey", "", "Path to TLS private key file (PEM) — required for -scp -tls")
+	tlsCA := flag.String("tlsca", "", "Path to CA certificate file (PEM) used to verify the remote peer")
+	tlsInsecure := flag.Bool("tlsinsecure", false, "Skip TLS certificate verification (SCU only — do not use in production)")
+
 	flag.Parse()
 
 	if *startSCP {
@@ -56,7 +66,29 @@ func main() {
 		if *calledAE == "" {
 			log.Fatalln("calledae is required for scp")
 		}
-		scp := services.NewSCP(*port)
+
+		var scp services.SCP
+		if *tlsEnabled {
+			if *tlsCert == "" || *tlsKey == "" {
+				log.Fatalln("-tlscert and -tlskey are required when -scp -tls is set")
+			}
+			cert, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
+			if err != nil {
+				log.Fatalf("failed to load TLS certificate: %v", err)
+			}
+			tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+			if *tlsCA != "" {
+				pool, err := loadCertPool(*tlsCA)
+				if err != nil {
+					log.Fatalf("failed to load CA certificate: %v", err)
+				}
+				tlsCfg.ClientCAs = pool
+				tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+			}
+			scp = services.NewSCPWithTLS(*port, tlsCfg)
+		} else {
+			scp = services.NewSCP(*port)
+		}
 
 		scp.OnAssociationRequest(func(request network.AssociationRequest) bool {
 			called := request.GetCalledAE()
@@ -108,8 +140,30 @@ func main() {
 		IsCFind:   true,
 		IsCStore:  true,
 		IsMWL:     true,
-		IsTLS:     false,
+		IsTLS:     *tlsEnabled,
 	}
+	if *tlsEnabled {
+		tlsCfg := &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: *tlsInsecure, //nolint:gosec
+		}
+		if *tlsCA != "" {
+			pool, err := loadCertPool(*tlsCA)
+			if err != nil {
+				log.Fatalf("failed to load CA certificate: %v", err)
+			}
+			tlsCfg.RootCAs = pool
+		}
+		if *tlsCert != "" && *tlsKey != "" {
+			cert, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
+			if err != nil {
+				log.Fatalf("failed to load client TLS certificate: %v", err)
+			}
+			tlsCfg.Certificates = []tls.Certificate{cert}
+		}
+		destination.TLSConfig = tlsCfg
+	}
+	_ = tlsCA // consumed above; suppress unused-variable warning when TLS is off
 
 	if *cecho {
 		scu := services.NewSCU(destination)
@@ -177,4 +231,18 @@ func main() {
 		obj.DumpTags()
 		return
 	}
+}
+
+// loadCertPool reads a PEM-encoded CA certificate file and returns a cert pool
+// containing it. Used for both server-side ClientCAs and client-side RootCAs.
+func loadCertPool(caFile string) (*x509.CertPool, error) {
+	pem, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("no valid certificates found in %s", caFile)
+	}
+	return pool, nil
 }

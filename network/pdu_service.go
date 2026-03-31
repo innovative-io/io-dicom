@@ -2,6 +2,7 @@ package network
 
 import (
 	"bufio"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,11 +23,19 @@ var ErrAssociationReleased = errors.New("DICOM association released")
 // ErrAssociationAborted is returned by NextPDU when the peer sends an A-ABORT PDU.
 var ErrAssociationAborted = errors.New("DICOM association aborted")
 
+// ErrAssociationRejected is returned by NextPDU when the local handler rejects the
+// incoming A-ASSOCIATE-RQ. The SCP must close the transport connection after rejection
+// (DICOM PS 3.8 §9.3.4).
+var ErrAssociationRejected = errors.New("DICOM association rejected")
+
 // PDUService - struct for PDUService
 type PDUService interface {
 	GetTransferSyntax(pcid byte) *transfersyntax.TransferSyntax
 	SetTimeout(timeout int)
 	Connect(IP string, Port string) error
+	// ConnectTLS dials the remote AE over TLS and negotiates an A-ASSOCIATE.
+	// Pass nil for cfg to use the system certificate pool without a client certificate.
+	ConnectTLS(IP string, Port string, cfg *tls.Config) error
 	Close()
 	GetAAssociationRQ() AssociationRequest
 	GetCalledAE() string
@@ -162,7 +171,25 @@ func (pdu *pduService) Connect(IP string, Port string) error {
 	if err != nil {
 		return errors.New("pduservice::Connect - " + err.Error())
 	}
+	return pdu.finishConnect(conn)
+}
 
+// ConnectTLS dials the remote AE with TLS and negotiates an A-ASSOCIATE.
+// Pass nil for cfg to use the system certificate pool with no client certificate.
+func (pdu *pduService) ConnectTLS(IP string, Port string, cfg *tls.Config) error {
+	pdu.AcceptedPresentationContexts = nil
+	pdu.Pdata.PresentationContextID = 0
+
+	conn, err := tls.Dial("tcp", IP+":"+Port, cfg)
+	if err != nil {
+		return fmt.Errorf("pduservice::ConnectTLS - %w", err)
+	}
+	return pdu.finishConnect(conn)
+}
+
+// finishConnect completes an A-ASSOCIATE handshake over an already-established
+// connection (plain TCP or TLS).
+func (pdu *pduService) finishConnect(conn net.Conn) error {
 	pdu.conn = conn
 	if pdu.Timeout > 0 {
 		conn.SetDeadline(time.Now().Add(time.Duration(pdu.Timeout) * time.Second))
@@ -178,7 +205,7 @@ func (pdu *pduService) Connect(IP string, Port string) error {
 	pdu.AssocRQ.SetImplementationClassUID(implementation.GetImplementationClassUID())
 	pdu.AssocRQ.SetImplementationVersionName(implementation.GetImplementationVersion())
 
-	if err = pdu.AssocRQ.Write(pdu.readWriter); err != nil {
+	if err := pdu.AssocRQ.Write(pdu.readWriter); err != nil {
 		return err
 	}
 
@@ -443,7 +470,11 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 	if pdu.OnAssociationRequest == nil || !pdu.OnAssociationRequest(pdu.AssocRQ) {
 		slog.Warn("pdu: rejecting association - rejected by application handler", "CalledAE", pdu.AssocRQ.GetCalledAE(), "CallingAE", pdu.AssocRQ.GetCallingAE())
 		pdu.AssocRJ.Set(1, 7)
-		return pdu.AssocRJ.Write(rw)
+		if err := pdu.AssocRJ.Write(rw); err != nil {
+			return err
+		}
+		// Per DICOM PS 3.8 §9.3.4 the rejecting AE must close the transport connection.
+		return ErrAssociationRejected
 	}
 
 	pdu.AcceptedPresentationContexts = nil

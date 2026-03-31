@@ -39,10 +39,10 @@ func NewSCU(destination *network.Destination) SCU {
 
 func (d *scu) EchoSCU(timeout int) error {
 	pdu := network.NewPDUService()
+	defer pdu.Close()
 	if err := d.openAssociation(pdu, sopclass.Verification.UID, []string{}, timeout); err != nil {
 		return err
 	}
-	defer pdu.Close()
 	if err := dimse.CEchoWriteRQ(pdu); err != nil {
 		return err
 	}
@@ -54,10 +54,10 @@ func (d *scu) FindSCU(Query media.DICOMObject, timeout int) (int, uint16, error)
 	status := dicomstatus.Warning
 
 	pdu := network.NewPDUService()
+	defer pdu.Close()
 	if err := d.openAssociation(pdu, sopclass.StudyRootQueryRetrieveInformationModelFind.UID, []string{}, timeout); err != nil {
 		return results, status, err
 	}
-	defer pdu.Close()
 
 	if err := dimse.CFindWriteRQ(pdu, Query); err != nil {
 		return results, status, err
@@ -87,10 +87,10 @@ func (d *scu) MoveSCU(destAET string, Query media.DICOMObject, timeout int) (uin
 	var pending int
 
 	pdu := network.NewPDUService()
+	defer pdu.Close()
 	if err := d.openAssociation(pdu, sopclass.StudyRootQueryRetrieveInformationModelMove.UID, []string{}, timeout); err != nil {
 		return dicomstatus.FailureUnableToProcess, err
 	}
-	defer pdu.Close()
 
 	if err := dimse.CMoveWriteRQ(pdu, Query, destAET); err != nil {
 		return dicomstatus.FailureUnableToProcess, err
@@ -123,10 +123,10 @@ func (d *scu) StoreSCU(FileName string, timeout int) error {
 	}
 
 	pdu := network.NewPDUService()
+	defer pdu.Close()
 	if err := d.openAssociation(pdu, SOPClassUID, []string{DDO.GetTransferSyntax().UID}, timeout); err != nil {
 		return err
 	}
-	defer pdu.Close()
 
 	if err := d.writeStoreRQ(pdu, DDO); err != nil {
 		return err
@@ -164,6 +164,9 @@ func (d *scu) openAssociation(pdu network.PDUService, abstractSyntax string, tra
 	presContext.AddTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
 	pdu.AddPresContexts(presContext)
 
+	if d.destination.IsTLS {
+		return pdu.ConnectTLS(d.destination.HostName, strconv.Itoa(d.destination.Port), d.destination.TLSConfig)
+	}
 	return pdu.Connect(d.destination.HostName, strconv.Itoa(d.destination.Port))
 }
 
