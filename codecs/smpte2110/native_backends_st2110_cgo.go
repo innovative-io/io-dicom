@@ -70,7 +70,7 @@ func (st2110Backend) Decode(encoded []byte, output []byte, _ string) error {
 		"-pix_fmt", pixFmt,
 		outPath,
 	}
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.Command(resolvedST2110FFmpeg, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg decode failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -130,7 +130,7 @@ func (st2110Backend) Encode(raw []byte, width uint16, height uint16, samples uin
 		"-f", "matroska",
 		outPath,
 	}
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.Command(resolvedST2110FFmpeg, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("ffmpeg encode failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -145,13 +145,25 @@ func (st2110Backend) Encode(raw []byte, width uint16, height uint16, samples uin
 	return encoded, nil
 }
 
+var (
+	resolvedST2110FFmpeg  string
+	resolvedST2110FFprobe string
+)
+
 func ensureST2110Tools() error {
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
+	if resolvedST2110FFmpeg != "" && resolvedST2110FFprobe != "" {
+		return nil
+	}
+	p, err := exec.LookPath("ffmpeg")
+	if err != nil {
 		return errST2110ToolingUnavailable
 	}
-	if _, err := exec.LookPath("ffprobe"); err != nil {
+	q, err := exec.LookPath("ffprobe")
+	if err != nil {
 		return errST2110ToolingUnavailable
 	}
+	resolvedST2110FFmpeg = p
+	resolvedST2110FFprobe = q
 	return nil
 }
 
@@ -176,8 +188,11 @@ func pixelFormatForLayout(samples int, bits int) (string, int, error) {
 }
 
 func probeDimensions(path string) (int, int, error) {
+	if err := ensureST2110Tools(); err != nil {
+		return 0, 0, err
+	}
 	cmd := exec.Command(
-		"ffprobe",
+		resolvedST2110FFprobe,
 		"-v", "error",
 		"-select_streams", "v:0",
 		"-show_entries", "stream=width,height",

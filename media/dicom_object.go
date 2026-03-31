@@ -22,6 +22,10 @@ import (
 	"github.com/innovative-io/io-dicom/transcoder"
 )
 
+// maxPixelDataBytes is the upper bound for a single pixel data allocation (512 MiB).
+// It prevents unbounded allocations from malformed or malicious DICOM input.
+const maxPixelDataBytes = 512 * 1024 * 1024
+
 // DICOMObject - DICOM Object structure
 type DICOMObject interface {
 	Add(tag *DICOMTag)
@@ -420,7 +424,7 @@ func (obj *dicomObject) WriteToBytes() []byte {
 // Wrote - Write a DICOM Object to a DICOM File
 func (obj *dicomObject) WriteToFile(fileName string) error {
 	data := obj.WriteToBytes()
-	return os.WriteFile(fileName, data, 0644)
+	return os.WriteFile(fileName, data, 0o600)
 }
 
 func (obj *dicomObject) WriteDate(tag *tags.Tag, date time.Time) {
@@ -571,18 +575,19 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 				icon = true
 			}
 			if (tag.Group == 0x7FE0) && (tag.Element == 0x0010) && (!icon) {
-				size := uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+				sizePx := uint64(cols) * uint64(rows) * uint64(bitsa) / 8
 				if RGB {
-					size = 3 * size
+					sizePx = 3 * sizePx
 				}
 				if frames > 0 {
-					size = uint32(frames) * size
+					sizePx *= uint64(frames)
 				} else {
 					frames = 1
 				}
-				if size == 0 {
-					return nil, errors.New("DICOMObject::ConvertTransferSyntax, size=0")
+				if sizePx == 0 || sizePx > uint64(maxPixelDataBytes) {
+					return nil, fmt.Errorf("DICOMObject::GetPixelData, invalid pixel data size %d", sizePx)
 				}
+				size := uint32(sizePx)
 
 				if frame >= int(frames) {
 					return nil, errors.New("invalid frame")
@@ -593,7 +598,13 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 					if tagIdx >= len(obj.Tags) {
 						return nil, fmt.Errorf("frame %d out of range", frame)
 					}
-					return obj.GetTagAt(tagIdx).Data, nil
+					t := obj.GetTagAt(tagIdx)
+					if t == nil {
+						return nil, fmt.Errorf("frame %d pixel item is nil", frame)
+					}
+					out := make([]byte, len(t.Data))
+					copy(out, t.Data)
+					return out, nil
 				} else {
 					if RGB && (planar == 1) {
 						var img_offset, img_size uint32
@@ -612,7 +623,9 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 						}
 						planar = 0
 					} else {
-						return tag.Data, nil
+						out := make([]byte, len(tag.Data))
+						copy(out, tag.Data)
+						return out, nil
 					}
 				}
 			}
@@ -684,21 +697,25 @@ func (obj *dicomObject) ChangeTransferSyntax(outTS *transfersyntax.TransferSynta
 				icon = true
 			}
 			if (tag.Group == 0x7FE0) && (tag.Element == 0x0010) && (!icon) {
-				size := uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+				sizePx := uint64(cols) * uint64(rows) * uint64(bitsa) / 8
 				if RGB {
-					size = 3 * size
+					sizePx = 3 * sizePx
 				}
+				var size uint32
 				if frames > 0 {
-					size = uint32(frames) * size
+					sizePx *= uint64(frames)
 				} else {
 					frames = 1
 				}
-				if size == 0 {
-					return errors.New("DICOMObject::ConvertTransferSyntax, size=0")
+				if sizePx == 0 || sizePx > uint64(maxPixelDataBytes) {
+					return fmt.Errorf("DICOMObject::ConvertTransferSyntax, invalid pixel data size %d", sizePx)
 				}
+				size = uint32(sizePx)
 				img := make([]byte, size)
 				if tag.Length == 0xFFFFFFFF {
-					obj.uncompress(i, img, size, frames, bitsa, PhotoInt)
+					if err := obj.uncompress(i, img, size, frames, bitsa, PhotoInt); err != nil {
+						return fmt.Errorf("DICOMObject::ConvertTransferSyntax, decompress failed: %w", err)
+					}
 				} else { // Uncompressed
 					if RGB && (planar == 1) { // change from planar=1 to planar=0
 						var img_offset, img_size uint32
@@ -1670,6 +1687,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing RLE frame %d", j)
+			}
 			if err := transcoder.RLEdecode(tag.Data, img[offset:], tag.Length, single, PhotoInt); err != nil {
 				return err
 			}
@@ -1682,6 +1702,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG lossless frame %d", j)
+			}
 			if bitsa == 8 {
 				if err := jpeg.DIJG8decode(tag.Data, tag.Length, img[offset:], single); err != nil {
 					return err
@@ -1698,6 +1721,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG baseline frame %d", j)
+			}
 			if bitsa == 8 {
 				if err := jpeg.DIJG8decode(tag.Data, tag.Length, img[offset:], single); err != nil {
 					return err
@@ -1714,6 +1740,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG extended frame %d", j)
+			}
 			if err := jpeg.DIJG12decode(tag.Data, tag.Length, img[offset:], single); err != nil {
 				return err
 			}
@@ -1726,6 +1755,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG-LS frame %d", j)
+			}
 			if err := jpegls.JLSdecode(tag.Data, tag.Length, img[offset:]); err != nil {
 				return err
 			}
@@ -1742,6 +1774,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG 2000 lossless frame %d", j)
+			}
 			if err := jpeg2000.J2Kdecode(tag.Data, tag.Length, img[offset:]); err != nil {
 				return err
 			}
@@ -1756,6 +1791,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG 2000 frame %d", j)
+			}
 			if err := jpeg2000.J2Kdecode(tag.Data, tag.Length, img[offset:]); err != nil {
 				return err
 			}
@@ -1770,6 +1808,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG XL frame %d", j)
+			}
 			if err := jpegxl.JXLdecode(tag.Data, tag.Length, img[offset:]); err != nil {
 				return err
 			}
@@ -1782,6 +1823,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPIP frame %d", j)
+			}
 			if err := jpip.JPIPdecode(tag.Data, tag.Length, img[offset:], obj.TransferSyntax.UID); err != nil {
 				return err
 			}
@@ -1822,6 +1866,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing MPEG frame %d", j)
+			}
 			if err := mpeg.MPEGdecode(tag.Data, tag.Length, img[offset:], obj.TransferSyntax.UID); err != nil {
 				return err
 			}
@@ -1836,6 +1883,9 @@ func (obj *dicomObject) uncompress(i int, img []byte, size uint32, frames uint32
 		for j = 0; j < frames; j++ {
 			offset = j * single
 			tag := obj.GetTagAt(i + 1)
+			if tag == nil {
+				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing SMPTE frame %d", j)
+			}
 			if err := smpte2110.SMPTE2110decode(tag.Data, tag.Length, img[offset:], obj.TransferSyntax.UID); err != nil {
 				return err
 			}

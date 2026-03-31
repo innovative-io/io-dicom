@@ -77,7 +77,7 @@ func (ffmpegBackend) Decode(encoded []byte, output []byte, transferSyntaxUID str
 		"-pix_fmt", pixFmt,
 		outPath,
 	}
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.Command(resolvedFFmpeg, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg decode failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -142,7 +142,7 @@ func (ffmpegBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 		"-f", "mpegts",
 		outPath,
 	}
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.Command(resolvedFFmpeg, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("ffmpeg encode failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -157,13 +157,25 @@ func (ffmpegBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 	return encoded, nil
 }
 
+var (
+	resolvedFFmpeg  string
+	resolvedFFprobe string
+)
+
 func ensureFFmpegTools() error {
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
+	if resolvedFFmpeg != "" && resolvedFFprobe != "" {
+		return nil
+	}
+	p, err := exec.LookPath("ffmpeg")
+	if err != nil {
 		return errFFmpegToolingUnavailable
 	}
-	if _, err := exec.LookPath("ffprobe"); err != nil {
+	q, err := exec.LookPath("ffprobe")
+	if err != nil {
 		return errFFmpegToolingUnavailable
 	}
+	resolvedFFmpeg = p
+	resolvedFFprobe = q
 	return nil
 }
 
@@ -188,16 +200,26 @@ func pixelFormatForLayout(samples int, bits int) (string, int, error) {
 }
 
 func codecForUID(uid string) (string, error) {
-	if !isSupportedMPEGUID(uid) {
+	switch uid {
+	case "1.2.840.10008.1.2.4.100", "1.2.840.10008.1.2.4.100.1",
+		"1.2.840.10008.1.2.4.101", "1.2.840.10008.1.2.4.101.1":
+		return "mpeg2video", nil
+	case "1.2.840.10008.1.2.4.102", "1.2.840.10008.1.2.4.102.1",
+		"1.2.840.10008.1.2.4.103", "1.2.840.10008.1.2.4.103.1",
+		"1.2.840.10008.1.2.4.104", "1.2.840.10008.1.2.4.104.1",
+		"1.2.840.10008.1.2.4.105", "1.2.840.10008.1.2.4.105.1",
+		"1.2.840.10008.1.2.4.106", "1.2.840.10008.1.2.4.106.1":
+		return "mpeg4", nil
+	case "1.2.840.10008.1.2.4.107", "1.2.840.10008.1.2.4.108":
+		return "hevc", nil
+	default:
 		return "", errUnsupportedTransferSyntax
 	}
-	// mpeg2video is widely available across ffmpeg builds and keeps tagged tests portable.
-	return "mpeg2video", nil
 }
 
 func probeDimensions(path string) (int, int, error) {
 	cmd := exec.Command(
-		"ffprobe",
+		resolvedFFprobe,
 		"-v", "error",
 		"-select_streams", "v:0",
 		"-show_entries", "stream=width,height",

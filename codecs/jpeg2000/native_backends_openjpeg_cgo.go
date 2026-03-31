@@ -53,7 +53,7 @@ func (openjpegBackend) Decode(encoded []byte, output []byte) error {
 		return fmt.Errorf("write j2k payload: %w", err)
 	}
 
-	cmd := exec.Command("opj_decompress", "-i", inPath, "-o", outPath)
+	cmd := exec.Command(resolvedOPJDecompress, "-i", inPath, "-o", outPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("opj_decompress failed: %w: %s", err, stringsTrim(string(out)))
 	}
@@ -103,7 +103,7 @@ func (openjpegBackend) Encode(raw []byte, width uint16, height uint16, samples u
 	if ratio > 0 {
 		args = append(args, "-r", strconv.Itoa(ratio))
 	}
-	cmd := exec.Command("opj_compress", args...)
+	cmd := exec.Command(resolvedOPJCompress, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("opj_compress failed: %w: %s", err, stringsTrim(string(out)))
 	}
@@ -118,13 +118,25 @@ func (openjpegBackend) Encode(raw []byte, width uint16, height uint16, samples u
 	return encoded, nil
 }
 
+var (
+	resolvedOPJCompress   string
+	resolvedOPJDecompress string
+)
+
 func ensureOpenJPEGTools() error {
-	if _, err := exec.LookPath("opj_compress"); err != nil {
+	if resolvedOPJCompress != "" && resolvedOPJDecompress != "" {
+		return nil
+	}
+	p, err := exec.LookPath("opj_compress")
+	if err != nil {
 		return errOpenJPEGToolingUnavailable
 	}
-	if _, err := exec.LookPath("opj_decompress"); err != nil {
+	q, err := exec.LookPath("opj_decompress")
+	if err != nil {
 		return errOpenJPEGToolingUnavailable
 	}
+	resolvedOPJCompress = p
+	resolvedOPJDecompress = q
 	return nil
 }
 
@@ -135,15 +147,15 @@ func encodePNM(raw []byte, width int, height int, samples int, bits int) ([]byte
 	if samples != 1 && samples != 3 {
 		return nil, errOpenJPEGUnsupportedPNM
 	}
-	if bits != 8 && bits != 16 {
+	if bits != 8 && bits != 12 && bits != 16 {
 		return nil, errOpenJPEGUnsupportedPNM
 	}
 
 	bytesPerSample := 1
 	maxVal := 255
-	if bits == 16 {
+	if bits > 8 {
 		bytesPerSample = 2
-		maxVal = 65535
+		maxVal = (1 << bits) - 1
 	}
 	expected := width * height * samples * bytesPerSample
 	if len(raw) != expected {

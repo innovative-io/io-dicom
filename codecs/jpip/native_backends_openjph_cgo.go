@@ -119,15 +119,15 @@ func (openjphBackend) Encode(raw []byte, width uint16, height uint16, samples ui
 
 func resolveCodecTools() (compressCmd string, decompressCmd string, err error) {
 	// Prefer OpenJPH tools when available.
-	if _, cErr := exec.LookPath("ojph_compress"); cErr == nil {
-		if _, dErr := exec.LookPath("ojph_decompress"); dErr == nil {
-			return "ojph_compress", "ojph_decompress", nil
+	if p, cErr := exec.LookPath("ojph_compress"); cErr == nil {
+		if q, dErr := exec.LookPath("ojph_decompress"); dErr == nil {
+			return p, q, nil
 		}
 	}
 	// Fallback to OpenJPEG tools for broader compatibility.
-	if _, cErr := exec.LookPath("opj_compress"); cErr == nil {
-		if _, dErr := exec.LookPath("opj_decompress"); dErr == nil {
-			return "opj_compress", "opj_decompress", nil
+	if p, cErr := exec.LookPath("opj_compress"); cErr == nil {
+		if q, dErr := exec.LookPath("opj_decompress"); dErr == nil {
+			return p, q, nil
 		}
 	}
 	return "", "", errOpenJPHToolingUnavailable
@@ -140,15 +140,15 @@ func encodePNM(raw []byte, width int, height int, samples int, bits int) ([]byte
 	if samples != 1 && samples != 3 {
 		return nil, errOpenJPHUnsupportedPNM
 	}
-	if bits != 8 && bits != 16 {
+	if bits != 8 && bits != 12 && bits != 16 {
 		return nil, errOpenJPHUnsupportedPNM
 	}
 
 	bytesPerSample := 1
 	maxVal := 255
-	if bits == 16 {
+	if bits > 8 {
 		bytesPerSample = 2
-		maxVal = 65535
+		maxVal = (1 << bits) - 1
 	}
 	expected := width * height * samples * bytesPerSample
 	if len(raw) != expected {

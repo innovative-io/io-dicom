@@ -53,7 +53,7 @@ func (libjxlBackend) Decode(encoded []byte, output []byte) error {
 		return fmt.Errorf("write jxl payload: %w", err)
 	}
 
-	cmd := exec.Command("djxl", inPath, outPath)
+	cmd := exec.Command(resolvedDJXL, inPath, outPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("djxl failed: %w: %s", err, stringsTrim(string(out)))
 	}
@@ -103,7 +103,7 @@ func (libjxlBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 	if lossless {
 		args = append(args, "--distance=0")
 	}
-	cmd := exec.Command("cjxl", args...)
+	cmd := exec.Command(resolvedCJXL, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("cjxl failed: %w: %s", err, stringsTrim(string(out)))
 	}
@@ -118,13 +118,25 @@ func (libjxlBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 	return encoded, nil
 }
 
+var (
+	resolvedCJXL string
+	resolvedDJXL string
+)
+
 func ensureLibJXLTools() error {
-	if _, err := exec.LookPath("cjxl"); err != nil {
+	if resolvedCJXL != "" && resolvedDJXL != "" {
+		return nil
+	}
+	p, err := exec.LookPath("cjxl")
+	if err != nil {
 		return errLibJXLToolingUnavailable
 	}
-	if _, err := exec.LookPath("djxl"); err != nil {
+	q, err := exec.LookPath("djxl")
+	if err != nil {
 		return errLibJXLToolingUnavailable
 	}
+	resolvedCJXL = p
+	resolvedDJXL = q
 	return nil
 }
 
@@ -135,15 +147,15 @@ func encodePNM(raw []byte, width int, height int, samples int, bits int) ([]byte
 	if samples != 1 && samples != 3 {
 		return nil, errLibJXLUnsupportedPNM
 	}
-	if bits != 8 && bits != 16 {
+	if bits != 8 && bits != 12 && bits != 16 {
 		return nil, errLibJXLUnsupportedPNM
 	}
 
 	bytesPerSample := 1
 	maxVal := 255
-	if bits == 16 {
+	if bits > 8 {
 		bytesPerSample = 2
-		maxVal = 65535
+		maxVal = (1 << bits) - 1
 	}
 	expected := width * height * samples * bytesPerSample
 	if len(raw) != expected {

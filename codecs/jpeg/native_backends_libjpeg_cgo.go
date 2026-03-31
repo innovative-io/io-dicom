@@ -37,20 +37,12 @@ func (libjpegBackend) Decode12(encoded []byte, output []byte) error {
 		return errLibJPEGInvalidPayload
 	}
 	if err := ensureLibJPEGTools(); err != nil {
-		if len(encoded) > len(output) {
-			return errLibJPEGInvalidPayload
-		}
-		copy(output, encoded)
-		return nil
+		return err
 	}
 
 	raw, err := decodeLosslessToRaw(encoded)
 	if err != nil {
-		if len(encoded) > len(output) {
-			return errLibJPEGInvalidPayload
-		}
-		copy(output, encoded)
-		return nil
+		return fmt.Errorf("libjpeg decode12: %w", err)
 	}
 	if len(raw) > len(output) {
 		return errLibJPEGInvalidPayload
@@ -61,20 +53,14 @@ func (libjpegBackend) Decode12(encoded []byte, output []byte) error {
 
 func (libjpegBackend) Encode12(raw []byte, width uint16, height uint16, samples uint16, _ int) ([]byte, error) {
 	if err := ensureLibJPEGTools(); err != nil {
-		out := make([]byte, len(raw))
-		copy(out, raw)
-		return out, nil
+		return nil, err
 	}
 	encoded, err := encodeRawLossless(raw, int(width), int(height), int(samples), 12)
 	if err != nil {
-		out := make([]byte, len(raw))
-		copy(out, raw)
-		return out, nil
+		return nil, fmt.Errorf("libjpeg encode12: %w", err)
 	}
 	if decoded, derr := decodeLosslessToRaw(encoded); derr != nil || len(decoded) != len(raw) {
-		out := make([]byte, len(raw))
-		copy(out, raw)
-		return out, nil
+		return nil, fmt.Errorf("libjpeg encode12: roundtrip verification failed")
 	}
 	return encoded, nil
 }
@@ -84,20 +70,12 @@ func (libjpegBackend) Decode16(encoded []byte, output []byte) error {
 		return errors.New("ERROR, Decode16, JPEG failed")
 	}
 	if err := ensureLibJPEGTools(); err != nil {
-		if len(encoded) > len(output) {
-			return errors.New("ERROR, Decode16, JPEG failed")
-		}
-		copy(output, encoded)
-		return nil
+		return err
 	}
 
 	raw, err := decodeLosslessToRaw(encoded)
 	if err != nil {
-		if len(encoded) > len(output) {
-			return errors.New("ERROR, Decode16, JPEG failed")
-		}
-		copy(output, encoded)
-		return nil
+		return fmt.Errorf("libjpeg decode16: %w", err)
 	}
 	if len(raw) > len(output) {
 		return errors.New("ERROR, Decode16, JPEG failed")
@@ -108,31 +86,37 @@ func (libjpegBackend) Decode16(encoded []byte, output []byte) error {
 
 func (libjpegBackend) Encode16(raw []byte, width uint16, height uint16, samples uint16, _ int) ([]byte, error) {
 	if err := ensureLibJPEGTools(); err != nil {
-		out := make([]byte, len(raw))
-		copy(out, raw)
-		return out, nil
+		return nil, err
 	}
 	encoded, err := encodeRawLossless(raw, int(width), int(height), int(samples), 16)
 	if err != nil {
-		out := make([]byte, len(raw))
-		copy(out, raw)
-		return out, nil
+		return nil, fmt.Errorf("libjpeg encode16: %w", err)
 	}
 	if decoded, derr := decodeLosslessToRaw(encoded); derr != nil || len(decoded) != len(raw) {
-		out := make([]byte, len(raw))
-		copy(out, raw)
-		return out, nil
+		return nil, fmt.Errorf("libjpeg encode16: roundtrip verification failed")
 	}
 	return encoded, nil
 }
 
+var (
+	resolvedCJPEG string
+	resolvedDJPEG string
+)
+
 func ensureLibJPEGTools() error {
-	if _, err := exec.LookPath("cjpeg"); err != nil {
+	if resolvedCJPEG != "" && resolvedDJPEG != "" {
+		return nil
+	}
+	p, err := exec.LookPath("cjpeg")
+	if err != nil {
 		return errLibJPEGToolsMissing
 	}
-	if _, err := exec.LookPath("djpeg"); err != nil {
+	q, err := exec.LookPath("djpeg")
+	if err != nil {
 		return errLibJPEGToolsMissing
 	}
+	resolvedCJPEG = p
+	resolvedDJPEG = q
 	return nil
 }
 
@@ -155,7 +139,7 @@ func encodeRawLossless(raw []byte, width int, height int, samples int, bits int)
 	}
 
 	cmd := exec.Command(
-		"cjpeg",
+		resolvedCJPEG,
 		"-lossless", "1",
 		"-precision", strconv.Itoa(bits),
 		"-outfile", outPath,
@@ -188,7 +172,7 @@ func decodeLosslessToRaw(encoded []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	cmd := exec.Command("djpeg", "-pnm", "-outfile", outPath, inPath)
+	cmd := exec.Command(resolvedDJPEG, "-pnm", "-outfile", outPath, inPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("djpeg failed: %w: %s", err, string(bytes.TrimSpace(out)))
 	}
