@@ -9,6 +9,7 @@ import (
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
 )
 
 // AssociationAccept AssociationAccept
@@ -48,12 +49,12 @@ type associationAccept struct {
 // NewAssociationAccept NewAssociationAccept
 func NewAssociationAccept() AssociationAccept {
 	return &associationAccept{
-		ItemType:        0x02,
+		ItemType:        pdutype.AssociationAccept,
 		Reserved1:       0x00,
-		ProtocolVersion: 0x01,
+		ProtocolVersion: ProtocolVersionCurrent,
 		Reserved2:       0x00,
 		AppContext: &uidItem{
-			itemType:  0x10,
+			itemType:  pdutype.ApplicationContextItem,
 			reserved1: 0x00,
 			uid:       sopclass.DICOMApplicationContext.UID,
 			length:    uint16(len(sopclass.DICOMApplicationContext.UID)),
@@ -192,15 +193,15 @@ func (aaac *associationAccept) ReadDynamic(ms media.MemoryStream) (err error) {
 		}
 
 		switch TempByte {
-		case 0x10:
+		case pdutype.ApplicationContextItem:
 			aaac.AppContext.ReadDynamic(ms)
 			Count = Count - int(aaac.AppContext.GetSize())
-		case 0x21:
+		case pdutype.PresentationContextAcceptItem:
 			PresContextAccept := NewPresentationContextAccept()
 			PresContextAccept.ReadDynamic(ms)
 			Count = Count - int(PresContextAccept.Size())
 			aaac.PresContextAccepts = append(aaac.PresContextAccepts, PresContextAccept)
-		case 0x50: // User Information
+		case pdutype.UserInformationItem: // User Information
 			aaac.UserInfo.ReadDynamic(ms)
 			Count = Count - int(aaac.UserInfo.Size())
 		default:

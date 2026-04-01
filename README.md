@@ -60,14 +60,19 @@ Implemented DIMSE protocol support (DICOM PS3.7):
 - **N-service command response helpers** - N-EVENT-REPORT, N-GET, N-SET, N-ACTION, N-CREATE, N-DELETE response encoding helpers are available in `dimse/`
 
 Notes:
-- C-CANCEL command reception is parsed in SCP, tracked by message ID, and exposed through `OnCCancelRequest`; this enables application-driven cancellation handling and pre-operation cancellation responses.
-- Full mid-operation cancellation preemption still requires asynchronous operation handlers.
+- C-CANCEL command reception is parsed in SCP, tracked by message ID, and exposed through `OnCCancelRequest`.
+- C-FIND, C-GET, and C-MOVE now use context-cancellable streaming handlers. SCP can emit pending responses while the handler is running and applies true in-flight cancel preemption by canceling handler context when a matching C-CANCEL arrives.
+- Breaking API change: `OnCFindRequest`, `OnCGetRequest`, and `OnCMoveRequest` now require context-aware handler signatures with emit callbacks and structured final results.
+- C-GET/C-MOVE progress counters are validated for deterministic monotonic progression (remaining non-increasing; completed/failed/warnings non-decreasing). Non-monotonic progress is terminated with processing-failure status.
+- If a query/retrieve handler does not exit within the cancel grace window after matching C-CANCEL, SCP sends A-ABORT and closes the association.
 - C-FIND status semantics are enforced: pending responses must include an identifier dataset, and final responses must not include one.
 - Query/Retrieve operation-specific status validation is enforced for C-FIND/C-GET/C-MOVE response parsing and writing (including service-specific disallowed combinations such as C-STORE-only warning codes and C-MOVE-only refusal codes).
+- Command writes select the negotiated presentation context by SOP class instead of relying on a single default context, so multiple accepted query/retrieve models can coexist on one association.
 - Core DICOM status descriptions are available via `network/dicomstatus.Description(status)` with range-aware fallback for unmapped Axxx/Bxxx/Cxxx codes.
 - C-STORE service-specific status-code class validation is enforced for response parsing and writing.
 - C-STORE response field validation is enforced (`CommandDataSetType=0x0101` and non-zero `MessageIDBeingRespondedTo`).
 - C-ECHO response field validation is enforced (`CommandDataSetType=0x0101` and non-zero `MessageIDBeingRespondedTo`).
+- DICOM file writes now validate required output prerequisites before emitting file meta information: transfer syntax, SOP Class UID, and SOP Instance UID must all be present.
 - For detailed C-MOVE usage patterns, error handling, and compliance information, see the [C-MOVE Implementation Guide](docs/dicom-cmove-implementation.md).
 
 ## DICOM Network Conformance Notes
@@ -499,23 +504,22 @@ scp.OnAssociationRequest(func(request network.AssociationRequest) bool {
   return *calledAE == called
 })
 
-scp.OnCFindRequest(func(request network.AssociationRequest, queryLevel string, query media.DICOMObject) ([]media.DICOMObject, uint16) {
+scp.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, queryLevel string, query media.DICOMObject, emit func(media.DICOMObject)) (services.CFindResult, error) {
   query.DumpTags()
-  results := make([]media.DICOMObject, 0)
   for i := 0; i < 10; i++ {
-    results = append(results, utils.GenerateCFindRequest())
+    emit(utils.GenerateCFindRequest())
   }
-  return results, dicomstatus.Success
+  return services.CFindResult{Status: dicomstatus.Success}, nil
 })
 
-scp.OnCGetRequest(func(request network.AssociationRequest, getLevel string, query media.DICOMObject) (uint16, uint16, uint16, uint16, uint16) {
-  // status, remaining, completed, failed, warnings
-  return dicomstatus.Success, 0, 1, 0, 0
+scp.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, query media.DICOMObject, emit func(services.CGetProgress)) (services.CGetResult, error) {
+  emit(services.CGetProgress{Remaining: 1, Completed: 0, Failed: 0, Warnings: 0})
+  return services.CGetResult{Status: dicomstatus.Success, Remaining: 0, Completed: 1, Failed: 0, Warnings: 0}, nil
 })
 
-scp.OnCMoveRequest(func(request network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject) uint16 {
+scp.OnCMoveRequest(func(ctx context.Context, request network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject, emit func(services.CMoveProgress)) (services.CMoveResult, error) {
   query.DumpTags()
-  return dicomstatus.Success
+  return services.CMoveResult{Status: dicomstatus.Success}, nil
 })
 
 scp.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {

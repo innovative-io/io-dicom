@@ -39,5 +39,5 @@ func CCancelWriteRQ(pdu network.PDUService, messageIDBeingRespondedTo uint16) er
 	commandObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageIDBeingRespondedTo)
 	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
 
-	return pdu.Write(commandObj, 0x01)
+	return pdu.Write(commandObj, network.PDVCommand)
 }

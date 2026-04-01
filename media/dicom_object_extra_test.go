@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
+	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 )
 
 func init() {
@@ -126,6 +127,43 @@ func TestDICOMObject_WriteToFile(t *testing.T) {
 	}
 	if info.Size() == 0 {
 		t.Fatal("WriteToFile() produced empty file")
+	}
+}
+
+func TestDICOMObject_WriteToFile_RequiresTransferSyntax(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
+	obj.WriteString(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.101")
+
+	err := obj.WriteToFile(filepath.Join(t.TempDir(), "invalid-no-ts.dcm"))
+	if err == nil {
+		t.Fatal("WriteToFile() error = nil, want missing transfer syntax error")
+	}
+}
+
+func TestDICOMObject_WriteToFile_RequiresSOPClassUID(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+	obj.WriteString(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.102")
+
+	err := obj.WriteToFile(filepath.Join(t.TempDir(), "invalid-no-sopclass.dcm"))
+	if err == nil {
+		t.Fatal("WriteToFile() error = nil, want missing SOP Class UID error")
+	}
+}
+
+func TestDICOMObject_WriteToFile_RequiresSOPInstanceUID(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+	obj.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
+
+	err := obj.WriteToFile(filepath.Join(t.TempDir(), "invalid-no-sopinstance.dcm"))
+	if err == nil {
+		t.Fatal("WriteToFile() error = nil, want missing SOP Instance UID error")
 	}
 }
 

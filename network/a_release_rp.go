@@ -4,6 +4,7 @@ import (
 	"bufio"
 
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
 )
 
 // ReleaseResponse - ReleaseResponse
@@ -24,7 +25,7 @@ type releaseResponse struct {
 // NewReleaseResponse - NewReleaseResponse
 func NewReleaseResponse() ReleaseResponse {
 	return &releaseResponse{
-		ItemType:  0x06,
+		ItemType:  pdutype.AssociationReleaseResponse,
 		Reserved1: 0x00,
 		Reserved2: 0x00,
 	}

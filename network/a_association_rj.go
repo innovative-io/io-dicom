@@ -5,25 +5,59 @@ import (
 	"log/slog"
 
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
+)
+
+// Reject Result values per DICOM PS3.8 Table 9-21.
+const (
+	RejectResultPermanent byte = 0x01
+	RejectResultTransient byte = 0x02
+)
+
+// Reject Source values per DICOM PS3.8 Table 9-21.
+const (
+	RejectSourceServiceUser              byte = 0x01
+	RejectSourceServiceProviderACSE      byte = 0x02
+	RejectSourceServiceProviderPresenter byte = 0x03
+)
+
+// Reject Reason values for UL-service-user (Source 1) per PS3.8 Table 9-21.
+const (
+	RejectReasonNoReasonGiven                  byte = 0x01
+	RejectReasonApplicationContextNotSupported byte = 0x02
+	RejectReasonCallingAENotRecognized         byte = 0x03
+	RejectReasonCalledAENotRecognized          byte = 0x07
+)
+
+// Reject Reason values for UL-service-provider ACSE (Source 2) per PS3.8 Table 9-21.
+const (
+	RejectReasonACSENoReasonGiven           byte = 0x01
+	RejectReasonProtocolVersionNotSupported byte = 0x02
+)
+
+// Reject Reason values for UL-service-provider presentation (Source 3) per PS3.8 Table 9-21.
+const (
+	RejectReasonTemporaryCongestion byte = 0x01
+	RejectReasonLocalLimitExceeded  byte = 0x02
 )
 
 var rejectReasonsBySource = map[byte]map[byte]string{
 	// UL-service-user (Table 9-21, Source 1)
-	1: {
-		1: "No reason given",
-		2: "Application context not supported",
-		3: "Calling AE not recognized",
-		7: "Called AE not recognized",
+	RejectSourceServiceUser: {
+		RejectReasonNoReasonGiven:                  "No reason given",
+		RejectReasonApplicationContextNotSupported: "Application context not supported",
+		RejectReasonCallingAENotRecognized:         "Calling AE not recognized",
+		RejectReasonCalledAENotRecognized:          "Called AE not recognized",
 	},
 	// UL-service-provider (ACSE related function, Source 2)
-	2: {
-		1: "No reason given",
-		2: "Protocol version not supported",
+	RejectSourceServiceProviderACSE: {
+		RejectReasonACSENoReasonGiven:           "No reason given",
+		RejectReasonProtocolVersionNotSupported: "Protocol version not supported",
 	},
 	// UL-service-provider (presentation related function, Source 3)
-	3: {
-		1: "Temporary congestion",
-		2: "Local limit exceeded",
+	RejectSourceServiceProviderPresenter: {
+		RejectReasonTemporaryCongestion: "Temporary congestion",
+		RejectReasonLocalLimitExceeded:  "Local limit exceeded",
 	},
 }
 
@@ -52,12 +86,12 @@ type associationReject struct {
 // NewAssociationReject creates an association reject
 func NewAssociationReject() AssociationReject {
 	return &associationReject{
-		ItemType:  0x03,
+		ItemType:  pdutype.AssociationReject,
 		Reserved1: 0x00,
 		Reserved2: 0x00,
-		Result:    0x01,
-		Source:    0x03,
-		Reason:    1,
+		Result:    RejectResultPermanent,
+		Source:    RejectSourceServiceProviderPresenter,
+		Reason:    RejectReasonTemporaryCongestion,
 	}
 }
 

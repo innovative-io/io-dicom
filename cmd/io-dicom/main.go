@@ -96,18 +96,17 @@ func main() {
 			return *calledAE == called
 		})
 
-		scp.OnCFindRequest(func(request network.AssociationRequest, queryLevel string, query media.DICOMObject) ([]media.DICOMObject, uint16) {
+		scp.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, queryLevel string, query media.DICOMObject, emit func(media.DICOMObject)) (services.CFindResult, error) {
 			query.DumpTags()
-			results := make([]media.DICOMObject, 0)
 			for i := 0; i < 10; i++ {
-				results = append(results, utils.GenerateCFindRequest())
+				emit(utils.GenerateCFindRequest())
 			}
-			return results, dicomstatus.Success
+			return services.CFindResult{Status: dicomstatus.Success}, nil
 		})
 
-		scp.OnCMoveRequest(func(request network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject) uint16 {
+		scp.OnCMoveRequest(func(ctx context.Context, request network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject, emit func(services.CMoveProgress)) (services.CMoveResult, error) {
 			query.DumpTags()
-			return dicomstatus.Success
+			return services.CMoveResult{Status: dicomstatus.Success}, nil
 		})
 
 		scp.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {

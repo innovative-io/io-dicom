@@ -4,6 +4,7 @@ import (
 	"bufio"
 
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
 )
 
 // MaximumPDULength - MaximumPDULength
@@ -26,7 +27,7 @@ type maximumPDULength struct {
 // NewMaximumPDULength - NewMaximumPDULength
 func NewMaximumPDULength() MaximumPDULength {
 	return &maximumPDULength{
-		ItemType: 0x51,
+		ItemType: pdutype.MaximumSubLengthItem,
 		Length:   4,
 	}
 }

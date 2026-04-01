@@ -10,7 +10,7 @@ This document formally defines the DICOM standards alignment and known limitatio
 
 ## Executive Summary
 
-io-dicom is a **partial-conformance** DICOM implementation targeting **SCU (Service Class User) and SCP (Service Class Provider)** roles with primary focus on query/retrieve and storage workflows. The library prioritizes:
+io-dicom is a **partial-coverage, standards-aligned-for-implemented-features** DICOM implementation targeting **SCU (Service Class User) and SCP (Service Class Provider)** roles with primary focus on query/retrieve and storage workflows. The library prioritizes:
 
 - ✅ **Standards compliance** for implemented features (with mapped conformance)
 - ✅ **Pure-Go, no-CGO design** (trade-off: some codec implementations are fallback-only)
@@ -27,10 +27,10 @@ io-dicom is a **partial-conformance** DICOM implementation targeting **SCU (Serv
 | **PS3.1** | Introduction | Informational Only | Architectural alignment only |
 | **PS3.2** | Conformance | **This Document** | Formal conformance statement |
 | **PS3.3** | IOD Definitions | Partial | Object parsing works; IOD validation incomplete |
-| **PS3.4** | Service Classes | Partial | Core services (C-ECHO, C-STORE, C-FIND, C-GET, C-MOVE); see section below |
+| **PS3.4** | Service Classes | Partial | Core services implemented; advanced query options/model negotiation and retrieve orchestration remain scoped limitations |
 | **PS3.5** | Data Structures & Encoding | Partial | Transfer syntax support matrix below; edge cases incomplete |
 | **PS3.6** | Data Dictionary | Aligned | Tag library complete with all standard tags |
-| **PS3.7** | DIMSE Services | **Partial** | Core command semantics; status-code edge cases incomplete (see section) |
+| **PS3.7** | DIMSE Services | **Partial** | Core command semantics aligned for implemented services; full part coverage remains incomplete |
 | **PS3.8** | Network Communication | **Aligned** | UL state machine fully tested; PDU sequencing conforms |
 | **PS3.10** | Media Storage | Partial | DICOM file I/O works; constraints incomplete |
 | **PS3.11** | Ultrasound | Out of Scope | No ultrasound-specific object handling |
@@ -94,14 +94,17 @@ io-dicom is a **partial-conformance** DICOM implementation targeting **SCU (Serv
 - Request/Response command field exchange
 - Identifier dataset handling
 - Query/Retrieve level validation in SCP request handling (`PATIENT`, `STUDY`, `SERIES`, `IMAGE`, `FRAME`)
+- Query/Retrieve model selection follows the negotiated presentation context abstract syntax for the active SOP class
 - Status code transitions (Success, Pending, Warning, Failure)
 - Response dataset validation (pending responses must include identifier)
 - Final response dataset validation (final responses must not include identifier)
 - CommandDataSetType validation (0x0101, 0x0102)
+- In-flight cancellation preemption via context-cancellable streaming handlers; matching C-CANCEL cancels the active handler context and returns final Cancel status
+- Forced association abort if a canceled handler does not exit within the cancel grace window
 
 **Known Limitations**:
 - Service class attributes (Relational Query, Timezone Query) not enforced
-- No Query Model negotiation (Standard Query Model assumed)
+- No extended negotiation support for relational or timezone query options
 
 ---
 
@@ -151,9 +154,9 @@ io-dicom is a **partial-conformance** DICOM implementation targeting **SCU (Serv
 
 ---
 
-#### ⚠️ C-CANCEL (Cancel)
+#### ✅ C-CANCEL (Cancel)
 
-**Status**: Partial  
+**Status**: Aligned  
 **Standard Reference**: PS3.4 §C.3.4.2.1 (Cancel Operation)  
 **Implementation**: `dimse/` command parsing  
 **Tests**: `services/scp_test.go` (cancel tracking path covered indirectly in SCP command handling)
@@ -163,11 +166,11 @@ io-dicom is a **partial-conformance** DICOM implementation targeting **SCU (Serv
 - Message ID tracking for cancellation requests
 - Optional callback hook (`OnCCancelRequest`) for application-level cancel handling
 - Pre-operation cancellation response support for C-FIND/C-GET/C-MOVE when cancellation is already registered
+- In-flight C-FIND/C-GET/C-MOVE preemption via context-cancellable streaming handlers: SCP cancels the active operation context on matching C-CANCEL and emits final Cancel with deterministic final response state
+- C-GET/C-MOVE pending progress counters are enforced as monotonic (remaining non-increasing; completed/failed/warnings non-decreasing)
+- If a canceled C-FIND/C-GET/C-MOVE handler does not exit within the cancel grace window, SCP aborts the association (A-ABORT)
 
-**Known Limitations**:
-- ⚠️ **Critical**: Synchronous per-association request processing means mid-operation cancellation is **not** functionally supported
-- Cancel request is not yet preemptive for in-flight result streaming
-- **Recommendation**: Implement asynchronous handler dispatch if C-CANCEL support is required
+**Known Limitations**: None for implemented query/retrieve cancel semantics
 
 ---
 
@@ -279,6 +282,7 @@ io-dicom is a **partial-conformance** DICOM implementation targeting **SCU (Serv
 - A-ASSOCIATE-AC/RJ/AB parsing
 - Transfer syntax preference (Explicit VR LE → Implicit VR LE → Explicit VR BE)
 - Negotiation restricted to declared supported transfer syntaxes (`dictionary/transfersyntax.SupportedTransferSyntax`)
+- Write-path presentation context selection by negotiated abstract syntax (for example, distinct query/retrieve SOP class models on one association)
 - AE title handling (16-byte, space-padded)
 - Implementation class UID and version name encoding
 - Explicit presentation-context reject result mapping:
@@ -421,10 +425,10 @@ io-dicom is a **partial-conformance** DICOM implementation targeting **SCU (Serv
 - Transfer Syntax UID encoding/selection
 - Media Storage SOP Class/Instance UID
 - File-level meta information
+- Write-time validation of required file output prerequisites (`TransferSyntaxUID`, `SOPClassUID`, `SOPInstanceUID`)
 
 **Known Limitations**:
 - ⚠️ **Media Storage File-Set**: Directory and catalog file management not implemented
-- No validation of required file meta attributes
 - No automatic transfer syntax negotiation based on file encoding
 
 ---
@@ -466,14 +470,14 @@ io-dicom is a **partial-conformance** DICOM implementation targeting **SCU (Serv
 
 ### 2. Synchronous Request Processing
 
-**Decision**: Synchronous per-association request dispatch  
+**Decision**: Synchronous per-association request dispatch with cancellable query/retrieve worker execution  
 **Impact**:
 - ✅ Simpler state management
 - ✅ Deterministic error semantics
-- ⚠️ C-CANCEL cannot interrupt mid-operation
+- ✅ C-CANCEL can preempt active C-FIND/C-GET/C-MOVE handlers through context cancellation and abort fallback
 - ⚠️ Async workloads require external goroutine wrapping
 
-**Conformance Impact**: C-CANCEL conformance limited (documented as minimal support)
+**Conformance Impact**: Operation control is aligned for implemented query/retrieve commands; broader service-class coverage still depends on package scope
 
 ---
 
@@ -506,7 +510,6 @@ io-dicom is a **partial-conformance** DICOM implementation targeting **SCU (Serv
 | Gap | Severity | Mitigation | Workaround |
 |---|---|---|---|
 | Status-code edge cases (PS3.4 disallowed combinations) | Low | Continue expanding per-operation matrix tests to full status tables | Validate status codes in handler layer |
-| C-CANCEL mid-operation | High | Implement async request dispatcher | Wrap handlers in goroutines with cancellation |
 | Codec conversion (lossy) | Medium | Use external codec service | Route through ffmpeg or similar for conversion |
 | Presentation context result code matrix | Low | Add comprehensive negotiation tests | Accept handler returns default transfer syntax |
 | Media file-set management | Low | Use filesystem directly or external PACS | Implement custom file organization |
@@ -542,7 +545,7 @@ This library has **not** undergone formal DICOM Conformance Review Board (CRB) c
 ## Recommendations for Users
 
 1. **Interoperability Testing**: Validate io-dicom behavior with target PACS systems before production deployment
-2. **C-CANCEL Support**: If mid-operation cancellation is required, implement asynchronous handler wrapping
+2. **Query/Retrieve Handlers**: Ensure C-FIND/C-GET/C-MOVE handlers honor `context.Context` cancellation promptly to avoid forced association abort on cancel timeout
 3. **Codec Conversion**: Route lossy codec conversion through external services (ffmpeg, DicomRtl, etc.)
 4. **IOD Validation**: Implement DICOM object attribute validation in your handler layer
 5. **Status Code Validation**: Enforce service-specific status-code constraints in your application logic

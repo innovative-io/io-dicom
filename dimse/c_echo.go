@@ -36,7 +36,7 @@ func CEchoWriteRQ(pdu network.PDUService) error {
 	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
 	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
 
-	return pdu.Write(commandObj, 0x01)
+	return pdu.Write(commandObj, network.PDVCommand)
 }
 
 // CEchoReadRSP CEcho response read
@@ -92,5 +92,5 @@ func CEchoWriteRSP(pdu network.PDUService, commandObj media.DICOMObject) error {
 	responseObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
 	responseObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
 	responseObj.WriteUint16(tags.Status, dicomstatus.Success)
-	return pdu.Write(responseObj, 0x01)
+	return pdu.Write(responseObj, network.PDVCommand)
 }

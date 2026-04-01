@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
 )
 
 // PresentationContext - PresentationContext
@@ -36,7 +37,7 @@ type presentationContext struct {
 // NewPresentationContext - NewPresentationContext
 func NewPresentationContext() PresentationContext {
 	return &presentationContext{
-		ItemType:              0x20,
+		ItemType:              pdutype.PresentationContextItem,
 		PresentationContextID: Uniq8odd(),
 	}
 }
@@ -54,14 +55,14 @@ func (pc *presentationContext) GetAbstractSyntax() UIDItem {
 }
 
 func (pc *presentationContext) SetAbstractSyntax(abstractSyntaxUID string) {
-	pc.AbsSyntax.SetType(0x30)
+	pc.AbsSyntax.SetType(pdutype.AbstractSyntaxItem)
 	pc.AbsSyntax.SetReserved(0x00)
 	pc.AbsSyntax.SetUID(abstractSyntaxUID)
 	pc.AbsSyntax.SetLength(uint16(len(abstractSyntaxUID)))
 }
 
 func (pc *presentationContext) AddTransferSyntax(transferSyntaxUID string) {
-	transferSyntax := NewUIDItem(transferSyntaxUID, 0x40)
+	transferSyntax := NewUIDItem(transferSyntaxUID, pdutype.TransferSyntaxItem)
 	pc.TrnSyntaxs = append(pc.TrnSyntaxs, transferSyntax)
 }
 

@@ -14,12 +14,12 @@ func isValidQRStatus(status uint16) bool {
 		return true
 	}
 
-	if status >= 0x0100 && status <= 0x01FF {
+	if status >= dicomstatus.FailureServiceSpecificMin && status <= dicomstatus.FailureServiceSpecificMax {
 		return true
 	}
 
 	h := status >> 12
-	return h == 0xA || h == 0xB || h == 0xC
+	return h == dicomstatus.HighNibbleFailureRefused || h == dicomstatus.HighNibbleWarning || h == dicomstatus.HighNibbleFailureCannotUnderstand
 }
 
 func validateQRStatus(status uint16, op string) error {

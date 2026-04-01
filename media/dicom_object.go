@@ -462,8 +462,30 @@ func (obj *dicomObject) WriteToBytes() []byte {
 	return bufdata.GetAllBytes()
 }
 
+func ValidateFileWrite(obj DICOMObject) error {
+	if obj == nil {
+		return errors.New("media: cannot write nil DICOM object")
+	}
+	if obj.GetTransferSyntax() == nil {
+		return errors.New("media: TransferSyntax is required for DICOM file output")
+	}
+	if transfersyntax.GetTransferSyntaxFromUID(obj.GetTransferSyntax().UID) == nil {
+		return fmt.Errorf("media: unsupported TransferSyntaxUID %q for DICOM file output", obj.GetTransferSyntax().UID)
+	}
+	if strings.TrimSpace(obj.GetString(tags.SOPClassUID)) == "" {
+		return errors.New("media: SOPClassUID is required for DICOM file output")
+	}
+	if strings.TrimSpace(obj.GetString(tags.SOPInstanceUID)) == "" {
+		return errors.New("media: SOPInstanceUID is required for DICOM file output")
+	}
+	return nil
+}
+
 // Wrote - Write a DICOM Object to a DICOM File
 func (obj *dicomObject) WriteToFile(fileName string) error {
+	if err := ValidateFileWrite(obj); err != nil {
+		return err
+	}
 	data := obj.WriteToBytes()
 	return os.WriteFile(fileName, data, 0o600)
 }

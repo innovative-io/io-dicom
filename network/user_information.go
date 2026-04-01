@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
 )
 
 // UserInformation - UserInformation
@@ -40,15 +41,15 @@ type userInformation struct {
 // NewUserInformation - NewUserInformation
 func NewUserInformation() UserInformation {
 	return &userInformation{
-		ItemType:      0x50,
+		ItemType:      pdutype.UserInformationItem,
 		MaxSubLength:  NewMaximumPDULength(),
 		AsyncOpWindow: NewAsyncOperationWindow(),
 		SCPSCURole:    NewRoleSelect(),
 		ImpClass: uidItem{
-			itemType: 0x52,
+			itemType: pdutype.ImplementationClassUIDItem,
 		},
 		ImpVersion: uidItem{
-			itemType: 0x55,
+			itemType: pdutype.ImplementationVersionNameItem,
 		},
 	}
 }
@@ -85,7 +86,7 @@ func (ui *userInformation) GetImplementationClass() UIDItem {
 }
 
 func (ui *userInformation) SetImplementationClassUID(name string) {
-	ui.ImpClass.SetType(0x52)
+	ui.ImpClass.SetType(pdutype.ImplementationClassUIDItem)
 	ui.ImpClass.SetReserved(0x00)
 	ui.ImpClass.SetUID(name)
 	ui.ImpClass.SetLength(uint16(len(name)))
@@ -96,7 +97,7 @@ func (ui *userInformation) GetImplementationVersion() UIDItem {
 }
 
 func (ui *userInformation) SetImplementationVersionName(name string) {
-	ui.ImpVersion.SetType(0x55)
+	ui.ImpVersion.SetType(pdutype.ImplementationVersionNameItem)
 	ui.ImpVersion.SetReserved(0x00)
 	ui.ImpVersion.SetUID(name)
 	ui.ImpVersion.SetLength(uint16(len(name)))
@@ -145,20 +146,20 @@ func (ui *userInformation) ReadDynamic(ms media.MemoryStream) (err error) {
 		}
 
 		switch TempByte {
-		case 0x51:
+		case pdutype.MaximumSubLengthItem:
 			ui.MaxSubLength.ReadDynamic(ms)
 			Count = Count - int(ui.MaxSubLength.Size())
-		case 0x52:
+		case pdutype.ImplementationClassUIDItem:
 			ui.ImpClass.ReadDynamic(ms)
 			Count = Count - int(ui.ImpClass.GetSize())
-		case 0x53:
+		case pdutype.AsyncOperationsWindowItem:
 			ui.AsyncOpWindow.ReadDynamic(ms)
 			Count = Count - int(ui.AsyncOpWindow.Size())
-		case 0x54:
+		case pdutype.SCPSCURoleSelectionItem:
 			ui.SCPSCURole.ReadDynamic(ms)
 			Count = Count - int(ui.SCPSCURole.Size())
 			ui.UserInfoBaggage += uint32(ui.SCPSCURole.Size())
-		case 0x55:
+		case pdutype.ImplementationVersionNameItem:
 			ui.ImpVersion.ReadDynamic(ms)
 			Count = Count - int(ui.ImpVersion.GetSize())
 		default:

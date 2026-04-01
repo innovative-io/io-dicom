@@ -93,8 +93,8 @@ func Test_scu_FindSCU(t *testing.T) {
 		return request.GetCalledAE() == "TEST_SCP"
 	})
 
-	testSCP.OnCFindRequest(func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16) {
-		return make([]media.DICOMObject, 0), dicomstatus.Success
+	testSCP.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, findLevel string, data media.DICOMObject, emit func(media.DICOMObject)) (CFindResult, error) {
+		return CFindResult{Status: dicomstatus.Success}, nil
 	})
 
 	media.InitDict()

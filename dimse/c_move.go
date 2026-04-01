@@ -160,13 +160,13 @@ func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destination
 	commandObj.WriteUint16(tags.Priority, pri)
 	commandObj.WriteUint16(tags.CommandDataSetType, commandDataSetType)
 
-	if err := pdu.Write(commandObj, 0x01); err != nil {
+	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
 	}
 
 	// If identifier dataset is present, send it
 	if commandDataSetType == dicomcommand.DataSetPresent && dataObj != nil {
-		return pdu.Write(dataObj, 0x00)
+		return pdu.Write(dataObj, network.PDVDataset)
 	}
 	return nil
 }
@@ -325,5 +325,5 @@ func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 	responseCommandObj.WriteUint16(tags.NumberOfFailedSuboperations, failed)
 	responseCommandObj.WriteUint16(tags.NumberOfWarningSuboperations, warnings)
 
-	return pdu.Write(responseCommandObj, 0x01)
+	return pdu.Write(responseCommandObj, network.PDVCommand)
 }

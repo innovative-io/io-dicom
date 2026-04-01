@@ -34,10 +34,10 @@ func CGetWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	commandObj.WriteUint16(tags.Priority, priority.Medium)
 	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetPresent)
 
-	if err := pdu.Write(commandObj, 0x01); err != nil {
+	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
 	}
-	return pdu.Write(dataObj, 0x00)
+	return pdu.Write(dataObj, network.PDVDataset)
 }
 
 // CGetReadRSP reads a C-GET-RSP and updates pending with remaining sub-ops.
@@ -135,5 +135,5 @@ func CGetWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, s
 	responseCommandObj.WriteUint16(tags.NumberOfFailedSuboperations, failed)
 	responseCommandObj.WriteUint16(tags.NumberOfWarningSuboperations, warnings)
 
-	return pdu.Write(responseCommandObj, 0x01)
+	return pdu.Write(responseCommandObj, network.PDVCommand)
 }

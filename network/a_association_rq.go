@@ -9,6 +9,7 @@ import (
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
 )
 
 // AssociationRequest - AssociationRequest
@@ -50,12 +51,12 @@ type associationRequest struct {
 // NewAssociationRequest - NewAssociationRequest
 func NewAssociationRequest() AssociationRequest {
 	return &associationRequest{
-		ItemType:        0x01,
+		ItemType:        pdutype.AssociationRequest,
 		Reserved1:       0x00,
-		ProtocolVersion: 0x01,
+		ProtocolVersion: ProtocolVersionCurrent,
 		Reserved2:       0x00,
 		AppContext: &uidItem{
-			itemType:  0x10,
+			itemType:  pdutype.ApplicationContextItem,
 			reserved1: 0x00,
 			uid:       sopclass.DICOMApplicationContext.UID,
 			length:    uint16(len(sopclass.DICOMApplicationContext.UID)),
@@ -194,16 +195,16 @@ func (aarq *associationRequest) Read(ms media.MemoryStream) (err error) {
 		}
 
 		switch TempByte {
-		case 0x10:
+		case pdutype.ApplicationContextItem:
 			aarq.AppContext.SetType(TempByte)
 			aarq.AppContext.ReadDynamic(ms)
 			Count = Count - int(aarq.AppContext.GetSize())
-		case 0x20:
+		case pdutype.PresentationContextItem:
 			PresContext := NewPresentationContext()
 			PresContext.ReadDynamic(ms)
 			Count = Count - int(PresContext.Size())
 			aarq.PresContexts = append(aarq.PresContexts, PresContext)
-		case 0x50: // User Information
+		case pdutype.UserInformationItem: // User Information
 			aarq.UserInfo.ReadDynamic(ms)
 			return nil
 		default:

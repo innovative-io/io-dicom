@@ -61,11 +61,11 @@ func NWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, resp
 		responseCommandObj.WriteString(tags.AffectedSOPInstanceUID, sopInstanceUID)
 	}
 
-	if err := pdu.Write(responseCommandObj, 0x01); err != nil {
+	if err := pdu.Write(responseCommandObj, network.PDVCommand); err != nil {
 		return err
 	}
-	if leDSType == 0x0102 {
-		return pdu.Write(responseDataObj, 0x00)
+	if leDSType == dicomcommand.DataSetPresent {
+		return pdu.Write(responseDataObj, network.PDVDataset)
 	}
 	return nil
 }

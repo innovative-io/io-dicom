@@ -4,6 +4,7 @@ import (
 	"bufio"
 
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
 )
 
 // ReleaseRequest ReleaseRequest
@@ -24,7 +25,7 @@ type releaseRequest struct {
 // NewReleaseRequest NewReleaseRequest
 func NewReleaseRequest() ReleaseRequest {
 	return &releaseRequest{
-		ItemType:  0x05,
+		ItemType:  pdutype.AssociationReleaseRequest,
 		Reserved1: 0x00,
 		Reserved2: 0x00,
 	}

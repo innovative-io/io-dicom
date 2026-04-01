@@ -153,6 +153,38 @@ func selectDefaultPresentationContextID(accepted []PresentationContextAccept) (b
 	return 0, false
 }
 
+func selectPresentationContextIDForAbstractSyntax(accepted []PresentationContextAccept, abstractSyntaxUID string) (byte, bool) {
+	if abstractSyntaxUID == "" {
+		return 0, false
+	}
+
+	for _, context := range accepted {
+		if context.GetResult() == 0 && context.GetAbstractSyntax().GetUID() == abstractSyntaxUID {
+			return context.GetPresentationContextID(), true
+		}
+	}
+
+	return 0, false
+}
+
+func negotiatedAbstractSyntaxForObject(dco media.DICOMObject) string {
+	if dco == nil {
+		return ""
+	}
+
+	if uid := dco.GetString(tags.AffectedSOPClassUID); uid != "" {
+		return uid
+	}
+	if uid := dco.GetString(tags.RequestedSOPClassUID); uid != "" {
+		return uid
+	}
+	if uid := dco.GetString(tags.SOPClassUID); uid != "" {
+		return uid
+	}
+
+	return ""
+}
+
 func (pdu *pduService) GetTransferSyntax(pcid byte) *transfersyntax.TransferSyntax {
 	for _, pca := range pdu.AcceptedPresentationContexts {
 		if pca.GetPresentationContextID() == pcid {
@@ -435,6 +467,14 @@ func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
 		pdu.Pdata.Buffer.ClearMemoryStream()
 	} else {
 		pdu.Pdata.Buffer = media.NewEmptyBufData()
+	}
+
+	if pcid, ok := selectPresentationContextIDForAbstractSyntax(pdu.AcceptedPresentationContexts, negotiatedAbstractSyntaxForObject(DCO)); ok {
+		pdu.Pdata.PresentationContextID = pcid
+	} else if pdu.Pdata.PresentationContextID == 0 {
+		if defaultPCID, ok := selectDefaultPresentationContextID(pdu.AcceptedPresentationContexts); ok {
+			pdu.Pdata.PresentationContextID = defaultPCID
+		}
 	}
 
 	if ts := pdu.GetTransferSyntax(pdu.Pdata.PresentationContextID); ts != nil {

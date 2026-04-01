@@ -7,6 +7,7 @@ import (
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
 )
 
 // PresentationContextAccept accepted presentation context
@@ -40,7 +41,7 @@ type presentationContextAccept struct {
 // NewPresentationContextAccept creates a PresentationContextAccept
 func NewPresentationContextAccept() PresentationContextAccept {
 	return &presentationContextAccept{
-		ItemType:              0x21,
+		ItemType:              pdutype.PresentationContextAcceptItem,
 		PresentationContextID: Uniq8(),
 		Result:                2,
 	}
@@ -78,14 +79,14 @@ func (pc *presentationContextAccept) GetAbstractSyntax() UIDItem {
 }
 
 func (pc *presentationContextAccept) SetAbstractSyntax(abstractSyntaxUID string) {
-	pc.AbsSyntax.SetType(0x30)
+	pc.AbsSyntax.SetType(pdutype.AbstractSyntaxItem)
 	pc.AbsSyntax.SetReserved(0x00)
 	pc.AbsSyntax.SetUID(abstractSyntaxUID)
 	pc.AbsSyntax.SetLength(uint16(len(abstractSyntaxUID)))
 }
 
 func (pc *presentationContextAccept) SetTransferSyntax(transferSyntaxUID string) {
-	pc.TrnSyntax.SetType(0x40)
+	pc.TrnSyntax.SetType(pdutype.TransferSyntaxItem)
 	pc.TrnSyntax.SetReserved(0)
 	pc.TrnSyntax.SetUID(transferSyntaxUID)
 	pc.TrnSyntax.SetLength(uint16(len(transferSyntaxUID)))

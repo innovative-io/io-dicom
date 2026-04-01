@@ -31,12 +31,12 @@ func CFindWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	commandObj.WriteUint16(tags.CommandField, dicomcommand.CFindRequest)
 	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
 	commandObj.WriteUint16(tags.Priority, priority.Medium)
-	commandObj.WriteUint16(tags.CommandDataSetType, 0x0102)
+	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetPresent)
 
-	if err := pdu.Write(commandObj, 0x01); err != nil {
+	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
 	}
-	return pdu.Write(dataObj, 0x00)
+	return pdu.Write(dataObj, network.PDVDataset)
 }
 
 // CFindReadRSP CFind response read
@@ -131,12 +131,12 @@ func CFindWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 	responseCommandObj.WriteUint16(tags.CommandDataSetType, leDSType)
 	responseCommandObj.WriteUint16(tags.Status, status)
 
-	if err := pdu.Write(responseCommandObj, 0x01); err != nil {
+	if err := pdu.Write(responseCommandObj, network.PDVCommand); err != nil {
 		return err
 	}
 
 	if responseDataObj.TagCount() > 0 {
-		return pdu.Write(responseDataObj, 0x00)
+		return pdu.Write(responseDataObj, network.PDVDataset)
 	}
 	return nil
 }

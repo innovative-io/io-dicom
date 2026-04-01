@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
 )
 
 // PresentationDataTransfer - PresentationDataTransfer
@@ -54,21 +55,20 @@ func (pd *PresentationDataTransfer) ReadDynamic(ms media.MemoryStream) (err erro
 		count = count - pd.pdv.Length - 4
 		pd.Length = pd.Length - pd.pdv.Length - 4
 
-		if pd.pdv.MsgHeader&0x02 > 0 {
+		if pd.pdv.MsgHeader&PDVLastFragment > 0 {
 			pd.MsgStatus = 1
 			pd.PresentationContextID = pd.pdv.PresentationContextID
 			return nil
 		}
 	}
 
-	if pd.pdv.MsgHeader&0x02 > 0 {
+	if pd.pdv.MsgHeader&PDVLastFragment > 0 {
 		pd.MsgStatus = 1
 	}
 
 	pd.PresentationContextID = pd.pdv.PresentationContextID
 	return nil
 }
-
 func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 	TotalSize := uint32(pd.Buffer.GetSize())
 	pd.Buffer.SetPosition(0)
@@ -82,12 +82,12 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 	// Edge case: empty dataset must still emit one terminating PDV so the remote
 	// peer sees the last-fragment bit and unblocks from its NextPDU read.
 	if TotalSize == 0 {
-		pd.MsgHeader = pd.MsgHeader | 0x02
+		pd.MsgHeader = pd.MsgHeader | PDVLastFragment
 		pd.pdv.PresentationContextID = pd.PresentationContextID
 		pd.pdv.MsgHeader = pd.MsgHeader
 		pd.pdv.Length = 2 // 2 header bytes (PCID + MsgHeader), no payload
 		pd.Length = pd.pdv.Length + 4
-		pd.ItemType = 0x04
+		pd.ItemType = pdutype.PDUDataTransfer
 		pd.Reserved1 = 0
 		bd := media.NewEmptyBufData()
 		bd.SetBigEndian(true)
@@ -110,16 +110,16 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 			pd.BlockSize = TotalSize - SentSize
 		}
 		if (pd.BlockSize + SentSize) == TotalSize {
-			pd.MsgHeader = pd.MsgHeader | 0x02
+			pd.MsgHeader = pd.MsgHeader | PDVLastFragment
 		} else {
-			pd.MsgHeader = pd.MsgHeader & 0x01
+			pd.MsgHeader = pd.MsgHeader & PDVTypeMask
 		}
 
 		pd.pdv.PresentationContextID = pd.PresentationContextID
 		pd.pdv.MsgHeader = pd.MsgHeader
 		pd.pdv.Length = pd.BlockSize + 2
 		pd.Length = pd.pdv.Length + 4
-		pd.ItemType = 0x04
+		pd.ItemType = pdutype.PDUDataTransfer
 		pd.Reserved1 = 0
 		bd := media.NewEmptyBufData()
 

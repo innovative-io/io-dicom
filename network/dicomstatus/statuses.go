@@ -59,3 +59,24 @@ const WarningDataSetDoesNotMatchSOPClass uint16 = 0xB007
 // WarningSubOperationsCompleteOneOrMoreFailures - 0xB000
 // C-MOVE/C-GET warning: completed with one or more failed/warning sub-ops.
 const WarningSubOperationsCompleteOneOrMoreFailures uint16 = 0xB000
+
+// FailureServiceSpecificMin - 0x0100
+// Lower bound of the service-specific failure status code range used across multiple
+// DICOM services (e.g. C-STORE PS3.7 Table C.4-1, Query/Retrieve).
+const FailureServiceSpecificMin uint16 = 0x0100
+
+// FailureServiceSpecificMax - 0x01FF
+// Upper bound of the service-specific failure status code range.
+const FailureServiceSpecificMax uint16 = 0x01FF
+
+// HighNibbleFailureRefused is the high nibble (bits 15-12) value identifying
+// refused/out-of-resources failure status codes (0xAxxx per PS3.7).
+const HighNibbleFailureRefused uint16 = 0xA
+
+// HighNibbleWarning is the high nibble value identifying warning status codes
+// (0xBxxx per PS3.7).
+const HighNibbleWarning uint16 = 0xB
+
+// HighNibbleFailureCannotUnderstand is the high nibble value identifying
+// "cannot understand" / unable-to-process failure status codes (0xCxxx per PS3.7).
+const HighNibbleFailureCannotUnderstand uint16 = 0xC

@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
+	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
+	"github.com/innovative-io/io-dicom/media"
 )
 
 func TestSelectPreferredTransferSyntaxPrefersLittleEndian(t *testing.T) {
@@ -160,5 +162,65 @@ func TestInterogateAAssociateRQ_MixedPresentationContextAcceptance(t *testing.T)
 
 	if len(pdu.AcceptedPresentationContexts) != 1 {
 		t.Fatalf("AcceptedPresentationContexts = %d, want 1", len(pdu.AcceptedPresentationContexts))
+	}
+}
+
+func TestSelectPresentationContextIDForAbstractSyntax(t *testing.T) {
+	studyRoot := NewPresentationContextAccept()
+	studyRoot.SetResult(0)
+	studyRoot.SetPresentationContextID(1)
+	studyRoot.SetAbstractSyntax(sopclass.StudyRootQueryRetrieveInformationModelFind.UID)
+	studyRoot.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+
+	patientRoot := NewPresentationContextAccept()
+	patientRoot.SetResult(0)
+	patientRoot.SetPresentationContextID(3)
+	patientRoot.SetAbstractSyntax(sopclass.PatientRootQueryRetrieveInformationModelFind.UID)
+	patientRoot.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+
+	got, ok := selectPresentationContextIDForAbstractSyntax([]PresentationContextAccept{studyRoot, patientRoot}, sopclass.PatientRootQueryRetrieveInformationModelFind.UID)
+	if !ok {
+		t.Fatal("selectPresentationContextIDForAbstractSyntax() ok=false, want true")
+	}
+	if got != 3 {
+		t.Fatalf("selectPresentationContextIDForAbstractSyntax() = %d, want 3", got)
+	}
+}
+
+func TestWriteSelectsPresentationContextByAbstractSyntax(t *testing.T) {
+	pdu := NewPDUService().(*pduService)
+	pdu.Pdata.Buffer = nil
+	pdu.AssocAC = NewAssociationAccept()
+	pdu.AssocAC.GetUserInformation().GetMaxSubLength().SetMaximumLength(maxPduLength)
+	pdu.readWriter = bufio.NewReadWriter(bufio.NewReader(bytes.NewReader(nil)), bufio.NewWriter(&bytes.Buffer{}))
+
+	studyRoot := NewPresentationContextAccept()
+	studyRoot.SetResult(0)
+	studyRoot.SetPresentationContextID(1)
+	studyRoot.SetAbstractSyntax(sopclass.StudyRootQueryRetrieveInformationModelFind.UID)
+	studyRoot.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+
+	patientRoot := NewPresentationContextAccept()
+	patientRoot.SetResult(0)
+	patientRoot.SetPresentationContextID(3)
+	patientRoot.SetAbstractSyntax(sopclass.PatientRootQueryRetrieveInformationModelFind.UID)
+	patientRoot.SetTransferSyntax(transfersyntax.ImplicitVRLittleEndian.UID)
+
+	pdu.AcceptedPresentationContexts = []PresentationContextAccept{studyRoot, patientRoot}
+	pdu.Pdata.PresentationContextID = 1
+
+	cmd := media.NewEmptyDCMObj()
+	cmd.WriteString(tags.AffectedSOPClassUID, sopclass.PatientRootQueryRetrieveInformationModelFind.UID)
+	cmd.WriteUint16(tags.CommandField, 0x0020)
+	cmd.WriteUint16(tags.MessageID, 1)
+
+	if err := pdu.Write(cmd, byte(1)); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if got := pdu.GetPresentationContextID(); got != 3 {
+		t.Fatalf("GetPresentationContextID() = %d, want 3", got)
+	}
+	if cmd.GetTransferSyntax() == nil || cmd.GetTransferSyntax().UID != transfersyntax.ImplicitVRLittleEndian.UID {
+		t.Fatalf("command transfer syntax = %v, want Implicit VR Little Endian", cmd.GetTransferSyntax())
 	}
 }

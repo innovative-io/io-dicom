@@ -4,6 +4,7 @@ import (
 	"bufio"
 
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
 )
 
 // RoleSelect - RoleSelect
@@ -26,7 +27,7 @@ type roleSelect struct {
 // NewRoleSelect - NewRoleSelect
 func NewRoleSelect() RoleSelect {
 	return &roleSelect{
-		ItemType: 0x54,
+		ItemType: pdutype.SCPSCURoleSelectionItem,
 	}
 }
 

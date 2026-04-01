@@ -1,6 +1,9 @@
 package network
 
-import "github.com/innovative-io/io-dicom/media"
+import (
+	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
+)
 
 // AsyncOperationWindow - AsyncOperationWindow
 type AsyncOperationWindow interface {
@@ -22,7 +25,7 @@ type asyncOperationWindow struct {
 // NewAsyncOperationWindow - NewAsyncOperationWindow
 func NewAsyncOperationWindow() AsyncOperationWindow {
 	return &asyncOperationWindow{
-		ItemType: 0x53,
+		ItemType: pdutype.AsyncOperationsWindowItem,
 	}
 }
 

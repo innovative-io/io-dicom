@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/dimse"
@@ -23,6 +25,81 @@ import (
 // reduces syscall overhead when transferring large pixel-data payloads.
 const scpBufSize = 256 * 1024
 
+// cancelPollWindow bounds how long SCP waits while polling for interleaved
+// DIMSE commands, including in-flight C-CANCEL, during active operations.
+const cancelPollWindow = 5 * time.Millisecond
+
+// cancelGraceWindow bounds how long SCP waits for a handler to exit after a
+// matching C-CANCEL is received before aborting the association.
+const cancelGraceWindow = 250 * time.Millisecond
+
+type operationCounterState struct {
+	seen      bool
+	remaining uint16
+	completed uint16
+	failed    uint16
+	warnings  uint16
+}
+
+func (s *operationCounterState) applyProgress(remaining, completed, failed, warnings uint16) error {
+	if !s.seen {
+		s.seen = true
+		s.remaining = remaining
+		s.completed = completed
+		s.failed = failed
+		s.warnings = warnings
+		return nil
+	}
+
+	if remaining > s.remaining {
+		return fmt.Errorf("remaining sub-operations must be non-increasing: prev=%d curr=%d", s.remaining, remaining)
+	}
+	if completed < s.completed {
+		return fmt.Errorf("completed sub-operations must be non-decreasing: prev=%d curr=%d", s.completed, completed)
+	}
+	if failed < s.failed {
+		return fmt.Errorf("failed sub-operations must be non-decreasing: prev=%d curr=%d", s.failed, failed)
+	}
+	if warnings < s.warnings {
+		return fmt.Errorf("warning sub-operations must be non-decreasing: prev=%d curr=%d", s.warnings, warnings)
+	}
+
+	s.remaining = remaining
+	s.completed = completed
+	s.failed = failed
+	s.warnings = warnings
+	return nil
+}
+
+func (s *operationCounterState) finalize(status uint16, remaining, completed, failed, warnings uint16, canceled bool) (uint16, uint16, uint16, uint16, uint16, error) {
+	if canceled {
+		status = dicomstatus.Cancel
+		remaining = 0
+	}
+
+	if s.seen {
+		if completed < s.completed || failed < s.failed || warnings < s.warnings {
+			return 0, 0, 0, 0, 0, errors.New("final counters regress from last pending counters")
+		}
+	}
+
+	if status != dicomstatus.Pending && status != dicomstatus.PendingWithWarnings && remaining != 0 {
+		return 0, 0, 0, 0, 0, fmt.Errorf("final response requires remaining=0, got %d", remaining)
+	}
+
+	return status, remaining, completed, failed, warnings, nil
+}
+
+func abortAssociation(rw *bufio.ReadWriter, conn net.Conn) {
+	if rw != nil {
+		_ = network.NewAbortRequest().Write(rw)
+		_ = rw.Flush()
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
 // SCP - Interface to scp
 type SCP interface {
 	// Start begins accepting connections and blocks until the listener is
@@ -31,9 +108,9 @@ type SCP interface {
 	// Stop closes the listener and waits for all in-flight connections to finish.
 	Stop() error
 	OnAssociationRequest(f func(request network.AssociationRequest) bool)
-	OnCFindRequest(f func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16))
-	OnCGetRequest(f func(request network.AssociationRequest, getLevel string, data media.DICOMObject) (status uint16, remaining uint16, completed uint16, failed uint16, warnings uint16))
-	OnCMoveRequest(f func(request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject) uint16)
+	OnCFindRequest(f CFindHandler)
+	OnCGetRequest(f CGetHandler)
+	OnCMoveRequest(f CMoveHandler)
 	OnCStoreRequest(f func(request network.AssociationRequest, data media.DICOMObject) uint16)
 	OnNEventReportRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
 	OnNGetRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
@@ -49,6 +126,44 @@ type SCP interface {
 	OnCEchoRequest(f func(request network.AssociationRequest) bool)
 }
 
+type CGetProgress struct {
+	Remaining uint16
+	Completed uint16
+	Failed    uint16
+	Warnings  uint16
+}
+
+type CFindResult struct {
+	Status uint16
+}
+
+type CGetResult struct {
+	Status    uint16
+	Remaining uint16
+	Completed uint16
+	Failed    uint16
+	Warnings  uint16
+}
+
+type CMoveProgress struct {
+	Remaining uint16
+	Completed uint16
+	Failed    uint16
+	Warnings  uint16
+}
+
+type CMoveResult struct {
+	Status    uint16
+	Remaining uint16
+	Completed uint16
+	Failed    uint16
+	Warnings  uint16
+}
+
+type CFindHandler func(ctx context.Context, request network.AssociationRequest, findLevel string, data media.DICOMObject, emit func(media.DICOMObject)) (CFindResult, error)
+type CGetHandler func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, emit func(CGetProgress)) (CGetResult, error)
+type CMoveHandler func(ctx context.Context, request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject, emit func(CMoveProgress)) (CMoveResult, error)
+
 type scp struct {
 	Port                  int
 	tlsConfig             *tls.Config
@@ -63,9 +178,9 @@ type scp struct {
 	onNDeleteRequest      func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
 
 	onAssociationRequest func(request network.AssociationRequest) bool
-	onCFindRequest       func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16)
-	onCGetRequest        func(request network.AssociationRequest, getLevel string, data media.DICOMObject) (status uint16, remaining uint16, completed uint16, failed uint16, warnings uint16)
-	onCMoveRequest       func(request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject) uint16
+	onCFindRequest       CFindHandler
+	onCGetRequest        CGetHandler
+	onCMoveRequest       CMoveHandler
 	onCStoreRequest      func(request network.AssociationRequest, data media.DICOMObject) uint16
 	onCCancelRequest     func(request network.AssociationRequest, messageID uint16)
 	onCEchoRequest       func(request network.AssociationRequest) bool
@@ -130,6 +245,366 @@ func (s *scp) consumeCanceled(messageID uint16) bool {
 	return ok
 }
 
+func isReadTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, net.ErrClosed) {
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func (s *scp) handleCancelCommand(assocRQ network.AssociationRequest, dco media.DICOMObject) uint16 {
+	messageID := dco.GetUShort(tags.MessageIDBeingRespondedTo)
+	s.markCanceled(messageID)
+
+	s.mu.RLock()
+	cancelHandler := s.onCCancelRequest
+	s.mu.RUnlock()
+	if cancelHandler != nil {
+		cancelHandler(assocRQ, messageID)
+	}
+
+	slog.Info("scp: C-CANCEL received", "message_id_being_responded_to", messageID)
+	return messageID
+}
+
+func (s *scp) pollCommand(conn net.Conn, pdu network.PDUService) (media.DICOMObject, error) {
+	if conn == nil {
+		return nil, nil
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(cancelPollWindow)); err != nil {
+		return nil, err
+	}
+	dco, err := pdu.NextPDU()
+	_ = conn.SetReadDeadline(time.Time{})
+
+	if err != nil {
+		if isReadTimeout(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return dco, nil
+}
+
+func (s *scp) runCFindOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.PDUService, queue *[]media.DICOMObject, requestCommandObj media.DICOMObject, assocRQ network.AssociationRequest, findLevel string, query media.DICOMObject, handler CFindHandler) error {
+	type findResponse struct {
+		result CFindResult
+		err    error
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	matchCh := make(chan media.DICOMObject, 16)
+	resultCh := make(chan findResponse, 1)
+
+	go func() {
+		result, err := handler(ctx, assocRQ, findLevel, query, func(match media.DICOMObject) {
+			select {
+			case <-ctx.Done():
+				return
+			case matchCh <- match:
+			}
+		})
+		resultCh <- findResponse{result: result, err: err}
+	}()
+
+	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	canceled := false
+	var cancelDeadline time.Time
+
+	for {
+		if canceled && !cancelDeadline.IsZero() && time.Now().After(cancelDeadline) {
+			abortAssociation(rw, conn)
+			return errors.New("scp: C-Find handler did not exit within cancel grace window")
+		}
+
+		select {
+		case match := <-matchCh:
+			if match == nil {
+				cancel()
+				return dimse.CFindWriteRSP(pdu, requestCommandObj, media.NewEmptyDCMObj(), dicomstatus.FailureProcessingFailure)
+			}
+			if err := dimse.CFindWriteRSP(pdu, requestCommandObj, match, dicomstatus.Pending); err != nil {
+				return err
+			}
+		case resp := <-resultCh:
+			drain := true
+			for drain {
+				select {
+				case match := <-matchCh:
+					if match == nil {
+						return dimse.CFindWriteRSP(pdu, requestCommandObj, media.NewEmptyDCMObj(), dicomstatus.FailureProcessingFailure)
+					}
+					if err := dimse.CFindWriteRSP(pdu, requestCommandObj, match, dicomstatus.Pending); err != nil {
+						return err
+					}
+				default:
+					drain = false
+				}
+			}
+
+			if resp.err != nil {
+				if canceled {
+					return dimse.CFindWriteRSP(pdu, requestCommandObj, media.NewEmptyDCMObj(), dicomstatus.Cancel)
+				}
+				return dimse.CFindWriteRSP(pdu, requestCommandObj, media.NewEmptyDCMObj(), dicomstatus.FailureProcessingFailure)
+			}
+
+			finalStatus := resp.result.Status
+			if canceled {
+				finalStatus = dicomstatus.Cancel
+			}
+			if finalStatus == dicomstatus.Pending || finalStatus == dicomstatus.PendingWithWarnings {
+				finalStatus = dicomstatus.FailureProcessingFailure
+			}
+
+			return dimse.CFindWriteRSP(pdu, requestCommandObj, media.NewEmptyDCMObj(), finalStatus)
+		default:
+			dco, err := s.pollCommand(conn, pdu)
+			if err != nil {
+				return err
+			}
+			if dco == nil {
+				continue
+			}
+
+			if dco.GetUShort(tags.CommandField) == dicomcommand.CCancelRequest {
+				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
+				if cancelMessageID == messageID {
+					canceled = true
+					if cancelDeadline.IsZero() {
+						cancelDeadline = time.Now().Add(cancelGraceWindow)
+					}
+					cancel()
+				}
+				continue
+			}
+
+			*queue = append(*queue, dco)
+		}
+	}
+}
+
+func (s *scp) runCGetOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.PDUService, queue *[]media.DICOMObject, requestCommandObj media.DICOMObject, assocRQ network.AssociationRequest, getLevel string, query media.DICOMObject, handler CGetHandler) error {
+	type getResponse struct {
+		result CGetResult
+		err    error
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	progressCh := make(chan CGetProgress, 16)
+	resultCh := make(chan getResponse, 1)
+
+	go func() {
+		result, err := handler(ctx, assocRQ, getLevel, query, func(progress CGetProgress) {
+			select {
+			case <-ctx.Done():
+				return
+			case progressCh <- progress:
+			}
+		})
+		resultCh <- getResponse{result: result, err: err}
+	}()
+
+	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	state := operationCounterState{}
+	canceled := false
+	var cancelDeadline time.Time
+
+	for {
+		if canceled && !cancelDeadline.IsZero() && time.Now().After(cancelDeadline) {
+			abortAssociation(rw, conn)
+			return errors.New("scp: C-Get handler did not exit within cancel grace window")
+		}
+
+		select {
+		case progress := <-progressCh:
+			if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+				cancel()
+				return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+			if err := dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+				return err
+			}
+		case resp := <-resultCh:
+			drain := true
+			for drain {
+				select {
+				case progress := <-progressCh:
+					if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+						return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+					}
+					if err := dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+						return err
+					}
+				default:
+					drain = false
+				}
+			}
+
+			if resp.err != nil {
+				if canceled {
+					return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.Cancel, 0, state.completed, state.failed, state.warnings)
+				}
+				return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+
+			final := resp.result
+			if final.Completed == 0 && final.Failed == 0 && final.Warnings == 0 {
+				final.Completed = state.completed
+				final.Failed = state.failed
+				final.Warnings = state.warnings
+			}
+
+			status, remaining, completed, failed, warnings, err := state.finalize(final.Status, final.Remaining, final.Completed, final.Failed, final.Warnings, canceled)
+			if err != nil {
+				return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+
+			return dimse.CGetWriteRSP(pdu, requestCommandObj, status, remaining, completed, failed, warnings)
+		default:
+			dco, err := s.pollCommand(conn, pdu)
+			if err != nil {
+				return err
+			}
+			if dco == nil {
+				continue
+			}
+
+			if dco.GetUShort(tags.CommandField) == dicomcommand.CCancelRequest {
+				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
+				if cancelMessageID == messageID {
+					canceled = true
+					if cancelDeadline.IsZero() {
+						cancelDeadline = time.Now().Add(cancelGraceWindow)
+					}
+					cancel()
+				}
+				continue
+			}
+
+			*queue = append(*queue, dco)
+		}
+	}
+}
+
+func (s *scp) runCMoveOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.PDUService, queue *[]media.DICOMObject, requestCommandObj media.DICOMObject, assocRQ network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject, handler CMoveHandler) error {
+	type moveResponse struct {
+		result CMoveResult
+		err    error
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	progressCh := make(chan CMoveProgress, 16)
+	resultCh := make(chan moveResponse, 1)
+
+	go func() {
+		result, err := handler(ctx, assocRQ, moveDestAE, moveLevel, query, func(progress CMoveProgress) {
+			select {
+			case <-ctx.Done():
+				return
+			case progressCh <- progress:
+			}
+		})
+		resultCh <- moveResponse{result: result, err: err}
+	}()
+
+	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	state := operationCounterState{}
+	canceled := false
+	var cancelDeadline time.Time
+
+	for {
+		if canceled && !cancelDeadline.IsZero() && time.Now().After(cancelDeadline) {
+			abortAssociation(rw, conn)
+			return errors.New("scp: C-Move handler did not exit within cancel grace window")
+		}
+
+		select {
+		case progress := <-progressCh:
+			if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+				cancel()
+				return dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+			if err := dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+				return err
+			}
+		case resp := <-resultCh:
+			drain := true
+			for drain {
+				select {
+				case progress := <-progressCh:
+					if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+						return dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+					}
+					if err := dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+						return err
+					}
+				default:
+					drain = false
+				}
+			}
+
+			if resp.err != nil {
+				if canceled {
+					return dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.Cancel, 0, state.completed, state.failed, state.warnings)
+				}
+				return dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+
+			final := resp.result
+			if final.Completed == 0 && final.Failed == 0 && final.Warnings == 0 {
+				final.Completed = state.completed
+				final.Failed = state.failed
+				final.Warnings = state.warnings
+			}
+
+			status, remaining, completed, failed, warnings, err := state.finalize(final.Status, final.Remaining, final.Completed, final.Failed, final.Warnings, canceled)
+			if err != nil {
+				return dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+
+			return dimse.CMoveWriteRSP(pdu, requestCommandObj, status, remaining, completed, failed, warnings)
+		default:
+			dco, err := s.pollCommand(conn, pdu)
+			if err != nil {
+				return err
+			}
+			if dco == nil {
+				continue
+			}
+
+			if dco.GetUShort(tags.CommandField) == dicomcommand.CCancelRequest {
+				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
+				if cancelMessageID == messageID {
+					canceled = true
+					if cancelDeadline.IsZero() {
+						cancelDeadline = time.Now().Add(cancelGraceWindow)
+					}
+					cancel()
+				}
+				continue
+			}
+
+			*queue = append(*queue, dco)
+		}
+	}
+}
+
 func (s *scp) Start(ctx context.Context) error {
 	var err error
 	if s.tlsConfig != nil {
@@ -192,16 +667,27 @@ func (s *scp) handleConnection(conn net.Conn) {
 	}
 
 	defer conn.Close()
+	queuedCommands := make([]media.DICOMObject, 0, 1)
 
 	for {
-		dco, err := pdu.NextPDU()
-		if err != nil {
-			if !errors.Is(err, network.ErrAssociationReleased) &&
-				!errors.Is(err, network.ErrAssociationAborted) &&
-				!errors.Is(err, network.ErrAssociationRejected) {
-				slog.Error("scp: network error", "ERROR", err)
+		var (
+			dco media.DICOMObject
+			err error
+		)
+
+		if len(queuedCommands) > 0 {
+			dco = queuedCommands[0]
+			queuedCommands = queuedCommands[1:]
+		} else {
+			dco, err = pdu.NextPDU()
+			if err != nil {
+				if !errors.Is(err, network.ErrAssociationReleased) &&
+					!errors.Is(err, network.ErrAssociationAborted) &&
+					!errors.Is(err, network.ErrAssociationRejected) {
+					slog.Error("scp: network error", "ERROR", err)
+				}
+				return
 			}
-			return
 		}
 		if dco == nil {
 			continue
@@ -269,17 +755,8 @@ func (s *scp) handleConnection(conn net.Conn) {
 			}
 
 			queryLevel := ddo.GetString(tags.QueryRetrieveLevel)
-			results, status := findHandler(pdu.GetAAssociationRQ(), queryLevel, ddo)
-			// Send each match as Pending per DICOM PS3.7 C.4.1.4.
-			for _, result := range results {
-				if err := dimse.CFindWriteRSP(pdu, dco, result, dicomstatus.Pending); err != nil {
-					slog.Error("scp: C-Find failed to write pending response", "ERROR", err.Error())
-					return
-				}
-			}
-			// Final status-only response (CommandDataSetType = DataSetNone).
-			if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), status); err != nil {
-				slog.Error("scp: C-Find failed to write final response", "ERROR", err.Error())
+			if err := s.runCFindOperation(rw, conn, pdu, &queuedCommands, dco, pdu.GetAAssociationRQ(), queryLevel, ddo, findHandler); err != nil {
+				slog.Error("scp: C-Find operation failed", "ERROR", err.Error())
 				return
 			}
 
@@ -318,9 +795,8 @@ func (s *scp) handleConnection(conn net.Conn) {
 			}
 
 			getLevel := ddo.GetString(tags.QueryRetrieveLevel)
-			status, remaining, completed, failed, warnings := getHandler(pdu.GetAAssociationRQ(), getLevel, ddo)
-			if err := dimse.CGetWriteRSP(pdu, dco, status, remaining, completed, failed, warnings); err != nil {
-				slog.Error("scp: C-Get failed to write response", "ERROR", err.Error())
+			if err := s.runCGetOperation(rw, conn, pdu, &queuedCommands, dco, pdu.GetAAssociationRQ(), getLevel, ddo, getHandler); err != nil {
+				slog.Error("scp: C-Get operation failed", "ERROR", err.Error())
 				return
 			}
 
@@ -360,9 +836,8 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 			moveLevel := ddo.GetString(tags.QueryRetrieveLevel)
 			moveDestAE := dco.GetString(tags.MoveDestination)
-			status := moveHandler(pdu.GetAAssociationRQ(), moveDestAE, moveLevel, ddo)
-			if err := dimse.CMoveWriteRSP(pdu, dco, status, 0, 0, 0, 0); err != nil {
-				slog.Error("scp: C-Move failed to write response", "ERROR", err.Error())
+			if err := s.runCMoveOperation(rw, conn, pdu, &queuedCommands, dco, pdu.GetAAssociationRQ(), moveDestAE, moveLevel, ddo, moveHandler); err != nil {
+				slog.Error("scp: C-Move operation failed", "ERROR", err.Error())
 				return
 			}
 
@@ -500,15 +975,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.CCancelRequest:
 			// C-CANCEL-RQ applies to in-progress C-FIND/C-MOVE/C-GET operations.
-			messageID := dco.GetUShort(tags.MessageIDBeingRespondedTo)
-			s.markCanceled(messageID)
-			s.mu.RLock()
-			cancelHandler := s.onCCancelRequest
-			s.mu.RUnlock()
-			if cancelHandler != nil {
-				cancelHandler(pdu.GetAAssociationRQ(), messageID)
-			}
-			slog.Info("scp: C-CANCEL received", "message_id_being_responded_to", messageID)
+			s.handleCancelCommand(pdu.GetAAssociationRQ(), dco)
 
 		case dicomcommand.CEchoRequest:
 			s.mu.RLock()
@@ -536,19 +1003,19 @@ func (s *scp) OnAssociationRequest(f func(request network.AssociationRequest) bo
 	s.onAssociationRequest = f
 }
 
-func (s *scp) OnCFindRequest(f func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16)) {
+func (s *scp) OnCFindRequest(f CFindHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onCFindRequest = f
 }
 
-func (s *scp) OnCGetRequest(f func(request network.AssociationRequest, getLevel string, data media.DICOMObject) (status uint16, remaining uint16, completed uint16, failed uint16, warnings uint16)) {
+func (s *scp) OnCGetRequest(f CGetHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onCGetRequest = f
 }
 
-func (s *scp) OnCMoveRequest(f func(request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject) uint16) {
+func (s *scp) OnCMoveRequest(f CMoveHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onCMoveRequest = f

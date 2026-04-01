@@ -22,12 +22,12 @@ func isValidCStoreStatus(status uint16) bool {
 		return true
 	}
 
-	if status >= 0x0100 && status <= 0x01FF {
+	if status >= dicomstatus.FailureServiceSpecificMin && status <= dicomstatus.FailureServiceSpecificMax {
 		return true
 	}
 
 	h := status >> 12
-	return h == 0xA || h == 0xC
+	return h == dicomstatus.HighNibbleFailureRefused || h == dicomstatus.HighNibbleFailureCannotUnderstand
 }
 
 func validateCStoreStatus(status uint16, op string) error {
@@ -72,10 +72,10 @@ func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetPresent)
 	commandObj.WriteString(tags.AffectedSOPInstanceUID, sopInstanceUID)
 
-	if err := pdu.Write(commandObj, 0x01); err != nil {
+	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
 	}
-	return pdu.Write(dataObj, 0x00)
+	return pdu.Write(dataObj, network.PDVDataset)
 }
 
 // CStoreReadRSP CStore response read
@@ -149,5 +149,5 @@ func CStoreWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject,
 	responseCommandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
 	responseCommandObj.WriteUint16(tags.Status, status)
 	responseCommandObj.WriteString(tags.AffectedSOPInstanceUID, sopInstanceUID)
-	return pdu.Write(responseCommandObj, 0x01)
+	return pdu.Write(responseCommandObj, network.PDVCommand)
 }

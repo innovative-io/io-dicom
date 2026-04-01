@@ -4,27 +4,45 @@ import (
 	"bufio"
 
 	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/network/pdutype"
+)
+
+// Abort Source values per DICOM PS3.8 Table 9-26.
+const (
+	AbortSourceServiceUser         byte = 0x00
+	AbortSourceServiceProviderACSE byte = 0x02
+	AbortSourceServiceProviderPres byte = 0x03
+)
+
+// Abort Reason values per DICOM PS3.8 Table 9-26.
+const (
+	AbortReasonNotSpecified             byte = 0x00
+	AbortReasonUnrecognizedPDU          byte = 0x01
+	AbortReasonUnexpectedPDU            byte = 0x02
+	AbortReasonUnrecognizedPDUParameter byte = 0x04
+	AbortReasonUnexpectedPDUParameter   byte = 0x05
+	AbortReasonInvalidPDUParameterValue byte = 0x06
 )
 
 var abortReasonsBySource = map[byte]map[byte]string{
-	0: {
-		0: "No reason given",
+	AbortSourceServiceUser: {
+		AbortReasonNotSpecified: "No reason given",
 	},
-	2: {
-		0: "No reason given",
-		1: "Unrecognized PDU",
-		2: "Unexpected PDU",
-		4: "Unrecognized PDU parameter",
-		5: "Unexpected PDU parameter",
-		6: "Invalid PDU parameter value",
+	AbortSourceServiceProviderACSE: {
+		AbortReasonNotSpecified:             "No reason given",
+		AbortReasonUnrecognizedPDU:          "Unrecognized PDU",
+		AbortReasonUnexpectedPDU:            "Unexpected PDU",
+		AbortReasonUnrecognizedPDUParameter: "Unrecognized PDU parameter",
+		AbortReasonUnexpectedPDUParameter:   "Unexpected PDU parameter",
+		AbortReasonInvalidPDUParameterValue: "Invalid PDU parameter value",
 	},
-	3: {
-		0: "No reason given",
-		1: "Unrecognized PDU",
-		2: "Unexpected PDU",
-		4: "Unrecognized PDU parameter",
-		5: "Unexpected PDU parameter",
-		6: "Invalid PDU parameter value",
+	AbortSourceServiceProviderPres: {
+		AbortReasonNotSpecified:             "No reason given",
+		AbortReasonUnrecognizedPDU:          "Unrecognized PDU",
+		AbortReasonUnexpectedPDU:            "Unexpected PDU",
+		AbortReasonUnrecognizedPDUParameter: "Unrecognized PDU parameter",
+		AbortReasonUnexpectedPDUParameter:   "Unexpected PDU parameter",
+		AbortReasonInvalidPDUParameterValue: "Invalid PDU parameter value",
 	},
 }
 
@@ -50,12 +68,12 @@ type abortRequest struct {
 // NewAbortRequest - NewAbortRequest
 func NewAbortRequest() AbortRequest {
 	return &abortRequest{
-		ItemType:  0x07,
+		ItemType:  pdutype.AssociationAbortRequest,
 		Reserved1: 0x00,
 		Reserved2: 0x00,
 		Reserved3: 0x00, // must be 0x00 per DICOM PS3.8 Table 9-26
-		Source:    0x00, // 0x00 = service-user per DICOM PS3.8 Table 9-26
-		Reason:    0x00, // 0x00 = no reason given
+		Source:    AbortSourceServiceUser,
+		Reason:    AbortReasonNotSpecified,
 	}
 }
 
