@@ -32,7 +32,7 @@ io-dicom is a **core-aligned, standards-compliant DICOM implementation** targeti
 | **PS3.6** | Data Dictionary | Aligned | Tag library complete with all standard tags |
 | **PS3.7** | DIMSE Services | **Partial** | Core command semantics aligned for implemented services; full part coverage remains incomplete |
 | **PS3.8** | Network Communication | **Aligned** | UL state machine fully tested; PDU sequencing conforms |
-| **PS3.10** | Media Storage | Partial | DICOM file I/O works; constraints incomplete |
+| **PS3.10** | Media Storage | **Core-Aligned** (§7) | DICOM file format fully supported; file-set management (§8-9) out of scope |
 | **PS3.11** | Ultrasound | Out of Scope | No ultrasound-specific object handling |
 | **PS3.12-14,16-17** | Modality-Specific | Out of Scope | No modality validation or constraints |
 | **PS3.15** | Security Profiles | Partial | TLS transport profile baseline implemented (TLS 1.2 minimum) |
@@ -77,9 +77,9 @@ io-dicom is a **core-aligned, standards-compliant DICOM implementation** targeti
 - Service-specific C-STORE status-code class validation in read/write paths
 - C-STORE-RSP required field validation (`CommandDataSetType=0x0101`, `MessageIDBeingRespondedTo` present)
 
-**Known Limitations**:
-- Storage Media File-Set support incomplete (PS3.10 subset)
-- No implicit DIMSE timeout (caller must manage)
+**Out of Scope**:
+- Media Storage File-Set management (PS3.10 §8-9) — application responsibility
+- No implicit DIMSE timeout — caller must manage
 
 ---
 
@@ -412,23 +412,36 @@ io-dicom is a **core-aligned, standards-compliant DICOM implementation** targeti
 
 ### PS3.10: Media Storage and File Format
 
-#### ⚠️ DICOM File Format
+#### ✅ DICOM File Format
 
-**Status**: Partial  
-**Standard Reference**: PS3.10 §7 (DICOM File Format)  
-**Implementation**: `media/` package
+**Status**: Core-Aligned  
+**Standard Reference**: PS3.10 §7 (DICOM File Format); §8-9 (File-Set Management) out of scope  
+**Implementation**: `media/dicom_buffer.go` (ReadMeta/WriteMeta), `media/dicom_object.go` (I/O)  
+**Tests**: `media/dicom_object_extra_test.go`
 
-**Supported**:
-- DICOM Preamble (128-byte prefix + "DICM" magic)
-- File Meta Information Group Length (0x0002, 0x0000)
-- Transfer Syntax UID encoding/selection
-- Media Storage SOP Class/Instance UID
-- File-level meta information
-- Write-time validation of required file output prerequisites (`TransferSyntaxUID`, `SOPClassUID`, `SOPInstanceUID`)
+**Supported (PS3.10 §7)**:
+- DICOM Preamble (128-byte zero-filled prefix + "DICM" magic per PS3.10 §7.1)
+- File Meta Information Group (0x0002) with full compliance:
+  - Group Length (0x0002,0x0000) UL — auto-calculated on write
+  - File Meta Info Group Length (0x0002,0x0001) OB — fixed "01 00"
+  - Media Storage SOP Class UID (0x0002,0x0002) UI — validated on write against file SOP Class
+  - Media Storage SOP Instance UID (0x0002,0x0003) UI — validated on write against file SOP Instance
+  - Transfer Syntax UID (0x0002,0x0010) UI — explicit VR LE always used for file meta per PS3.10 §7.1.2
+  - Implementation Class UID (0x0002,0x0012) UI — auto-populated from library
+  - Implementation Version Name (0x0002,0x0013) SH — auto-populated from library version
+- File Meta to Dataset boundary (group > 0x0002 signals end of PS3.10 §7.3.2)
+- Write-time file prerequisite validation:
+  - Preamble and "DICM" magic pre-written per PS3.10 §7.1
+  - Transfer syntax is supported and not nil
+  - SOPClassUID present and non-empty
+  - SOPInstanceUID present and non-empty
+- Read-time meta extraction via `ReadMeta()` with position tracking
+- Byte order detection from transfer syntax UID
 
-**Known Limitations**:
-- ⚠️ **Media Storage File-Set**: Directory and catalog file management not implemented
-- No automatic transfer syntax negotiation based on file encoding
+**Out of Scope (PS3.10 §8-9)**:
+- Media Storage File-Set structure (directory, descriptor, catalog)
+- Multi-file file-set management
+- Directory creation and maintenance
 
 ---
 
