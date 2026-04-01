@@ -14,6 +14,7 @@ import (
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomcommand"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
+	"github.com/innovative-io/io-dicom/network/priority"
 )
 
 // ── mockPDU ───────────────────────────────────────────────────────────────────
@@ -370,7 +371,7 @@ func TestCMoveWriteRQ_WritesCommandAndData(t *testing.T) {
 	m := newMockPDU(ctUID)
 	q := media.NewEmptyDCMObj()
 	q.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	if err := dimse.CMoveWriteRQ(m, q, "DEST_AE"); err != nil {
+	if err := dimse.CMoveWriteRQ(m, q, "DEST_AE", priority.Medium); err != nil {
 		t.Fatalf("CMoveWriteRQ: %v", err)
 	}
 	if len(m.written) != 2 {
@@ -613,42 +614,42 @@ func TestCMoveReadRQ_ErrorWrongCommandField(t *testing.T) {
 
 // ── C-MOVE-RQ Writing (Enhanced) ───────────────────────────────────────────────
 
-func TestCMoveWriteRQWithPriority_Low(t *testing.T) {
+func TestCMoveWriteRQ_LowPriority(t *testing.T) {
 	m := newMockPDU(ctUID)
 	q := media.NewEmptyDCMObj()
 	q.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	if err := dimse.CMoveWriteRQWithPriority(m, q, "DEST_AE", 2); err != nil {
-		t.Fatalf("CMoveWriteRQWithPriority: %v", err)
+	if err := dimse.CMoveWriteRQ(m, q, "DEST_AE", 2); err != nil {
+		t.Fatalf("CMoveWriteRQ: %v", err)
 	}
 	if len(m.written) != 2 {
-		t.Fatalf("CMoveWriteRQWithPriority: want 2 writes, got %d", len(m.written))
+		t.Fatalf("CMoveWriteRQ: want 2 writes, got %d", len(m.written))
 	}
 	if pri := m.written[0].GetUShort(tags.Priority); pri != 2 {
-		t.Errorf("CMoveWriteRQWithPriority: Priority %d want 2", pri)
+		t.Errorf("CMoveWriteRQ: Priority %d want 2", pri)
 	}
 }
 
-func TestCMoveWriteRQWithPriority_EmptyDestination(t *testing.T) {
+func TestCMoveWriteRQ_EmptyDestination(t *testing.T) {
 	m := newMockPDU(ctUID)
 	q := media.NewEmptyDCMObj()
-	if err := dimse.CMoveWriteRQWithPriority(m, q, "", 0); err == nil {
-		t.Error("CMoveWriteRQWithPriority: want error for empty destination")
+	if err := dimse.CMoveWriteRQ(m, q, "", 0); err == nil {
+		t.Error("CMoveWriteRQ: want error for empty destination")
 	}
 }
 
-func TestCMoveWriteRQWithPriority_EmptyDataset(t *testing.T) {
+func TestCMoveWriteRQ_EmptyDataset(t *testing.T) {
 	m := newMockPDU(ctUID)
 	q := media.NewEmptyDCMObj()
-	if err := dimse.CMoveWriteRQWithPriority(m, q, "DEST_AE", 1); err != nil {
-		t.Fatalf("CMoveWriteRQWithPriority: %v", err)
+	if err := dimse.CMoveWriteRQ(m, q, "DEST_AE", 1); err != nil {
+		t.Fatalf("CMoveWriteRQ: %v", err)
 	}
 	// When dataObj is empty, should only write 1 PDU (command only)
 	if len(m.written) != 1 {
-		t.Fatalf("CMoveWriteRQWithPriority (empty dataset): want 1 write, got %d", len(m.written))
+		t.Fatalf("CMoveWriteRQ (empty dataset): want 1 write, got %d", len(m.written))
 	}
 	// CommandDataSetType should be 0x0101 (no dataset)
 	if cdt := m.written[0].GetUShort(tags.CommandDataSetType); cdt != 0x0101 {
-		t.Errorf("CMoveWriteRQWithPriority: CommandDataSetType %04X want 0x0101", cdt)
+		t.Errorf("CMoveWriteRQ: CommandDataSetType %04X want 0x0101", cdt)
 	}
 }
 
@@ -692,5 +693,95 @@ func TestCMoveRequest_GetMoveLevelFromIdentifier(t *testing.T) {
 	level := req.GetMoveLevel()
 	if level != "STUDY" {
 		t.Errorf("GetMoveLevel: %s want STUDY", level)
+	}
+}
+
+// ── C-GET ─────────────────────────────────────────────────────────────────────
+
+func TestCGetWriteRQ_WritesCommandAndData(t *testing.T) {
+	m := newMockPDU(ctUID)
+	q := media.NewEmptyDCMObj()
+	q.WriteString(tags.QueryRetrieveLevel, "STUDY")
+	if err := dimse.CGetWriteRQ(m, q); err != nil {
+		t.Fatalf("CGetWriteRQ: %v", err)
+	}
+	if len(m.written) != 2 {
+		t.Fatalf("CGetWriteRQ: want 2 writes, got %d", len(m.written))
+	}
+	if cf := m.written[0].GetUShort(tags.CommandField); cf != dicomcommand.CGetRequest {
+		t.Errorf("CGetWriteRQ: CommandField %04X want CGetRequest", cf)
+	}
+}
+
+func TestCGetReadRSP_PendingThenFinal(t *testing.T) {
+	pending := media.NewEmptyDCMObj()
+	pending.WriteUint16(tags.CommandField, dicomcommand.CGetResponse)
+	pending.WriteUint16(tags.Status, dicomstatus.Pending)
+	pending.WriteUint16(tags.CommandDataSetType, 0x0101)
+	pending.WriteUint16(tags.NumberOfRemainingSuboperations, 2)
+
+	final := media.NewEmptyDCMObj()
+	final.WriteUint16(tags.CommandField, dicomcommand.CGetResponse)
+	final.WriteUint16(tags.Status, dicomstatus.Success)
+	final.WriteUint16(tags.CommandDataSetType, 0x0101)
+
+	m := newMockPDU(ctUID)
+	m.nextPDUs = []media.DICOMObject{pending, final}
+
+	pendingCount := 0
+	_, st1, err1 := dimse.CGetReadRSP(m, &pendingCount)
+	if err1 != nil {
+		t.Fatalf("CGetReadRSP (pending): %v", err1)
+	}
+	if st1 != dicomstatus.Pending || pendingCount != 2 {
+		t.Fatalf("CGetReadRSP pending: status=%04X pending=%d", st1, pendingCount)
+	}
+
+	_, st2, err2 := dimse.CGetReadRSP(m, &pendingCount)
+	if err2 != nil {
+		t.Fatalf("CGetReadRSP (final): %v", err2)
+	}
+	if st2 != dicomstatus.Success || pendingCount != -1 {
+		t.Fatalf("CGetReadRSP final: status=%04X pending=%d", st2, pendingCount)
+	}
+}
+
+func TestCGetWriteRSP_WritesResponse(t *testing.T) {
+	m := newMockPDU(ctUID)
+	rq := media.NewEmptyDCMObj()
+	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.WriteUint16(tags.CommandField, dicomcommand.CGetRequest)
+	rq.WriteUint16(tags.MessageID, 7)
+
+	if err := dimse.CGetWriteRSP(m, rq, dicomstatus.Success, 0, 1, 0, 0); err != nil {
+		t.Fatalf("CGetWriteRSP: %v", err)
+	}
+	if len(m.written) != 1 {
+		t.Fatalf("CGetWriteRSP: want 1 write, got %d", len(m.written))
+	}
+	if cf := m.written[0].GetUShort(tags.CommandField); cf != dicomcommand.CGetResponse {
+		t.Errorf("CGetWriteRSP: CommandField %04X want CGetResponse", cf)
+	}
+}
+
+// ── N-SERVICE Generic Response ───────────────────────────────────────────────
+
+func TestNWriteRSP_WritesResponse(t *testing.T) {
+	m := newMockPDU(ctUID)
+	rq := media.NewEmptyDCMObj()
+	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	rq.WriteString(tags.RequestedSOPClassUID, ctUID)
+	rq.WriteString(tags.RequestedSOPInstanceUID, "1.2.3.4.5")
+	rq.WriteUint16(tags.MessageID, 9)
+
+	if err := dimse.NWriteRSP(m, rq, dicomcommand.NGetResponse, dicomstatus.FailureSOPClassNotSupported, media.NewEmptyDCMObj()); err != nil {
+		t.Fatalf("NWriteRSP: %v", err)
+	}
+	if len(m.written) != 1 {
+		t.Fatalf("NWriteRSP: want 1 write, got %d", len(m.written))
+	}
+	if cf := m.written[0].GetUShort(tags.CommandField); cf != dicomcommand.NGetResponse {
+		t.Errorf("NWriteRSP: CommandField %04X want NGetResponse", cf)
 	}
 }

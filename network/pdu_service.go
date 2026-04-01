@@ -330,7 +330,7 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 		}
 
 		switch pdu.pdutype {
-		case pdutype.AssocicationRequest:
+		case pdutype.AssociationRequest:
 			if err := pdu.readPDU(); err != nil {
 				return nil, err
 			}

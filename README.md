@@ -17,7 +17,7 @@ Innovative IO DICOM Golang Library
 - `media/`: DICOM object model, parsing, encoding, and pixel pipeline orchestration
 - `network/`: DICOM network protocol data units and association primitives
 - `services/`: SCU/SCP high-level service APIs
-- `dimse/`: DIMSE command handlers (C-ECHO, C-FIND, C-MOVE, C-STORE)
+- `dimse/`: DIMSE command handlers (C-ECHO, C-FIND, C-GET, C-MOVE, C-STORE, N-service response helpers)
 - `dictionary/`: DICOM tags, SOP classes, transfer syntaxes, coding schemes
 - `codecs/jpeg/`: JPEG codec implementation and pure-Go fallback behavior
 - `codecs/jpeg2000/`: JPEG2000 codec interface and pure-Go fallback behavior
@@ -31,14 +31,18 @@ See `docs/project-structure.md` for package boundaries and maintenance conventio
 
 ## DICOM Protocol Implementation
 
-All DIMSE commands are fully implemented per DICOM PS3.7 specifications:
+Implemented DIMSE protocol support (DICOM PS3.7):
 
-- **C-ECHO** - Verification of connection and DICOM compatibility
-- **C-FIND** - Query to locate DICOM instances  
-- **C-STORE** - Store instances to SCP
-- **C-MOVE** - Retrieve and forward instances to destination (see [C-MOVE Implementation Guide](docs/dicom-cmove-implementation.md) for details)
+- **C-ECHO** - Verification
+- **C-STORE** - Storage
+- **C-FIND** - Query
+- **C-GET** - Query/Retrieve GET
+- **C-MOVE** - Query/Retrieve MOVE (see [C-MOVE Implementation Guide](docs/dicom-cmove-implementation.md) for details)
+- **N-service command response helpers** - N-EVENT-REPORT, N-GET, N-SET, N-ACTION, N-CREATE, N-DELETE response encoding helpers are available in `dimse/`
 
-For detailed C-MOVE usage patterns, error handling, and compliance information, see the [C-MOVE Implementation Guide](docs/dicom-cmove-implementation.md).
+Notes:
+- C-CANCEL command reception is parsed in SCP and logged; synchronous per-association request processing currently limits mid-operation cancellation semantics.
+- For detailed C-MOVE usage patterns, error handling, and compliance information, see the [C-MOVE Implementation Guide](docs/dicom-cmove-implementation.md).
 
 ## DICOM Network Conformance Notes
 
@@ -388,6 +392,18 @@ if err != nil {
 }
 ```
 
+### Send C-Get Request
+```golang
+request := utils.DefaultCMoveRequest(studyUID) // same Q/R identifier structure
+
+scu := services.NewSCU(destination)
+status, err := scu.GetSCU(request, 0)
+if err != nil {
+  log.Fatalln(err)
+}
+log.Printf("C-GET final status: 0x%04X", status)
+```
+
 ### Start a TLS-enabled SCP Server
 
 ```golang
@@ -457,7 +473,12 @@ scp.OnCFindRequest(func(request network.AssociationRequest, queryLevel string, q
   return results, dicomstatus.Success
 })
 
-scp.OnCMoveRequest(func(request network.AssociationRequest, moveLevel string, query media.DICOMObject) uint16 {
+scp.OnCGetRequest(func(request network.AssociationRequest, getLevel string, query media.DICOMObject) (uint16, uint16, uint16, uint16, uint16) {
+  // status, remaining, completed, failed, warnings
+  return dicomstatus.Success, 0, 1, 0, 0
+})
+
+scp.OnCMoveRequest(func(request network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject) uint16 {
   query.DumpTags()
   return dicomstatus.Success
 })

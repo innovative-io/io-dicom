@@ -50,13 +50,13 @@ func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 func CStoreReadRSP(pdu network.PDUService) (uint16, error) {
 	dco, err := pdu.NextPDU()
 	if err != nil {
-		return dicomstatus.FailureUnableToProcess, err
+		return dicomstatus.FailureProcessingFailure, err
 	}
 	// Is this a C-Store RSP?
 	if dco.GetUShort(tags.CommandField) == dicomcommand.CStoreResponse {
 		return dco.GetUShort(tags.Status), nil
 	}
-	return dicomstatus.FailureUnableToProcess, errors.New("CStoreReadRSP, unknown error")
+	return dicomstatus.FailureProcessingFailure, errors.New("CStoreReadRSP: unknown response command")
 }
 
 // CStoreWriteRSP CStore response write

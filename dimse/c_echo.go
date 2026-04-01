@@ -40,14 +40,15 @@ func CEchoWriteRQ(pdu network.PDUService) error {
 func CEchoReadRSP(pdu network.PDUService) error {
 	dco, err := pdu.NextPDU()
 	if err != nil {
-		return errors.New("CEchoReadRSP, failed pdu.Read(&DCO)")
+		return errors.New("CEchoReadRSP: failed to read response PDU")
 	}
 	if dco.GetUShort(tags.CommandField) == dicomcommand.CEchoResponse {
 		if dco.GetUShort(tags.Status) == dicomstatus.Success {
 			return nil
 		}
+		return errors.New("CEchoReadRSP: received non-success status")
 	}
-	return nil
+	return errors.New("CEchoReadRSP: unknown response command")
 }
 
 // CEchoWriteRSP CEcho response write
@@ -69,10 +70,9 @@ func CEchoWriteRSP(pdu network.PDUService, commandObj media.DICOMObject) error {
 		responseObj.WriteUint16(tags.CommandField, dicomcommand.CEchoResponse)
 		messageID := commandObj.GetUShort(tags.MessageID)
 		responseObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
-		commandDataSetType := commandObj.GetUShort(tags.CommandDataSetType)
-		responseObj.WriteUint16(tags.CommandDataSetType, commandDataSetType)
+		responseObj.WriteUint16(tags.CommandDataSetType, 0x0101)
 		responseObj.WriteUint16(tags.Status, dicomstatus.Success)
 		return pdu.Write(responseObj, 0x01)
 	}
-	return errors.New("CEchoReadRSP, unknown error")
+	return errors.New("CEchoWriteRSP: AffectedSOPClassUID is empty")
 }

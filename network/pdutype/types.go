@@ -1,9 +1,9 @@
 package pdutype
 
-// AssocicationRequest - Association request
-const AssocicationRequest = 0x01
+// AssociationRequest - Association request
+const AssociationRequest = 0x01
 
-// AssociationAccept - Assocation accept
+// AssociationAccept - Association accept
 const AssociationAccept = 0x02
 
 // AssociationReject - Association reject

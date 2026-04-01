@@ -31,23 +31,37 @@ type SCP interface {
 	Stop() error
 	OnAssociationRequest(f func(request network.AssociationRequest) bool)
 	OnCFindRequest(f func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16))
-	OnCMoveRequest(f func(request network.AssociationRequest, moveLevel string, data media.DICOMObject) uint16)
+	OnCGetRequest(f func(request network.AssociationRequest, getLevel string, data media.DICOMObject) (status uint16, remaining uint16, completed uint16, failed uint16, warnings uint16))
+	OnCMoveRequest(f func(request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject) uint16)
 	OnCStoreRequest(f func(request network.AssociationRequest, data media.DICOMObject) uint16)
+	OnNEventReportRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
+	OnNGetRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
+	OnNSetRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
+	OnNActionRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
+	OnNCreateRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
+	OnNDeleteRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
 	// OnCEchoRequest registers an optional handler invoked for every C-ECHO
 	// request. Return false to reject the echo (no response is sent).
 	OnCEchoRequest(f func(request network.AssociationRequest) bool)
 }
 
 type scp struct {
-	Port      int
-	tlsConfig *tls.Config
-	listener  net.Listener
-	wg        sync.WaitGroup
-	mu        sync.RWMutex
+	Port                  int
+	tlsConfig             *tls.Config
+	listener              net.Listener
+	wg                    sync.WaitGroup
+	mu                    sync.RWMutex
+	onNEventReportRequest func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
+	onNGetRequest         func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
+	onNSetRequest         func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
+	onNActionRequest      func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
+	onNCreateRequest      func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
+	onNDeleteRequest      func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
 
 	onAssociationRequest func(request network.AssociationRequest) bool
 	onCFindRequest       func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16)
-	onCMoveRequest       func(request network.AssociationRequest, moveLevel string, data media.DICOMObject) uint16
+	onCGetRequest        func(request network.AssociationRequest, getLevel string, data media.DICOMObject) (status uint16, remaining uint16, completed uint16, failed uint16, warnings uint16)
+	onCMoveRequest       func(request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject) uint16
 	onCStoreRequest      func(request network.AssociationRequest, data media.DICOMObject) uint16
 	onCEchoRequest       func(request network.AssociationRequest) bool
 }
@@ -163,7 +177,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 			if storeHandler == nil {
 				slog.Warn("scp: OnCStoreRequest not registered")
-				if err := dimse.CStoreWriteRSP(pdu, dco, dicomstatus.FailureUnableToProcess); err != nil {
+				if err := dimse.CStoreWriteRSP(pdu, dco, dicomstatus.FailureProcessingFailure); err != nil {
 					slog.Error("scp: C-Store failed to write error response", "ERROR", err.Error())
 					return
 				}
@@ -189,7 +203,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 			if findHandler == nil {
 				slog.Warn("scp: OnCFindRequest not registered")
-				if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), dicomstatus.FailureUnableToProcess); err != nil {
+				if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), dicomstatus.FailureProcessingFailure); err != nil {
 					slog.Error("scp: C-Find failed to write error response", "ERROR", err.Error())
 					return
 				}
@@ -211,6 +225,33 @@ func (s *scp) handleConnection(conn net.Conn) {
 				return
 			}
 
+		case dicomcommand.CGetRequest:
+			ddo, err := pdu.NextPDU()
+			if err != nil {
+				slog.Error("scp: C-Get failed to read request", "ERROR", err.Error())
+				return
+			}
+
+			s.mu.RLock()
+			getHandler := s.onCGetRequest
+			s.mu.RUnlock()
+
+			if getHandler == nil {
+				slog.Warn("scp: OnCGetRequest not registered")
+				if err := dimse.CGetWriteRSP(pdu, dco, dicomstatus.FailureSOPClassNotSupported, 0, 0, 0, 0); err != nil {
+					slog.Error("scp: C-Get failed to write error response", "ERROR", err.Error())
+					return
+				}
+				continue
+			}
+
+			getLevel := ddo.GetString(tags.QueryRetrieveLevel)
+			status, remaining, completed, failed, warnings := getHandler(pdu.GetAAssociationRQ(), getLevel, ddo)
+			if err := dimse.CGetWriteRSP(pdu, dco, status, remaining, completed, failed, warnings); err != nil {
+				slog.Error("scp: C-Get failed to write response", "ERROR", err.Error())
+				return
+			}
+
 		case dicomcommand.CMoveRequest:
 			ddo, err := pdu.NextPDU()
 			if err != nil {
@@ -224,7 +265,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 			if moveHandler == nil {
 				slog.Warn("scp: OnCMoveRequest not registered")
-				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.FailureUnableToProcess, 0, 0, 0, 0); err != nil {
+				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.FailureProcessingFailure, 0, 0, 0, 0); err != nil {
 					slog.Error("scp: C-Move failed to write error response", "ERROR", err.Error())
 					return
 				}
@@ -232,11 +273,149 @@ func (s *scp) handleConnection(conn net.Conn) {
 			}
 
 			moveLevel := ddo.GetString(tags.QueryRetrieveLevel)
-			status := moveHandler(pdu.GetAAssociationRQ(), moveLevel, ddo)
+			moveDestAE := dco.GetString(tags.MoveDestination)
+			status := moveHandler(pdu.GetAAssociationRQ(), moveDestAE, moveLevel, ddo)
 			if err := dimse.CMoveWriteRSP(pdu, dco, status, 0, 0, 0, 0); err != nil {
 				slog.Error("scp: C-Move failed to write response", "ERROR", err.Error())
 				return
 			}
+
+		case dicomcommand.NEventReportRequest:
+			var nData media.DICOMObject
+			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+				nData, err = pdu.NextPDU()
+				if err != nil {
+					slog.Error("scp: N-Event-Report failed to read request dataset", "ERROR", err.Error())
+					return
+				}
+			}
+			s.mu.RLock()
+			h := s.onNEventReportRequest
+			s.mu.RUnlock()
+			status := dicomstatus.FailureSOPClassNotSupported
+			resp := media.NewEmptyDCMObj()
+			if h != nil {
+				status, resp = h(pdu.GetAAssociationRQ(), dco, nData)
+			}
+			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NEventReportResponse, status, resp); err != nil {
+				slog.Error("scp: N-Event-Report failed to write response", "ERROR", err.Error())
+				return
+			}
+
+		case dicomcommand.NGetRequest:
+			var nData media.DICOMObject
+			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+				nData, err = pdu.NextPDU()
+				if err != nil {
+					slog.Error("scp: N-Get failed to read request dataset", "ERROR", err.Error())
+					return
+				}
+			}
+			s.mu.RLock()
+			h := s.onNGetRequest
+			s.mu.RUnlock()
+			status := dicomstatus.FailureSOPClassNotSupported
+			resp := media.NewEmptyDCMObj()
+			if h != nil {
+				status, resp = h(pdu.GetAAssociationRQ(), dco, nData)
+			}
+			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NGetResponse, status, resp); err != nil {
+				slog.Error("scp: N-Get failed to write response", "ERROR", err.Error())
+				return
+			}
+
+		case dicomcommand.NSetRequest:
+			var nData media.DICOMObject
+			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+				nData, err = pdu.NextPDU()
+				if err != nil {
+					slog.Error("scp: N-Set failed to read request dataset", "ERROR", err.Error())
+					return
+				}
+			}
+			s.mu.RLock()
+			h := s.onNSetRequest
+			s.mu.RUnlock()
+			status := dicomstatus.FailureSOPClassNotSupported
+			resp := media.NewEmptyDCMObj()
+			if h != nil {
+				status, resp = h(pdu.GetAAssociationRQ(), dco, nData)
+			}
+			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NSetResponse, status, resp); err != nil {
+				slog.Error("scp: N-Set failed to write response", "ERROR", err.Error())
+				return
+			}
+
+		case dicomcommand.NActionRequest:
+			var nData media.DICOMObject
+			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+				nData, err = pdu.NextPDU()
+				if err != nil {
+					slog.Error("scp: N-Action failed to read request dataset", "ERROR", err.Error())
+					return
+				}
+			}
+			s.mu.RLock()
+			h := s.onNActionRequest
+			s.mu.RUnlock()
+			status := dicomstatus.FailureSOPClassNotSupported
+			resp := media.NewEmptyDCMObj()
+			if h != nil {
+				status, resp = h(pdu.GetAAssociationRQ(), dco, nData)
+			}
+			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NActionResponse, status, resp); err != nil {
+				slog.Error("scp: N-Action failed to write response", "ERROR", err.Error())
+				return
+			}
+
+		case dicomcommand.NCreateRequest:
+			var nData media.DICOMObject
+			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+				nData, err = pdu.NextPDU()
+				if err != nil {
+					slog.Error("scp: N-Create failed to read request dataset", "ERROR", err.Error())
+					return
+				}
+			}
+			s.mu.RLock()
+			h := s.onNCreateRequest
+			s.mu.RUnlock()
+			status := dicomstatus.FailureSOPClassNotSupported
+			resp := media.NewEmptyDCMObj()
+			if h != nil {
+				status, resp = h(pdu.GetAAssociationRQ(), dco, nData)
+			}
+			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NCreateResponse, status, resp); err != nil {
+				slog.Error("scp: N-Create failed to write response", "ERROR", err.Error())
+				return
+			}
+
+		case dicomcommand.NDeleteRequest:
+			var nData media.DICOMObject
+			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+				nData, err = pdu.NextPDU()
+				if err != nil {
+					slog.Error("scp: N-Delete failed to read request dataset", "ERROR", err.Error())
+					return
+				}
+			}
+			s.mu.RLock()
+			h := s.onNDeleteRequest
+			s.mu.RUnlock()
+			status := dicomstatus.FailureSOPClassNotSupported
+			resp := media.NewEmptyDCMObj()
+			if h != nil {
+				status, resp = h(pdu.GetAAssociationRQ(), dco, nData)
+			}
+			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NDeleteResponse, status, resp); err != nil {
+				slog.Error("scp: N-Delete failed to write response", "ERROR", err.Error())
+				return
+			}
+
+		case dicomcommand.CCancelRequest:
+			// C-CANCEL-RQ applies to in-progress C-FIND/C-MOVE/C-GET operations.
+			// This SCP currently processes one operation at a time synchronously.
+			slog.Info("scp: C-CANCEL received", "message_id_being_responded_to", dco.GetUShort(tags.MessageIDBeingRespondedTo))
 
 		case dicomcommand.CEchoRequest:
 			s.mu.RLock()
@@ -270,7 +449,13 @@ func (s *scp) OnCFindRequest(f func(request network.AssociationRequest, findLeve
 	s.onCFindRequest = f
 }
 
-func (s *scp) OnCMoveRequest(f func(request network.AssociationRequest, moveLevel string, data media.DICOMObject) uint16) {
+func (s *scp) OnCGetRequest(f func(request network.AssociationRequest, getLevel string, data media.DICOMObject) (status uint16, remaining uint16, completed uint16, failed uint16, warnings uint16)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onCGetRequest = f
+}
+
+func (s *scp) OnCMoveRequest(f func(request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject) uint16) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onCMoveRequest = f
@@ -280,6 +465,42 @@ func (s *scp) OnCStoreRequest(f func(request network.AssociationRequest, data me
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onCStoreRequest = f
+}
+
+func (s *scp) OnNEventReportRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onNEventReportRequest = f
+}
+
+func (s *scp) OnNGetRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onNGetRequest = f
+}
+
+func (s *scp) OnNSetRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onNSetRequest = f
+}
+
+func (s *scp) OnNActionRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onNActionRequest = f
+}
+
+func (s *scp) OnNCreateRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onNCreateRequest = f
+}
+
+func (s *scp) OnNDeleteRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onNDeleteRequest = f
 }
 
 func (s *scp) OnCEchoRequest(f func(request network.AssociationRequest) bool) {

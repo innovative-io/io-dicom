@@ -40,7 +40,7 @@ func CFindWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 func CFindReadRSP(pdu network.PDUService) (media.DICOMObject, uint16, error) {
 	responseCommandObj, err := pdu.NextPDU()
 	if err != nil {
-		return nil, dicomstatus.FailureUnableToProcess, err
+		return nil, dicomstatus.FailureProcessingFailure, err
 	}
 
 	// Is this a C-Find RSP?
@@ -48,13 +48,13 @@ func CFindReadRSP(pdu network.PDUService) (media.DICOMObject, uint16, error) {
 		if responseCommandObj.GetUShort(tags.CommandDataSetType) != 0x0101 {
 			responseDataObj, err := pdu.NextPDU()
 			if err != nil {
-				return nil, dicomstatus.FailureUnableToProcess, err
+				return nil, dicomstatus.FailureProcessingFailure, err
 			}
 			return responseDataObj, responseCommandObj.GetUShort(tags.Status), nil
 		}
 		return nil, responseCommandObj.GetUShort(tags.Status), nil
 	}
-	return nil, dicomstatus.FailureUnableToProcess, errors.New("CFindReadRSP, unknown error")
+	return nil, dicomstatus.FailureProcessingFailure, errors.New("CFindReadRSP: unknown response command")
 }
 
 // CFindWriteRSP CFind response write

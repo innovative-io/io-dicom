@@ -9,7 +9,6 @@ import (
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomcommand"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
-	"github.com/innovative-io/io-dicom/network/priority"
 )
 
 // CMoveRequest represents a parsed C-MOVE request per DICOM PS3.7 §C.4.2.1.
@@ -105,14 +104,7 @@ func (r *CMoveRequest) GetMoveLevel() string {
 	return r.IdentifierDataSet.GetString(tags.QueryRetrieveLevel)
 }
 
-// CMoveWriteRQ writes a C-MOVE-RQ to the PDU service per DICOM PS3.7 §C.4.2.1.
-// This deprecated function is kept for backwards compatibility. Use CMoveWriteRQWithPriority
-// for new code that needs to specify priority.
-func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destinationAETitle string) error {
-	return CMoveWriteRQWithPriority(pdu, dataObj, destinationAETitle, priority.Medium)
-}
-
-// CMoveWriteRQWithPriority writes a C-MOVE-RQ to the PDU service with explicit priority.
+// CMoveWriteRQ writes a C-MOVE-RQ to the PDU service with explicit priority.
 // Per DICOM PS3.7 §C.4.2.1, the request includes:
 //   - Affected SOP Class UID from the negotiated presentation context
 //   - Message ID (generated automatically)
@@ -122,7 +114,7 @@ func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destination
 //
 // If dataObj contains tags, it is sent as the identifier dataset; otherwise
 // CommandDataSetType is set to 0x0101 (no dataset).
-func CMoveWriteRQWithPriority(pdu network.PDUService, dataObj media.DICOMObject, destinationAETitle string, pri uint16) error {
+func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destinationAETitle string, pri uint16) error {
 	if destinationAETitle == "" {
 		return errors.New("CMoveWriteRQ: destination AE title cannot be empty")
 	}
@@ -192,11 +184,11 @@ func CMoveWriteRQWithPriority(pdu network.PDUService, dataObj media.DICOMObject,
 func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint16, error) {
 	responseCommandObj, err := pdu.NextPDU()
 	if err != nil {
-		return nil, dicomstatus.FailureUnableToProcess, fmt.Errorf("CMoveReadRSP: failed to read response PDU: %w", err)
+		return nil, dicomstatus.FailureProcessingFailure, fmt.Errorf("CMoveReadRSP: failed to read response PDU: %w", err)
 	}
 
 	if responseCommandObj.GetUShort(tags.CommandField) != dicomcommand.CMoveResponse {
-		return nil, dicomstatus.FailureUnableToProcess,
+		return nil, dicomstatus.FailureProcessingFailure,
 			fmt.Errorf("CMoveReadRSP: expected C-MOVE Response (0x%04X), got 0x%04X",
 				dicomcommand.CMoveResponse, responseCommandObj.GetUShort(tags.CommandField))
 	}
@@ -211,7 +203,7 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 	warnings := int(responseCommandObj.GetUShort(tags.NumberOfWarningSuboperations))
 
 	// Update pending count
-	if status == dicomstatus.Pending {
+	if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
 		if pending != nil {
 			*pending = remaining
 		}
@@ -231,7 +223,7 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 	}
 
 	// Return nil for both completed and failed status codes
-	if status != dicomstatus.Pending {
+	if status != dicomstatus.Pending && status != dicomstatus.PendingWithWarnings {
 		if remaining != 0 || completed == 0 && failed == 0 && warnings == 0 {
 			// Final response - log sub-operation summary
 		}

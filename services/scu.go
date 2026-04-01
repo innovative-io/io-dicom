@@ -12,6 +12,7 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
+	"github.com/innovative-io/io-dicom/network/priority"
 )
 
 // SCU - interface to a scu
@@ -20,6 +21,7 @@ type SCU interface {
 	FindSCU(Query media.DICOMObject, timeout int) (int, uint16, error)
 	WorklistSCU(Query media.DICOMObject, timeout int) (int, uint16, error)
 	MoveSCU(destAET string, Query media.DICOMObject, timeout int) (uint16, error)
+	GetSCU(Query media.DICOMObject, timeout int) (uint16, error)
 	StoreSCU(FileName string, timeout int) error
 	SetOnCFindResult(f func(result media.DICOMObject))
 	SetOnCMoveResult(f func(result media.DICOMObject))
@@ -52,7 +54,7 @@ func (d *scu) EchoSCU(timeout int) error {
 
 func (d *scu) FindSCU(Query media.DICOMObject, timeout int) (int, uint16, error) {
 	results := 0
-	status := dicomstatus.Warning
+	status := dicomstatus.FailureProcessingFailure
 
 	pdu := network.NewPDUService()
 	defer pdu.Close()
@@ -88,7 +90,7 @@ func (d *scu) FindSCU(Query media.DICOMObject, timeout int) (int, uint16, error)
 // and returns the match count, final status, and any error.
 func (d *scu) WorklistSCU(Query media.DICOMObject, timeout int) (int, uint16, error) {
 	results := 0
-	status := dicomstatus.Warning
+	status := dicomstatus.FailureProcessingFailure
 
 	pdu := network.NewPDUService()
 	defer pdu.Close()
@@ -125,22 +127,47 @@ func (d *scu) MoveSCU(destAET string, Query media.DICOMObject, timeout int) (uin
 	pdu := network.NewPDUService()
 	defer pdu.Close()
 	if err := d.openAssociation(pdu, sopclass.StudyRootQueryRetrieveInformationModelMove.UID, []string{}, timeout); err != nil {
-		return dicomstatus.FailureUnableToProcess, err
+		return dicomstatus.FailureProcessingFailure, err
 	}
 
-	if err := dimse.CMoveWriteRQ(pdu, Query, destAET); err != nil {
-		return dicomstatus.FailureUnableToProcess, err
+	if err := dimse.CMoveWriteRQ(pdu, Query, destAET, priority.Medium); err != nil {
+		return dicomstatus.FailureProcessingFailure, err
 	}
 
 	for {
 		ddo, status, err := dimse.CMoveReadRSP(pdu, &pending)
 		if err != nil {
-			return dicomstatus.FailureUnableToProcess, err
+			return dicomstatus.FailureProcessingFailure, err
 		}
 		if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
 			if d.onCMoveResult != nil {
 				d.onCMoveResult(ddo)
 			}
+			continue
+		}
+		return status, nil
+	}
+}
+
+func (d *scu) GetSCU(Query media.DICOMObject, timeout int) (uint16, error) {
+	var pending int
+
+	pdu := network.NewPDUService()
+	defer pdu.Close()
+	if err := d.openAssociation(pdu, sopclass.StudyRootQueryRetrieveInformationModelGet.UID, []string{}, timeout); err != nil {
+		return dicomstatus.FailureProcessingFailure, err
+	}
+
+	if err := dimse.CGetWriteRQ(pdu, Query); err != nil {
+		return dicomstatus.FailureProcessingFailure, err
+	}
+
+	for {
+		_, status, err := dimse.CGetReadRSP(pdu, &pending)
+		if err != nil {
+			return dicomstatus.FailureProcessingFailure, err
+		}
+		if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
 			continue
 		}
 		return status, nil

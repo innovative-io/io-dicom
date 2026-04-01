@@ -76,7 +76,7 @@ func TestSCP_OnCMoveRequest(t *testing.T) {
 	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
 		return true
 	})
-	testSCP.OnCMoveRequest(func(request network.AssociationRequest, moveLevel string, data media.DICOMObject) uint16 {
+	testSCP.OnCMoveRequest(func(request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject) uint16 {
 		return dicomstatus.Success
 	})
 
