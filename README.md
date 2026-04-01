@@ -29,6 +29,25 @@ Innovative IO DICOM Golang Library
 
 See `docs/project-structure.md` for package boundaries and maintenance conventions.
 
+## DICOM Standards Alignment
+
+Section-by-section standards alignment tracking lives in
+`docs/dicom-standard-alignment-tracker.md`.
+
+PS3.7 DIMSE section-level requirement mapping lives in
+`docs/ps3.7-dimse-requirements-matrix.md`.
+
+PS3.8 network/UL section-level requirement mapping lives in
+`docs/ps3.8-network-requirements-matrix.md`.
+
+PS3.8 UL association state-transition mapping lives in
+`docs/ps3.8-ul-state-transition-matrix.md`.
+
+Formal product-level conformance declaration lives in `CONFORMANCE.md`.
+
+Transfer syntax implementation audit and deployment guidance lives in
+`docs/transfer-syntax-coverage-audit.md`.
+
 ## DICOM Protocol Implementation
 
 Implemented DIMSE protocol support (DICOM PS3.7):
@@ -41,16 +60,32 @@ Implemented DIMSE protocol support (DICOM PS3.7):
 - **N-service command response helpers** - N-EVENT-REPORT, N-GET, N-SET, N-ACTION, N-CREATE, N-DELETE response encoding helpers are available in `dimse/`
 
 Notes:
-- C-CANCEL command reception is parsed in SCP and logged; synchronous per-association request processing currently limits mid-operation cancellation semantics.
+- C-CANCEL command reception is parsed in SCP, tracked by message ID, and exposed through `OnCCancelRequest`; this enables application-driven cancellation handling and pre-operation cancellation responses.
+- Full mid-operation cancellation preemption still requires asynchronous operation handlers.
+- C-FIND status semantics are enforced: pending responses must include an identifier dataset, and final responses must not include one.
+- Query/Retrieve operation-specific status validation is enforced for C-FIND/C-GET/C-MOVE response parsing and writing (including service-specific disallowed combinations such as C-STORE-only warning codes and C-MOVE-only refusal codes).
+- Core DICOM status descriptions are available via `network/dicomstatus.Description(status)` with range-aware fallback for unmapped Axxx/Bxxx/Cxxx codes.
+- C-STORE service-specific status-code class validation is enforced for response parsing and writing.
+- C-STORE response field validation is enforced (`CommandDataSetType=0x0101` and non-zero `MessageIDBeingRespondedTo`).
+- C-ECHO response field validation is enforced (`CommandDataSetType=0x0101` and non-zero `MessageIDBeingRespondedTo`).
 - For detailed C-MOVE usage patterns, error handling, and compliance information, see the [C-MOVE Implementation Guide](docs/dicom-cmove-implementation.md).
 
 ## DICOM Network Conformance Notes
 
 - AE titles are encoded as fixed 16-byte, space-padded fields. Internal spaces are preserved while only trailing padding is trimmed when read back.
 - Association presentation context negotiation now prefers `Explicit VR Little Endian`, then `Implicit VR Little Endian`, then `Explicit VR Big Endian` when multiple offered transfer syntaxes are known.
+- Association presentation context negotiation accepts only transfer syntaxes in the supported transfer syntax contract (`dictionary/transfersyntax.SupportedTransferSyntax`).
 - Association accept handling selects a default presentation context from accepted contexts using the same preference order and falls back to any accepted context when needed.
+- Presentation context rejection reasons are now explicit: result code `3` for unsupported abstract syntax and `4` for unsupported transfer syntaxes.
 - Rejecting an incoming A-ASSOCIATE-RQ closes the transport connection immediately after sending A-ASSOCIATE-RJ, conforming to DICOM PS 3.8 §9.3.4.
-- TLS 1.2+ is supported for both the SCP listener (`NewSCPWithTLS`) and SCU outbound connections (`Destination.IsTLS` + `Destination.TLSConfig`). Pure-Go builds with no `crypto/tls` overhead remain the default when `IsTLS` is false.
+- A-ASSOCIATE-RJ reason text decoding is aligned to PS3.8 source/reason tables (UL service-user, ACSE provider, presentation provider), with deterministic `No reason given` fallback for unknown combinations.
+- TLS 1.2+ is enforced for both the SCP listener (`NewSCPWithTLS`) and SCU outbound connections (`Destination.IsTLS` + `Destination.TLSConfig`). Pure-Go builds with no `crypto/tls` overhead remain the default when `IsTLS` is false.
+
+## Query/Retrieve Identifier Validation
+
+- SCP validates `QueryRetrieveLevel` for C-FIND, C-GET, and C-MOVE requests.
+- Accepted levels are `PATIENT`, `STUDY`, `SERIES`, `IMAGE`, and `FRAME`.
+- Invalid levels return `0xA900` (`FailureIdentifierDoesNotMatchSOPClass`) before handler execution.
 
 ## Breaking Changes
 

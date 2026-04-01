@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
@@ -40,6 +41,9 @@ type SCP interface {
 	OnNActionRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
 	OnNCreateRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
 	OnNDeleteRequest(f func(request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
+	// OnCCancelRequest registers an optional callback invoked for incoming
+	// C-CANCEL-RQ message IDs.
+	OnCCancelRequest(f func(request network.AssociationRequest, messageID uint16))
 	// OnCEchoRequest registers an optional handler invoked for every C-ECHO
 	// request. Return false to reject the echo (no response is sent).
 	OnCEchoRequest(f func(request network.AssociationRequest) bool)
@@ -63,7 +67,9 @@ type scp struct {
 	onCGetRequest        func(request network.AssociationRequest, getLevel string, data media.DICOMObject) (status uint16, remaining uint16, completed uint16, failed uint16, warnings uint16)
 	onCMoveRequest       func(request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject) uint16
 	onCStoreRequest      func(request network.AssociationRequest, data media.DICOMObject) uint16
+	onCCancelRequest     func(request network.AssociationRequest, messageID uint16)
 	onCEchoRequest       func(request network.AssociationRequest) bool
+	canceledMessageIDs   map[uint16]struct{}
 }
 
 // NewSCP creates a plain-TCP DICOM SCP listening on port.
@@ -71,7 +77,8 @@ func NewSCP(port int) SCP {
 	media.InitDict()
 
 	return &scp{
-		Port: port,
+		Port:               port,
+		canceledMessageIDs: make(map[uint16]struct{}),
 	}
 }
 
@@ -81,9 +88,46 @@ func NewSCPWithTLS(port int, cfg *tls.Config) SCP {
 	media.InitDict()
 
 	return &scp{
-		Port:      port,
-		tlsConfig: cfg,
+		Port:               port,
+		tlsConfig:          normalizeServerTLSConfig(cfg),
+		canceledMessageIDs: make(map[uint16]struct{}),
 	}
+}
+
+func normalizeServerTLSConfig(cfg *tls.Config) *tls.Config {
+	if cfg == nil {
+		return &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	clone := cfg.Clone()
+	if clone.MinVersion == 0 || clone.MinVersion < tls.VersionTLS12 {
+		clone.MinVersion = tls.VersionTLS12
+	}
+	return clone
+}
+
+func isValidQueryRetrieveLevel(level string) bool {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "PATIENT", "STUDY", "SERIES", "IMAGE", "FRAME":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *scp) markCanceled(messageID uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.canceledMessageIDs[messageID] = struct{}{}
+}
+
+func (s *scp) consumeCanceled(messageID uint16) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.canceledMessageIDs[messageID]
+	if ok {
+		delete(s.canceledMessageIDs, messageID)
+	}
+	return ok
 }
 
 func (s *scp) Start(ctx context.Context) error {
@@ -196,6 +240,20 @@ func (s *scp) handleConnection(conn net.Conn) {
 				slog.Error("scp: C-Find failed to read request", "ERROR", err.Error())
 				return
 			}
+			if !isValidQueryRetrieveLevel(ddo.GetString(tags.QueryRetrieveLevel)) {
+				if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), dicomstatus.FailureIdentifierDoesNotMatchSOPClass); err != nil {
+					slog.Error("scp: C-Find failed to write invalid-identifier response", "ERROR", err.Error())
+					return
+				}
+				continue
+			}
+			if s.consumeCanceled(dco.GetUShort(tags.MessageID)) {
+				if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), dicomstatus.Cancel); err != nil {
+					slog.Error("scp: C-Find failed to write cancel response", "ERROR", err.Error())
+					return
+				}
+				continue
+			}
 
 			s.mu.RLock()
 			findHandler := s.onCFindRequest
@@ -219,7 +277,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 					return
 				}
 			}
-			// Final status-only response (CommandDataSetType = 0x0101).
+			// Final status-only response (CommandDataSetType = DataSetNone).
 			if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), status); err != nil {
 				slog.Error("scp: C-Find failed to write final response", "ERROR", err.Error())
 				return
@@ -230,6 +288,20 @@ func (s *scp) handleConnection(conn net.Conn) {
 			if err != nil {
 				slog.Error("scp: C-Get failed to read request", "ERROR", err.Error())
 				return
+			}
+			if !isValidQueryRetrieveLevel(ddo.GetString(tags.QueryRetrieveLevel)) {
+				if err := dimse.CGetWriteRSP(pdu, dco, dicomstatus.FailureIdentifierDoesNotMatchSOPClass, 0, 0, 0, 0); err != nil {
+					slog.Error("scp: C-Get failed to write invalid-identifier response", "ERROR", err.Error())
+					return
+				}
+				continue
+			}
+			if s.consumeCanceled(dco.GetUShort(tags.MessageID)) {
+				if err := dimse.CGetWriteRSP(pdu, dco, dicomstatus.Cancel, 0, 0, 0, 0); err != nil {
+					slog.Error("scp: C-Get failed to write cancel response", "ERROR", err.Error())
+					return
+				}
+				continue
 			}
 
 			s.mu.RLock()
@@ -258,6 +330,20 @@ func (s *scp) handleConnection(conn net.Conn) {
 				slog.Error("scp: C-Move failed to read request", "ERROR", err.Error())
 				return
 			}
+			if !isValidQueryRetrieveLevel(ddo.GetString(tags.QueryRetrieveLevel)) {
+				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.FailureIdentifierDoesNotMatchSOPClass, 0, 0, 0, 0); err != nil {
+					slog.Error("scp: C-Move failed to write invalid-identifier response", "ERROR", err.Error())
+					return
+				}
+				continue
+			}
+			if s.consumeCanceled(dco.GetUShort(tags.MessageID)) {
+				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.Cancel, 0, 0, 0, 0); err != nil {
+					slog.Error("scp: C-Move failed to write cancel response", "ERROR", err.Error())
+					return
+				}
+				continue
+			}
 
 			s.mu.RLock()
 			moveHandler := s.onCMoveRequest
@@ -282,7 +368,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NEventReportRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Event-Report failed to read request dataset", "ERROR", err.Error())
@@ -304,7 +390,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NGetRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Get failed to read request dataset", "ERROR", err.Error())
@@ -326,7 +412,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NSetRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Set failed to read request dataset", "ERROR", err.Error())
@@ -348,7 +434,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NActionRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Action failed to read request dataset", "ERROR", err.Error())
@@ -370,7 +456,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NCreateRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Create failed to read request dataset", "ERROR", err.Error())
@@ -392,7 +478,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NDeleteRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != 0x0101 {
+			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Delete failed to read request dataset", "ERROR", err.Error())
@@ -414,8 +500,15 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.CCancelRequest:
 			// C-CANCEL-RQ applies to in-progress C-FIND/C-MOVE/C-GET operations.
-			// This SCP currently processes one operation at a time synchronously.
-			slog.Info("scp: C-CANCEL received", "message_id_being_responded_to", dco.GetUShort(tags.MessageIDBeingRespondedTo))
+			messageID := dco.GetUShort(tags.MessageIDBeingRespondedTo)
+			s.markCanceled(messageID)
+			s.mu.RLock()
+			cancelHandler := s.onCCancelRequest
+			s.mu.RUnlock()
+			if cancelHandler != nil {
+				cancelHandler(pdu.GetAAssociationRQ(), messageID)
+			}
+			slog.Info("scp: C-CANCEL received", "message_id_being_responded_to", messageID)
 
 		case dicomcommand.CEchoRequest:
 			s.mu.RLock()
@@ -501,6 +594,12 @@ func (s *scp) OnNDeleteRequest(f func(request network.AssociationRequest, comman
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onNDeleteRequest = f
+}
+
+func (s *scp) OnCCancelRequest(f func(request network.AssociationRequest, messageID uint16)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onCCancelRequest = f
 }
 
 func (s *scp) OnCEchoRequest(f func(request network.AssociationRequest) bool) {

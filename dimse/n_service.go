@@ -6,6 +6,7 @@ import (
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
+	"github.com/innovative-io/io-dicom/network/dicomcommand"
 )
 
 // NWriteRSP writes a generic N-service response command and optional dataset.
@@ -40,9 +41,9 @@ func NWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, resp
 		sopInstanceUIDLength++
 	}
 
-	leDSType := uint16(0x0101)
+	leDSType := dicomcommand.DataSetNone
 	if responseDataObj != nil && responseDataObj.TagCount() > 0 {
-		leDSType = 0x0102
+		leDSType = dicomcommand.DataSetPresent
 	}
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2)

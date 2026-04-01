@@ -68,3 +68,11 @@ const NDeleteResponse = 0x8150
 
 // CCancelRequest = 0x0FFF
 const CCancelRequest = 0x0FFF
+
+// DataSetNone - 0x0101
+// CommandDataSetType value indicating no dataset is included in the message.
+const DataSetNone uint16 = 0x0101
+
+// DataSetPresent - 0x0102
+// CommandDataSetType value indicating a dataset follows the command.
+const DataSetPresent uint16 = 0x0102

@@ -20,6 +20,9 @@ func CEchoWriteRQ(pdu network.PDUService) error {
 	commandObj := media.NewEmptyDCMObj()
 
 	sopClassUID := sopClassUID(pdu)
+	if sopClassUID == "" {
+		return errors.New("CEchoWriteRQ: AffectedSOPClassUID is required")
+	}
 	sopClassUIDLength := uint16(len(sopClassUID))
 	if sopClassUIDLength%2 == 1 {
 		sopClassUIDLength++
@@ -31,7 +34,7 @@ func CEchoWriteRQ(pdu network.PDUService) error {
 	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
 	commandObj.WriteUint16(tags.CommandField, dicomcommand.CEchoRequest)
 	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
-	commandObj.WriteUint16(tags.CommandDataSetType, 0x0101)
+	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
 
 	return pdu.Write(commandObj, 0x01)
 }
@@ -43,6 +46,12 @@ func CEchoReadRSP(pdu network.PDUService) error {
 		return errors.New("CEchoReadRSP: failed to read response PDU")
 	}
 	if dco.GetUShort(tags.CommandField) == dicomcommand.CEchoResponse {
+		if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
+			return errors.New("CEchoReadRSP: CommandDataSetType must be DataSetNone")
+		}
+		if dco.GetUShort(tags.MessageIDBeingRespondedTo) == 0 {
+			return errors.New("CEchoReadRSP: MessageIDBeingRespondedTo is required")
+		}
 		if dco.GetUShort(tags.Status) == dicomstatus.Success {
 			return nil
 		}
@@ -53,26 +62,35 @@ func CEchoReadRSP(pdu network.PDUService) error {
 
 // CEchoWriteRSP CEcho response write
 func CEchoWriteRSP(pdu network.PDUService, commandObj media.DICOMObject) error {
+	if commandObj == nil {
+		return errors.New("CEchoWriteRSP: commandObj cannot be nil")
+	}
+
 	responseObj := media.NewEmptyDCMObj()
 
 	responseObj.SetTransferSyntax(commandObj.GetTransferSyntax())
 	sopClassUID := commandObj.GetString(tags.AffectedSOPClassUID)
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength > 0 {
-		if sopClassUIDLength%2 == 1 {
-			sopClassUIDLength++
-		}
-
-		commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
-
-		responseObj.WriteUint32(tags.CommandGroupLength, commandLength)
-		responseObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-		responseObj.WriteUint16(tags.CommandField, dicomcommand.CEchoResponse)
-		messageID := commandObj.GetUShort(tags.MessageID)
-		responseObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
-		responseObj.WriteUint16(tags.CommandDataSetType, 0x0101)
-		responseObj.WriteUint16(tags.Status, dicomstatus.Success)
-		return pdu.Write(responseObj, 0x01)
+	if sopClassUID == "" {
+		return errors.New("CEchoWriteRSP: AffectedSOPClassUID is required")
 	}
-	return errors.New("CEchoWriteRSP: AffectedSOPClassUID is empty")
+
+	messageID := commandObj.GetUShort(tags.MessageID)
+	if messageID == 0 {
+		return errors.New("CEchoWriteRSP: MessageID is required")
+	}
+
+	sopClassUIDLength := uint16(len(sopClassUID))
+	if sopClassUIDLength%2 == 1 {
+		sopClassUIDLength++
+	}
+
+	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
+
+	responseObj.WriteUint32(tags.CommandGroupLength, commandLength)
+	responseObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
+	responseObj.WriteUint16(tags.CommandField, dicomcommand.CEchoResponse)
+	responseObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
+	responseObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
+	responseObj.WriteUint16(tags.Status, dicomstatus.Success)
+	return pdu.Write(responseObj, 0x01)
 }

@@ -6,6 +6,28 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 )
 
+var abortReasonsBySource = map[byte]map[byte]string{
+	0: {
+		0: "No reason given",
+	},
+	2: {
+		0: "No reason given",
+		1: "Unrecognized PDU",
+		2: "Unexpected PDU",
+		4: "Unrecognized PDU parameter",
+		5: "Unexpected PDU parameter",
+		6: "Invalid PDU parameter value",
+	},
+	3: {
+		0: "No reason given",
+		1: "Unrecognized PDU",
+		2: "Unexpected PDU",
+		4: "Unrecognized PDU parameter",
+		5: "Unexpected PDU parameter",
+		6: "Invalid PDU parameter value",
+	},
+}
+
 // AbortRequest - AbortRequest
 type AbortRequest interface {
 	GetReason() string
@@ -38,7 +60,12 @@ func NewAbortRequest() AbortRequest {
 }
 
 func (aarq *abortRequest) GetReason() string {
-	return permanentRejectReasons[aarq.Reason]
+	if reasons, ok := abortReasonsBySource[aarq.Source]; ok {
+		if reason, ok := reasons[aarq.Reason]; ok {
+			return reason
+		}
+	}
+	return "No reason given"
 }
 
 func (aarq *abortRequest) Size() uint32 {

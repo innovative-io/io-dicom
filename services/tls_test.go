@@ -210,3 +210,23 @@ func Test_scu_EchoSCU_TLSPort_PlainClient(t *testing.T) {
 		t.Fatal("expected plain SCU to fail against TLS SCP, but it succeeded")
 	}
 }
+
+func TestNewSCPWithTLS_EnforcesMinimumTLS12(t *testing.T) {
+	s := NewSCPWithTLS(11111, &tls.Config{MinVersion: tls.VersionTLS10}).(*scp)
+	if s.tlsConfig == nil {
+		t.Fatal("tlsConfig is nil")
+	}
+	if s.tlsConfig.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("MinVersion = %d, want %d", s.tlsConfig.MinVersion, tls.VersionTLS12)
+	}
+}
+
+func TestNewSCPWithTLS_DefaultConfigUsesTLS12(t *testing.T) {
+	s := NewSCPWithTLS(11112, nil).(*scp)
+	if s.tlsConfig == nil {
+		t.Fatal("tlsConfig is nil")
+	}
+	if s.tlsConfig.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("MinVersion = %d, want %d", s.tlsConfig.MinVersion, tls.VersionTLS12)
+	}
+}

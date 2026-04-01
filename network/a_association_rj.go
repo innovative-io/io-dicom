@@ -7,18 +7,24 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 )
 
-var permanentRejectReasons = map[byte]string{
-	0: "No reason given",
-	1: "No reason given",
-	2: "Application context not supported",
-	3: "Calling AE not recognized",
-	7: "Called AE not recognized",
-}
-
-var transientRejectReasons = map[byte]string{
-	0: "No reason given",
-	1: "Temporary congestion",
-	2: "Local limit exceeded",
+var rejectReasonsBySource = map[byte]map[byte]string{
+	// UL-service-user (Table 9-21, Source 1)
+	1: {
+		1: "No reason given",
+		2: "Application context not supported",
+		3: "Calling AE not recognized",
+		7: "Called AE not recognized",
+	},
+	// UL-service-provider (ACSE related function, Source 2)
+	2: {
+		1: "No reason given",
+		2: "Protocol version not supported",
+	},
+	// UL-service-provider (presentation related function, Source 3)
+	3: {
+		1: "Temporary congestion",
+		2: "Local limit exceeded",
+	},
 }
 
 // AssociationReject association reject struct
@@ -56,14 +62,13 @@ func NewAssociationReject() AssociationReject {
 }
 
 func (aarj *associationReject) GetReason() string {
-	reason := "No reason given"
-	if aarj.Result == 0x01 {
-		reason = permanentRejectReasons[aarj.Reason]
+	if reasons, ok := rejectReasonsBySource[aarj.Source]; ok {
+		if reason, ok := reasons[aarj.Reason]; ok {
+			return reason
+		}
 	}
-	if aarj.Result == 0x02 {
-		reason = transientRejectReasons[aarj.Reason]
-	}
-	return reason
+
+	return "No reason given"
 }
 
 func (aarj *associationReject) Size() uint32 {

@@ -110,6 +110,9 @@ func selectPreferredTransferSyntax(offered []UIDItem) (string, bool) {
 	}
 
 	for _, candidate := range preferred {
+		if !transfersyntax.SupportedTransferSyntax(candidate) {
+			continue
+		}
 		for _, item := range offered {
 			if item.GetUID() == candidate {
 				return candidate, true
@@ -118,7 +121,7 @@ func selectPreferredTransferSyntax(offered []UIDItem) (string, bool) {
 	}
 
 	for _, item := range offered {
-		if transfersyntax.GetTransferSyntaxFromUID(item.GetUID()) != nil {
+		if transfersyntax.SupportedTransferSyntax(item.GetUID()) {
 			return item.GetUID(), true
 		}
 	}
@@ -180,11 +183,22 @@ func (pdu *pduService) ConnectTLS(IP string, Port string, cfg *tls.Config) error
 	pdu.AcceptedPresentationContexts = nil
 	pdu.Pdata.PresentationContextID = 0
 
-	conn, err := tls.Dial("tcp", IP+":"+Port, cfg)
+	conn, err := tls.Dial("tcp", IP+":"+Port, normalizeClientTLSConfig(cfg))
 	if err != nil {
 		return fmt.Errorf("pduservice::ConnectTLS - %w", err)
 	}
 	return pdu.finishConnect(conn)
+}
+
+func normalizeClientTLSConfig(cfg *tls.Config) *tls.Config {
+	if cfg == nil {
+		return &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	clone := cfg.Clone()
+	if clone.MinVersion == 0 || clone.MinVersion < tls.VersionTLS12 {
+		clone.MinVersion = tls.VersionTLS12
+	}
+	return clone
 }
 
 // finishConnect completes an A-ASSOCIATE handshake over an already-established
@@ -338,6 +352,10 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 				return nil, err
 			}
 			if err := pdu.interogateAAssociateRQ(pdu.readWriter); err != nil {
+				if errors.Is(err, ErrAssociationRejected) {
+					// After sending A-ASSOCIATE-RJ, rejecting AE must close transport.
+					pdu.closeConn()
+				}
 				return nil, err
 			}
 			return nil, nil
@@ -442,8 +460,13 @@ func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
 	pdu.Pdata.BlockSize = pdu.AssocAC.GetMaxSubLength() - 6
 
 	if ItemType > 0x00 {
-		sopClass := sopclass.GetSOPClassFromUID(DCO.GetString(tags.AffectedSOPClassUID))
-		slog.Debug("PDU-Service: SOP Class", "UID", sopClass.UID, "Description", sopClass.Description, "CalledAE", pdu.GetCalledAE())
+		sopClassUID := DCO.GetString(tags.AffectedSOPClassUID)
+		sopClass := sopclass.GetSOPClassFromUID(sopClassUID)
+		if sopClass != nil {
+			slog.Debug("PDU-Service: SOP Class", "UID", sopClass.UID, "Description", sopClass.Description, "CalledAE", pdu.GetCalledAE())
+		} else {
+			slog.Debug("PDU-Service: SOP Class", "UID", sopClassUID, "Description", "Unknown SOP Class", "CalledAE", pdu.GetCalledAE())
+		}
 	}
 
 	return pdu.Pdata.Write(pdu.readWriter)
@@ -496,7 +519,13 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 		slog.Debug("ASSOC-RQ: PresentationContext", "Index", presIndex)
 
 		sopClass := sopclass.GetSOPClassFromUID(PresContext.GetAbstractSyntax().GetUID())
-		slog.Debug("ASSOC-RQ: \tAbstractContext", "UID", sopClass.UID, "Description", sopClass.Description)
+		sopUID := PresContext.GetAbstractSyntax().GetUID()
+		sopDescription := ""
+		if sopClass != nil {
+			sopUID = sopClass.UID
+			sopDescription = sopClass.Description
+		}
+		slog.Debug("ASSOC-RQ: \tAbstractContext", "UID", sopUID, "Description", sopDescription)
 		for _, TransferSyn := range PresContext.GetTransferSyntaxes() {
 			tsName := ""
 			transferSyntax := transfersyntax.GetTransferSyntaxFromUID(TransferSyn.GetUID())
@@ -509,13 +538,24 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 		PresContextAccept := NewPresentationContextAccept()
 		PresContextAccept.SetResult(4)
 		PresContextAccept.SetAbstractSyntax(PresContext.GetAbstractSyntax().GetUID())
-		if tsUID, ok := selectPreferredTransferSyntax(PresContext.GetTransferSyntaxes()); ok {
+		if sopclass.GetSOPClassFromUID(PresContext.GetAbstractSyntax().GetUID()) == nil {
+			// 3: abstract syntax not supported (PS3.8 Table 9-18).
+			PresContextAccept.SetResult(3)
+			if len(PresContext.GetTransferSyntaxes()) > 0 {
+				PresContextAccept.SetTransferSyntax(PresContext.GetTransferSyntaxes()[0].GetUID())
+			} else {
+				PresContextAccept.SetTransferSyntax(transfersyntax.ImplicitVRLittleEndian.UID)
+			}
+		} else if tsUID, ok := selectPreferredTransferSyntax(PresContext.GetTransferSyntaxes()); ok {
 			PresContextAccept.SetResult(0)
 			PresContextAccept.SetTransferSyntax(tsUID)
 			pdu.AcceptedPresentationContexts = append(pdu.AcceptedPresentationContexts, PresContextAccept)
 		} else if len(PresContext.GetTransferSyntaxes()) > 0 {
+			// 4: transfer syntaxes not supported (PS3.8 Table 9-18).
+			PresContextAccept.SetResult(4)
 			PresContextAccept.SetTransferSyntax(PresContext.GetTransferSyntaxes()[0].GetUID())
 		} else {
+			PresContextAccept.SetResult(4)
 			PresContextAccept.SetTransferSyntax(transfersyntax.ImplicitVRLittleEndian.UID)
 		}
 

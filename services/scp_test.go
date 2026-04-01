@@ -3,6 +3,7 @@ package services
 import (
 	"testing"
 
+	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
@@ -117,4 +118,77 @@ func TestSCU_SetOnCMoveResult(t *testing.T) {
 	})
 	// Callback should be stored; verify it's exercised when MoveSCU fires it.
 	_ = called // captured in production use
+}
+
+func TestSCP_CFindRejectsInvalidQueryRetrieveLevel(t *testing.T) {
+	_, testSCP := StartSCP(t, 1047)
+
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
+		return true
+	})
+	testSCP.OnCFindRequest(func(request network.AssociationRequest, findLevel string, data media.DICOMObject) ([]media.DICOMObject, uint16) {
+		return []media.DICOMObject{}, dicomstatus.Success
+	})
+
+	media.InitDict()
+	dest := &network.Destination{
+		Name:      "CFindInvalidLevel",
+		CalledAE:  "SCP",
+		CallingAE: "SCU",
+		HostName:  "localhost",
+		Port:      1047,
+		IsCFind:   true,
+	}
+
+	query := media.NewEmptyDCMObj()
+	query.WriteString(tags.QueryRetrieveLevel, "NOT_A_LEVEL")
+	query.WriteString(tags.PatientID, "P123")
+
+	scu := NewSCU(dest)
+	_, status, err := scu.FindSCU(query, 5)
+	if err != nil {
+		t.Fatalf("FindSCU: %v", err)
+	}
+	if status != dicomstatus.FailureIdentifierDoesNotMatchSOPClass {
+		t.Fatalf("FindSCU status = 0x%04X, want 0x%04X", status, dicomstatus.FailureIdentifierDoesNotMatchSOPClass)
+	}
+}
+
+func TestSCP_CCancelTracking_ConsumeOnce(t *testing.T) {
+	s := NewSCP(1050).(*scp)
+
+	if s.consumeCanceled(42) {
+		t.Fatal("consumeCanceled() before mark = true, want false")
+	}
+
+	s.markCanceled(42)
+	if !s.consumeCanceled(42) {
+		t.Fatal("consumeCanceled() after mark = false, want true")
+	}
+	if s.consumeCanceled(42) {
+		t.Fatal("consumeCanceled() second call = true, want false")
+	}
+}
+
+func TestSCP_OnCCancelRequest_Setter(t *testing.T) {
+	s := NewSCP(1051).(*scp)
+
+	called := false
+	var gotMsgID uint16
+	s.OnCCancelRequest(func(_ network.AssociationRequest, messageID uint16) {
+		called = true
+		gotMsgID = messageID
+	})
+
+	if s.onCCancelRequest == nil {
+		t.Fatal("onCCancelRequest callback was not set")
+	}
+
+	s.onCCancelRequest(nil, 77)
+	if !called {
+		t.Fatal("onCCancelRequest callback was not invoked")
+	}
+	if gotMsgID != 77 {
+		t.Fatalf("callback messageID = %d, want 77", gotMsgID)
+	}
 }

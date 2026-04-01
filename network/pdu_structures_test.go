@@ -46,6 +46,24 @@ func TestAbortRequest_GetReason_Default(t *testing.T) {
 	}
 }
 
+func TestAbortRequest_GetReason_ProviderReason(t *testing.T) {
+	a := NewAbortRequest().(*abortRequest)
+	a.Source = 2
+	a.Reason = 2
+	if r := a.GetReason(); r != "Unexpected PDU" {
+		t.Errorf("AbortRequest.GetReason() = %q, want 'Unexpected PDU'", r)
+	}
+}
+
+func TestAbortRequest_GetReason_UnknownReasonFallback(t *testing.T) {
+	a := NewAbortRequest().(*abortRequest)
+	a.Source = 2
+	a.Reason = 99
+	if r := a.GetReason(); r != "No reason given" {
+		t.Errorf("AbortRequest.GetReason() = %q, want 'No reason given'", r)
+	}
+}
+
 func TestAbortRequest_WriteRead_Roundtrip(t *testing.T) {
 	a := NewAbortRequest()
 	data, err := captureWrite(a.Write)
@@ -90,10 +108,37 @@ func TestAssociationReject_Set_GetReason(t *testing.T) {
 
 func TestAssociationReject_Set_TransientReason(t *testing.T) {
 	rj := NewAssociationReject()
-	rj.Set(2, 2, 1) // transient, Temporary congestion
+	rj.Set(2, 3, 1) // transient, Source 3 presentation, Temporary congestion
 	r := rj.GetReason()
 	if r != "Temporary congestion" {
 		t.Errorf("AssociationReject.GetReason() = %q, want 'Temporary congestion'", r)
+	}
+}
+
+func TestAssociationReject_Set_ACSEProtocolVersionNotSupportedReason(t *testing.T) {
+	rj := NewAssociationReject()
+	rj.Set(1, 2, 2) // Source 2 ACSE, Protocol version not supported
+	r := rj.GetReason()
+	if r != "Protocol version not supported" {
+		t.Errorf("AssociationReject.GetReason() = %q, want 'Protocol version not supported'", r)
+	}
+}
+
+func TestAssociationReject_Set_PresentationLocalLimitExceededReason(t *testing.T) {
+	rj := NewAssociationReject()
+	rj.Set(2, 3, 2) // Source 3 presentation, Local limit exceeded
+	r := rj.GetReason()
+	if r != "Local limit exceeded" {
+		t.Errorf("AssociationReject.GetReason() = %q, want 'Local limit exceeded'", r)
+	}
+}
+
+func TestAssociationReject_Set_UnknownReasonFallsBack(t *testing.T) {
+	rj := NewAssociationReject()
+	rj.Set(1, 1, 99)
+	r := rj.GetReason()
+	if r != "No reason given" {
+		t.Errorf("AssociationReject.GetReason() = %q, want 'No reason given'", r)
 	}
 }
 

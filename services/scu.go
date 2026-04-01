@@ -200,7 +200,7 @@ func (d *scu) StoreSCU(FileName string, timeout int) error {
 		return err
 	}
 	if status != dicomstatus.Success {
-		return fmt.Errorf("scu: StoreSCU: C-Store failed with status 0x%04X", status)
+		return fmt.Errorf("scu: StoreSCU: C-Store failed with status 0x%04X (%s)", status, dicomstatus.Description(status))
 	}
 	return nil
 }

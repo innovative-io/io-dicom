@@ -38,7 +38,7 @@ type CMoveRequest struct {
 //   - (0000,0700) Priority (optional, defaults to Medium)
 //   - (0000,0800) Command Data Set Type
 //
-// If CommandDataSetType indicates identifier present (0x0102), the identifier
+// If CommandDataSetType indicates identifier present (DataSetPresent), the identifier
 // dataset is read from the next PDU.
 func CMoveReadRQ(pdu network.PDUService) (*CMoveRequest, error) {
 	commandObj, err := pdu.NextPDU()
@@ -64,9 +64,9 @@ func CMoveReadRQ(pdu network.PDUService) (*CMoveRequest, error) {
 		return nil, err
 	}
 
-	// If CommandDataSetType indicates identifier dataset present (0x0102),
+	// If CommandDataSetType indicates identifier dataset present (DataSetPresent),
 	// read it from the next PDU.
-	if req.CommandDataSetType == 0x0102 {
+	if req.CommandDataSetType == dicomcommand.DataSetPresent {
 		identifierDataSet, err := pdu.NextPDU()
 		if err != nil {
 			return nil, fmt.Errorf("CMoveReadRQ: failed to read identifier dataset: %w", err)
@@ -89,8 +89,8 @@ func validateCMoveRequest(req *CMoveRequest) error {
 	if req.MoveDestination == "" {
 		return errors.New("CMoveReadRQ: Move Destination is required")
 	}
-	if req.CommandDataSetType != 0x0101 && req.CommandDataSetType != 0x0102 {
-		return fmt.Errorf("CMoveReadRQ: invalid CommandDataSetType 0x%04X (must be 0x0101 or 0x0102)", req.CommandDataSetType)
+	if req.CommandDataSetType != dicomcommand.DataSetNone && req.CommandDataSetType != dicomcommand.DataSetPresent {
+		return fmt.Errorf("CMoveReadRQ: invalid CommandDataSetType 0x%04X (must be DataSetNone or DataSetPresent)", req.CommandDataSetType)
 	}
 	return nil
 }
@@ -110,10 +110,10 @@ func (r *CMoveRequest) GetMoveLevel() string {
 //   - Message ID (generated automatically)
 //   - Move Destination (the destination AE title)
 //   - Priority (explicit parameter)
-//   - Command Data Set Type (0x0102 to indicate identifier follows)
+//   - Command Data Set Type (DataSetPresent to indicate identifier follows)
 //
 // If dataObj contains tags, it is sent as the identifier dataset; otherwise
-// CommandDataSetType is set to 0x0101 (no dataset).
+// CommandDataSetType is set to DataSetNone (no dataset).
 func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destinationAETitle string, pri uint16) error {
 	if destinationAETitle == "" {
 		return errors.New("CMoveWriteRQ: destination AE title cannot be empty")
@@ -138,9 +138,9 @@ func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destination
 	}
 
 	// Determine if identifier dataset is present
-	commandDataSetType := uint16(0x0101)
+	commandDataSetType := dicomcommand.DataSetNone
 	if dataObj != nil && dataObj.TagCount() > 0 {
-		commandDataSetType = 0x0102
+		commandDataSetType = dicomcommand.DataSetPresent
 	}
 
 	// Calculate command length per PS3.7 Table C.4-2:
@@ -165,7 +165,7 @@ func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destination
 	}
 
 	// If identifier dataset is present, send it
-	if commandDataSetType == 0x0102 && dataObj != nil {
+	if commandDataSetType == dicomcommand.DataSetPresent && dataObj != nil {
 		return pdu.Write(dataObj, 0x00)
 	}
 	return nil
@@ -187,14 +187,22 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 		return nil, dicomstatus.FailureProcessingFailure, fmt.Errorf("CMoveReadRSP: failed to read response PDU: %w", err)
 	}
 
-	if responseCommandObj.GetUShort(tags.CommandField) != dicomcommand.CMoveResponse {
+	if got := responseCommandObj.GetUShort(tags.CommandField); got != dicomcommand.CMoveResponse {
 		return nil, dicomstatus.FailureProcessingFailure,
-			fmt.Errorf("CMoveReadRSP: expected C-MOVE Response (0x%04X), got 0x%04X",
-				dicomcommand.CMoveResponse, responseCommandObj.GetUShort(tags.CommandField))
+			fmt.Errorf("CMoveReadRSP: expected %s (0x%04X), got %s (0x%04X)",
+				dicomcommand.Description(dicomcommand.CMoveResponse), dicomcommand.CMoveResponse,
+				dicomcommand.Description(got), got)
 	}
 
 	status := responseCommandObj.GetUShort(tags.Status)
+	if err := validateQROperationStatus(status, "CMoveReadRSP"); err != nil {
+		return nil, dicomstatus.FailureProcessingFailure, err
+	}
 	commandDataSetType := responseCommandObj.GetUShort(tags.CommandDataSetType)
+	if commandDataSetType != dicomcommand.DataSetNone && commandDataSetType != dicomcommand.DataSetPresent {
+		return nil, dicomstatus.FailureProcessingFailure,
+			fmt.Errorf("CMoveReadRSP: invalid CommandDataSetType 0x%04X (must be DataSetNone or DataSetPresent)", commandDataSetType)
+	}
 
 	// Extract sub-operation counts per PS3.7 §C.4.2.1.9
 	remaining := int(responseCommandObj.GetUShort(tags.NumberOfRemainingSuboperations))
@@ -203,6 +211,10 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 	warnings := int(responseCommandObj.GetUShort(tags.NumberOfWarningSuboperations))
 
 	// Update pending count
+	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings); err != nil {
+		return nil, dicomstatus.FailureProcessingFailure, fmt.Errorf("CMoveReadRSP: invalid sub-operation counters: %w", err)
+	}
+
 	if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
 		if pending != nil {
 			*pending = remaining
@@ -213,8 +225,8 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 		}
 	}
 
-	// If CommandDataSetType indicates dataset present (0x0102), read it
-	if commandDataSetType == 0x0102 {
+	// If CommandDataSetType indicates dataset present (DataSetPresent), read it
+	if commandDataSetType == dicomcommand.DataSetPresent {
 		responseDataObj, err := pdu.NextPDU()
 		if err != nil {
 			return nil, status, fmt.Errorf("CMoveReadRSP: failed to read response dataset: %w", err)
@@ -282,6 +294,13 @@ func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 		sopClassUIDLength++
 	}
 
+	if err := validateSuboperationCounters(status, int(remaining), int(completed), int(failed), int(warnings)); err != nil {
+		return fmt.Errorf("CMoveWriteRSP: %w", err)
+	}
+	if err := validateQROperationStatus(status, "CMoveWriteRSP"); err != nil {
+		return err
+	}
+
 	// commandLength includes all fields after CommandGroupLength per PS3.7 Table C.4-3:
 	// - Affected SOP Class UID (8 + length)
 	// - Command Field (8 + 2)
@@ -299,7 +318,7 @@ func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 	responseCommandObj.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
 	messageID := requestCommandObj.GetUShort(tags.MessageID)
 	responseCommandObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
-	responseCommandObj.WriteUint16(tags.CommandDataSetType, 0x0101) // No dataset in response
+	responseCommandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone) // No dataset in response
 	responseCommandObj.WriteUint16(tags.Status, status)
 	responseCommandObj.WriteUint16(tags.NumberOfRemainingSuboperations, remaining)
 	responseCommandObj.WriteUint16(tags.NumberOfCompletedSuboperations, completed)
