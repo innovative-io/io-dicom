@@ -404,7 +404,7 @@ func TestCMoveReadRSP_PendingThenFinal(t *testing.T) {
 	pending := media.NewEmptyDCMObj()
 	pending.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
 	pending.WriteUint16(tags.Status, dicomstatus.Pending)
-	pending.WriteUint16(tags.CommandDataSetType, 0x0001)
+	pending.WriteUint16(tags.CommandDataSetType, 0x0102) // Dataset follows
 	pending.WriteUint16(tags.NumberOfRemainingSuboperations, 2)
 
 	dataset := media.NewEmptyDCMObj()
@@ -412,7 +412,7 @@ func TestCMoveReadRSP_PendingThenFinal(t *testing.T) {
 	final := media.NewEmptyDCMObj()
 	final.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
 	final.WriteUint16(tags.Status, dicomstatus.Success)
-	final.WriteUint16(tags.CommandDataSetType, 0x0101)
+	final.WriteUint16(tags.CommandDataSetType, 0x0101) // No dataset
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{pending, dataset, final}
@@ -425,6 +425,9 @@ func TestCMoveReadRSP_PendingThenFinal(t *testing.T) {
 	if st1 != dicomstatus.Pending {
 		t.Errorf("CMoveReadRSP: status %04X want Pending", st1)
 	}
+	if cnt != 2 {
+		t.Errorf("CMoveReadRSP: pending count %d want 2", cnt)
+	}
 
 	_, st2, err2 := dimse.CMoveReadRSP(m, &cnt)
 	if err2 != nil {
@@ -433,6 +436,9 @@ func TestCMoveReadRSP_PendingThenFinal(t *testing.T) {
 	if st2 != dicomstatus.Success {
 		t.Errorf("CMoveReadRSP: final status %04X want Success", st2)
 	}
+	if cnt != -1 {
+		t.Errorf("CMoveReadRSP: final pending count %d want -1", cnt)
+	}
 }
 
 func TestCMoveReadRSP_ErrorOnNoPDU(t *testing.T) {
@@ -440,5 +446,251 @@ func TestCMoveReadRSP_ErrorOnNoPDU(t *testing.T) {
 	var c int
 	if _, _, err := dimse.CMoveReadRSP(m, &c); err == nil {
 		t.Error("CMoveReadRSP: want error when NextPDU fails")
+	}
+}
+
+// ── C-MOVE-RQ Parsing (NEW) ───────────────────────────────────────────────────
+
+func TestCMoveReadRQ_SuccessWithIdentifier(t *testing.T) {
+	// Construct a C-MOVE-RQ command
+	cmd := media.NewEmptyDCMObj()
+	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.WriteUint16(tags.MessageID, 1)
+	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
+	cmd.WriteString(tags.MoveDestination, "DEST_AE")
+	cmd.WriteUint16(tags.Priority, 0) // Low
+	cmd.WriteUint16(tags.CommandDataSetType, 0x0102)
+
+	// Construct identifier dataset
+	identifier := media.NewEmptyDCMObj()
+	identifier.WriteString(tags.QueryRetrieveLevel, "STUDY")
+	identifier.WriteString(tags.PatientID, "P001")
+
+	m := newMockPDU(ctUID)
+	m.nextPDUs = []media.DICOMObject{cmd, identifier}
+
+	req, err := dimse.CMoveReadRQ(m)
+	if err != nil {
+		t.Fatalf("CMoveReadRQ: %v", err)
+	}
+
+	if req.AffectedSOPClassUID != ctUID {
+		t.Errorf("CMoveReadRQ: AffectedSOPClassUID %s want %s", req.AffectedSOPClassUID, ctUID)
+	}
+	if req.MessageID != 1 {
+		t.Errorf("CMoveReadRQ: MessageID %d want 1", req.MessageID)
+	}
+	if req.MoveDestination != "DEST_AE" {
+		t.Errorf("CMoveReadRQ: MoveDestination %s want DEST_AE", req.MoveDestination)
+	}
+	if req.Priority != 0 {
+		t.Errorf("CMoveReadRQ: Priority %d want 0", req.Priority)
+	}
+	if req.IdentifierDataSet == nil {
+		t.Error("CMoveReadRQ: IdentifierDataSet is nil")
+	}
+	if level := req.GetMoveLevel(); level != "STUDY" {
+		t.Errorf("CMoveReadRQ: GetMoveLevel() %s want STUDY", level)
+	}
+}
+
+func TestCMoveReadRQ_SuccessWithoutIdentifier(t *testing.T) {
+	cmd := media.NewEmptyDCMObj()
+	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.WriteUint16(tags.MessageID, 1)
+	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
+	cmd.WriteString(tags.MoveDestination, "DEST_AE")
+	cmd.WriteUint16(tags.Priority, 2) // High
+	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+
+	m := newMockPDU(ctUID)
+	m.nextPDUs = []media.DICOMObject{cmd}
+
+	req, err := dimse.CMoveReadRQ(m)
+	if err != nil {
+		t.Fatalf("CMoveReadRQ: %v", err)
+	}
+
+	if req.IdentifierDataSet != nil {
+		t.Error("CMoveReadRQ: IdentifierDataSet should be nil when CommandDataSetType=0x0101")
+	}
+	if req.Priority != 2 {
+		t.Errorf("CMoveReadRQ: Priority %d want 2", req.Priority)
+	}
+}
+
+func TestCMoveReadRQ_ErrorMissingSOPClassUID(t *testing.T) {
+	cmd := media.NewEmptyDCMObj()
+	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.WriteUint16(tags.MessageID, 1)
+	// Missing AffectedSOPClassUID
+	cmd.WriteString(tags.MoveDestination, "DEST_AE")
+	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+
+	m := newMockPDU(ctUID)
+	m.nextPDUs = []media.DICOMObject{cmd}
+
+	_, err := dimse.CMoveReadRQ(m)
+	if err == nil {
+		t.Error("CMoveReadRQ: want error when AffectedSOPClassUID is missing")
+	}
+}
+
+func TestCMoveReadRQ_ErrorMissingMessageID(t *testing.T) {
+	cmd := media.NewEmptyDCMObj()
+	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
+	// Missing MessageID
+	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
+	cmd.WriteString(tags.MoveDestination, "DEST_AE")
+	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+
+	m := newMockPDU(ctUID)
+	m.nextPDUs = []media.DICOMObject{cmd}
+
+	_, err := dimse.CMoveReadRQ(m)
+	if err == nil {
+		t.Error("CMoveReadRQ: want error when MessageID is missing")
+	}
+}
+
+func TestCMoveReadRQ_ErrorMissingMoveDestination(t *testing.T) {
+	cmd := media.NewEmptyDCMObj()
+	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.WriteUint16(tags.MessageID, 1)
+	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
+	// Missing MoveDestination
+	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+
+	m := newMockPDU(ctUID)
+	m.nextPDUs = []media.DICOMObject{cmd}
+
+	_, err := dimse.CMoveReadRQ(m)
+	if err == nil {
+		t.Error("CMoveReadRQ: want error when MoveDestination is missing")
+	}
+}
+
+func TestCMoveReadRQ_ErrorInvalidCommandDataSetType(t *testing.T) {
+	cmd := media.NewEmptyDCMObj()
+	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.WriteUint16(tags.MessageID, 1)
+	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
+	cmd.WriteString(tags.MoveDestination, "DEST_AE")
+	cmd.WriteUint16(tags.CommandDataSetType, 0x0103) // Invalid
+
+	m := newMockPDU(ctUID)
+	m.nextPDUs = []media.DICOMObject{cmd}
+
+	_, err := dimse.CMoveReadRQ(m)
+	if err == nil {
+		t.Error("CMoveReadRQ: want error for invalid CommandDataSetType")
+	}
+}
+
+func TestCMoveReadRQ_ErrorWrongCommandField(t *testing.T) {
+	cmd := media.NewEmptyDCMObj()
+	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	cmd.WriteUint16(tags.CommandField, dicomcommand.CFindRequest) // Wrong command
+	cmd.WriteUint16(tags.MessageID, 1)
+	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
+	cmd.WriteString(tags.MoveDestination, "DEST_AE")
+	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+
+	m := newMockPDU(ctUID)
+	m.nextPDUs = []media.DICOMObject{cmd}
+
+	_, err := dimse.CMoveReadRQ(m)
+	if err == nil {
+		t.Error("CMoveReadRQ: want error when CommandField is not C-MOVE Request")
+	}
+}
+
+// ── C-MOVE-RQ Writing (Enhanced) ───────────────────────────────────────────────
+
+func TestCMoveWriteRQWithPriority_Low(t *testing.T) {
+	m := newMockPDU(ctUID)
+	q := media.NewEmptyDCMObj()
+	q.WriteString(tags.QueryRetrieveLevel, "STUDY")
+	if err := dimse.CMoveWriteRQWithPriority(m, q, "DEST_AE", 2); err != nil {
+		t.Fatalf("CMoveWriteRQWithPriority: %v", err)
+	}
+	if len(m.written) != 2 {
+		t.Fatalf("CMoveWriteRQWithPriority: want 2 writes, got %d", len(m.written))
+	}
+	if pri := m.written[0].GetUShort(tags.Priority); pri != 2 {
+		t.Errorf("CMoveWriteRQWithPriority: Priority %d want 2", pri)
+	}
+}
+
+func TestCMoveWriteRQWithPriority_EmptyDestination(t *testing.T) {
+	m := newMockPDU(ctUID)
+	q := media.NewEmptyDCMObj()
+	if err := dimse.CMoveWriteRQWithPriority(m, q, "", 0); err == nil {
+		t.Error("CMoveWriteRQWithPriority: want error for empty destination")
+	}
+}
+
+func TestCMoveWriteRQWithPriority_EmptyDataset(t *testing.T) {
+	m := newMockPDU(ctUID)
+	q := media.NewEmptyDCMObj()
+	if err := dimse.CMoveWriteRQWithPriority(m, q, "DEST_AE", 1); err != nil {
+		t.Fatalf("CMoveWriteRQWithPriority: %v", err)
+	}
+	// When dataObj is empty, should only write 1 PDU (command only)
+	if len(m.written) != 1 {
+		t.Fatalf("CMoveWriteRQWithPriority (empty dataset): want 1 write, got %d", len(m.written))
+	}
+	// CommandDataSetType should be 0x0101 (no dataset)
+	if cdt := m.written[0].GetUShort(tags.CommandDataSetType); cdt != 0x0101 {
+		t.Errorf("CMoveWriteRQWithPriority: CommandDataSetType %04X want 0x0101", cdt)
+	}
+}
+
+// ── C-MOVE Response Stats (NEW) ────────────────────────────────────────────────
+
+func TestGetCMoveResponseStats(t *testing.T) {
+	rsp := media.NewEmptyDCMObj()
+	rsp.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
+	rsp.WriteUint16(tags.Status, dicomstatus.Pending)
+	rsp.WriteUint16(tags.CommandDataSetType, 0x0101)
+	rsp.WriteUint16(tags.NumberOfRemainingSuboperations, 5)
+	rsp.WriteUint16(tags.NumberOfCompletedSuboperations, 3)
+	rsp.WriteUint16(tags.NumberOfFailedSuboperations, 1)
+	rsp.WriteUint16(tags.NumberOfWarningSuboperations, 0)
+
+	stats := dimse.GetCMoveResponseStats(rsp)
+	if stats.Remaining != 5 {
+		t.Errorf("GetCMoveResponseStats: Remaining %d want 5", stats.Remaining)
+	}
+	if stats.Completed != 3 {
+		t.Errorf("GetCMoveResponseStats: Completed %d want 3", stats.Completed)
+	}
+	if stats.Failed != 1 {
+		t.Errorf("GetCMoveResponseStats: Failed %d want 1", stats.Failed)
+	}
+	if stats.Warnings != 0 {
+		t.Errorf("GetCMoveResponseStats: Warnings %d want 0", stats.Warnings)
+	}
+}
+
+// ── C-MOVE Helper Functions ────────────────────────────────────────────────
+
+func TestCMoveRequest_GetMoveLevelFromIdentifier(t *testing.T) {
+	identifier := media.NewEmptyDCMObj()
+	identifier.WriteString(tags.QueryRetrieveLevel, "STUDY")
+
+	req := &dimse.CMoveRequest{
+		IdentifierDataSet: identifier,
+	}
+
+	level := req.GetMoveLevel()
+	if level != "STUDY" {
+		t.Errorf("GetMoveLevel: %s want STUDY", level)
 	}
 }

@@ -29,6 +29,17 @@ Innovative IO DICOM Golang Library
 
 See `docs/project-structure.md` for package boundaries and maintenance conventions.
 
+## DICOM Protocol Implementation
+
+All DIMSE commands are fully implemented per DICOM PS3.7 specifications:
+
+- **C-ECHO** - Verification of connection and DICOM compatibility
+- **C-FIND** - Query to locate DICOM instances  
+- **C-STORE** - Store instances to SCP
+- **C-MOVE** - Retrieve and forward instances to destination (see [C-MOVE Implementation Guide](docs/dicom-cmove-implementation.md) for details)
+
+For detailed C-MOVE usage patterns, error handling, and compliance information, see the [C-MOVE Implementation Guide](docs/dicom-cmove-implementation.md).
+
 ## DICOM Network Conformance Notes
 
 - AE titles are encoded as fixed 16-byte, space-padded fields. Internal spaces are preserved while only trailing padding is trimmed when read back.
