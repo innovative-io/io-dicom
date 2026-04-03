@@ -530,6 +530,13 @@ func (pdu *pduService) interogateAAssociateAC() bool {
 }
 
 func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
+	if tlsConn, ok := pdu.conn.(*tls.Conn); ok {
+		state := tlsConn.ConnectionState()
+		pdu.AssocRQ.SetPeerCertificates(state.PeerCertificates)
+	} else {
+		pdu.AssocRQ.SetPeerCertificates(nil)
+	}
+
 	if pdu.OnAssociationRequest == nil || !pdu.OnAssociationRequest(pdu.AssocRQ) {
 		slog.Warn("pdu: rejecting association - rejected by application handler", "CalledAE", pdu.AssocRQ.GetCalledAE(), "CallingAE", pdu.AssocRQ.GetCallingAE())
 		// Result=1 (permanent), Source=1 (UL-service-user), Reason=7 (called AE not recognised)

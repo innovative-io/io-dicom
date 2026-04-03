@@ -2,6 +2,7 @@ package network
 
 import (
 	"bufio"
+	"crypto/x509"
 	"errors"
 	"log/slog"
 	"strconv"
@@ -28,6 +29,8 @@ type AssociationRequest interface {
 	GetImplementationClass() UIDItem
 	SetImplementationClassUID(uid string)
 	SetImplementationVersionName(name string)
+	GetPeerCertificates() []*x509.Certificate
+	SetPeerCertificates(certs []*x509.Certificate)
 	Size() uint32
 	Write(rw *bufio.ReadWriter) error
 	Read(ms media.MemoryStream) error
@@ -35,17 +38,18 @@ type AssociationRequest interface {
 }
 
 type associationRequest struct {
-	ItemType        byte // 0x01
-	Reserved1       byte
-	Length          uint32
-	ProtocolVersion uint16 // 0x01
-	Reserved2       uint16
-	CallingAE       [16]byte // 16 bytes transfered
-	CalledAE        [16]byte // 16 bytes transfered
-	Reserved3       [32]byte
-	AppContext      UIDItem
-	PresContexts    []PresentationContext
-	UserInfo        UserInformation
+	ItemType         byte // 0x01
+	Reserved1        byte
+	Length           uint32
+	ProtocolVersion  uint16 // 0x01
+	Reserved2        uint16
+	CallingAE        [16]byte // 16 bytes transfered
+	CalledAE         [16]byte // 16 bytes transfered
+	Reserved3        [32]byte
+	AppContext       UIDItem
+	PresContexts     []PresentationContext
+	UserInfo         UserInformation
+	PeerCertificates []*x509.Certificate
 }
 
 // NewAssociationRequest - NewAssociationRequest
@@ -120,6 +124,14 @@ func (aarq *associationRequest) SetImplementationClassUID(uid string) {
 
 func (aarq *associationRequest) SetImplementationVersionName(name string) {
 	aarq.UserInfo.SetImplementationVersionName(name)
+}
+
+func (aarq *associationRequest) GetPeerCertificates() []*x509.Certificate {
+	return aarq.PeerCertificates
+}
+
+func (aarq *associationRequest) SetPeerCertificates(certs []*x509.Certificate) {
+	aarq.PeerCertificates = certs
 }
 
 func (aarq *associationRequest) Size() uint32 {

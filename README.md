@@ -85,6 +85,7 @@ Notes:
 - Rejecting an incoming A-ASSOCIATE-RQ closes the transport connection immediately after sending A-ASSOCIATE-RJ, conforming to DICOM PS 3.8 §9.3.4.
 - A-ASSOCIATE-RJ reason text decoding is aligned to PS3.8 source/reason tables (UL service-user, ACSE provider, presentation provider), with deterministic `No reason given` fallback for unknown combinations.
 - TLS 1.2+ is enforced for both the SCP listener (`NewSCPWithTLS`) and SCU outbound connections (`Destination.IsTLS` + `Destination.TLSConfig`). Pure-Go builds with no `crypto/tls` overhead remain the default when `IsTLS` is false.
+- For TLS SCP associations, `network.AssociationRequest` now carries the negotiated peer certificate chain (`GetPeerCertificates`) so applications can attribute inbound clients by mTLS certificate identity.
 
 ## Query/Retrieve Identifier Validation
 
