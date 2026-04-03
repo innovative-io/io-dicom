@@ -98,6 +98,16 @@ go run ./cmd/compare   --help
 go run ./cmd/utilities
 ```
 
+### SCP health probe port
+
+When running io-dicom in SCP mode, use the dedicated TCP health probe listener to keep health checks off the DICOM listener port.
+
+```bash
+go run ./cmd/io-dicom -scp -datastore ./data -calledae DICOM_SCP -port 1040 -healthport 18040
+```
+
+Set `-healthport 0` to disable the dedicated health listener.
+
 ---
 
 ## Verify `$PATH` contains the Go binary directory

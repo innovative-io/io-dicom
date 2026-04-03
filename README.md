@@ -29,6 +29,18 @@ Innovative IO DICOM Golang Library
 
 See `docs/project-structure.md` for package boundaries and maintenance conventions.
 
+## CLI SCP Health Probe
+
+When running the CLI in SCP mode, use a dedicated TCP health probe port so Kubernetes or load balancer probes do not hit the DICOM association port and generate noisy protocol logs.
+
+Example:
+
+```bash
+io-dicom -scp -datastore ./data -calledae DICOM_SCP -port 1040 -healthport 18040
+```
+
+Set `-healthport 0` to disable the dedicated health listener.
+
 ## Sample DICOM Files
 
 The `samples/` directory contains local DICOM test files for validation and testing. It is ignored by git to keep the repository size down. See [DICOM-SAMPLES.md](DICOM-SAMPLES.md) for:

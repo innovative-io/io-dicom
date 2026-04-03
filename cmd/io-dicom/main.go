@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
@@ -47,6 +50,7 @@ func main() {
 	dump := flag.Bool("dump", false, "Dump contents of DICOM file to stdout")
 
 	datastore := flag.String("datastore", "", "Directory to use as SCP storage")
+	healthPort := flag.Int("healthport", 18040, "Dedicated TCP health probe port when running -scp (set 0 to disable)")
 
 	startSCP := flag.Bool("scp", false, "Start a SCP")
 
@@ -125,9 +129,22 @@ func main() {
 
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
+
+		var wg sync.WaitGroup
+		var healthListener net.Listener
+		if *healthPort > 0 {
+			var healthErr error
+			healthListener, healthErr = startTCPHealthListener(ctx, *healthPort, &wg)
+			if healthErr != nil {
+				log.Fatalf("failed to start TCP health listener on port %d: %v", *healthPort, healthErr)
+			}
+			defer healthListener.Close()
+		}
+
 		if err := scp.Start(ctx); err != nil {
 			log.Fatal(err)
 		}
+		wg.Wait()
 		return
 	}
 
@@ -268,4 +285,37 @@ func loadCertPool(caFile string) (*x509.CertPool, error) {
 		return nil, fmt.Errorf("no valid certificates found in %s", caFile)
 	}
 	return pool, nil
+}
+
+func startTCPHealthListener(ctx context.Context, port int, wg *sync.WaitGroup) (net.Listener, error) {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("INFO: TCP health listener started on port %d", port)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer log.Printf("INFO: TCP health listener stopped on port %d", port)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
+					return
+				}
+				log.Printf("WARN: TCP health listener accept failed on port %d: %v", port, err)
+				continue
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		_ = listener.Close()
+	}()
+
+	return listener, nil
 }
