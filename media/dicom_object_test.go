@@ -11,6 +11,15 @@ import (
 
 func TestNewDCMObjFromFile(t *testing.T) {
 	InitDict()
+	if _, err := os.Stat("../samples/test2.dcm"); err != nil {
+		t.Skipf("sample fixtures unavailable: %v", err)
+	}
+	if _, err := os.Stat("../samples/test2-2.dcm"); err != nil {
+		t.Skipf("sample fixtures unavailable: %v", err)
+	}
+	if _, err := os.Stat("../samples/test2-3.dcm"); err != nil {
+		t.Skipf("sample fixtures unavailable: %v", err)
+	}
 
 	type args struct {
 		fileName string
@@ -56,6 +65,13 @@ func TestNewDCMObjFromFile(t *testing.T) {
 }
 
 func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
+	if _, err := os.Stat("../samples/test2.dcm"); err != nil {
+		t.Skipf("sample fixtures unavailable: %v", err)
+	}
+	if _, err := os.Stat("../samples/jpeg8.dcm"); err != nil {
+		t.Skipf("sample fixtures unavailable: %v", err)
+	}
+
 	type args struct {
 		outTS *transfersyntax.TransferSyntax
 	}

@@ -3,6 +3,7 @@ package media
 import (
 	"bufio"
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -151,6 +152,10 @@ func TestMemoryStream_NewFromFile_Error(t *testing.T) {
 }
 
 func TestMemoryStream_NewFromFile_Success(t *testing.T) {
+	if _, err := os.Stat("../samples/test.dcm"); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+
 	ms, err := NewMemoryStreamFromFile("../samples/test.dcm")
 	if err != nil {
 		t.Fatal(err)

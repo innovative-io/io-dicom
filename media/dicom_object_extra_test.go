@@ -113,6 +113,10 @@ func TestDICOMObject_GetUIntGE(t *testing.T) {
 }
 
 func TestDICOMObject_WriteToFile(t *testing.T) {
+	if _, err := os.Stat("../samples/test.dcm"); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+
 	obj, err := NewDCMObjFromFile("../samples/test.dcm")
 	if err != nil {
 		t.Fatal(err)
@@ -217,6 +221,10 @@ func TestDICOMObject_WriteUint32GE(t *testing.T) {
 }
 
 func TestDICOMObject_DumpTags_DoesNotPanic(t *testing.T) {
+	if _, err := os.Stat("../samples/test.dcm"); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+
 	obj, err := NewDCMObjFromFile("../samples/test.dcm")
 	if err != nil {
 		t.Fatal(err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -156,6 +157,10 @@ func Test_scu_FindSCU(t *testing.T) {
 }
 
 func Test_scu_StoreSCU(t *testing.T) {
+	if _, err := os.Stat("../samples/test.dcm"); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+
 	_, testSCP := StartSCP(t, 1042)
 
 	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
