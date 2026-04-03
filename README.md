@@ -25,17 +25,17 @@ Innovative IO DICOM Golang Library
 - `database/`: sqlite-backed data access layer
 - `wado/`: DICOMweb server and client (WADO-RS, STOW-RS, QIDO-RS)
 - `utils/`, `uuids/`, `clients/`, `implementation/`: shared utilities and implementation metadata
-- `samples/`: sample DICOM files used by tests and local validation
+- `samples/`: local sample DICOM files used by tests and validation, populated on demand and ignored by git
 
 See `docs/project-structure.md` for package boundaries and maintenance conventions.
 
 ## Sample DICOM Files
 
-The `samples/` directory contains DICOM test files for validation and testing. See [DICOM-SAMPLES.md](DICOM-SAMPLES.md) for:
+The `samples/` directory contains local DICOM test files for validation and testing. It is ignored by git to keep the repository size down. See [DICOM-SAMPLES.md](DICOM-SAMPLES.md) for:
 
-- **Existing samples**: 13 files covering various codecs (JPEG, RLE, JPEG2000), modalities, and data types
+- **Bundled samples**: 17 repository-tracked baseline files covering JPEG, RLE, JPEG2000, raw pixel data, and encapsulated content
 - **Synthetic samples**: 4 generated DICOM files (CT, MR, Ultrasound, CR Color) built using the **io-dicom library**
-- **Acquisition tools**: Scripts for downloading additional public DICOM test files
+- **Acquisition tools**: Scripts for downloading 40+ curated public DICOM batches from pydicom, highdicom, and cornerstone3D
 - **Usage examples**: How to use samples in Go tests
 
 Generate synthetic DICOM files using the io-dicom library:
@@ -49,6 +49,8 @@ Download additional public samples:
 ```bash
 bash scripts/acquire-sample-dicoms.sh
 ```
+
+Note: sample-dependent tests and benchmarks expect local files in `samples/`. After a fresh clone, populate the directory with the generator and/or acquisition scripts before running those paths.
 
 ## DICOM Standards Alignment
 

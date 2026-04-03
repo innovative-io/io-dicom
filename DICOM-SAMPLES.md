@@ -2,9 +2,15 @@
 
 This directory contains sample DICOM files used for testing, validation, and demonstration purposes in the io-dicom library.
 
+The `samples/` directory is intentionally ignored by git. Populate it locally with the generation and acquisition scripts before running sample-dependent tests or benchmarks.
+
 ## Current Sample Collection
 
-### Total: 17 files, ~36 MB
+### Current Working Sample Set: 63 files, ~40 MB
+
+- 17 baseline repository files
+- 4 synthetic io-dicom-generated files
+- 42 curated public DICOM files acquired from pydicom, highdicom, and cornerstone3D
 
 **Original Test Files:**
 - `test.dcm` (130K) - Basic general DICOM image
@@ -24,6 +30,11 @@ This directory contains sample DICOM files used for testing, validation, and dem
 - `synthetic-mr.dcm` (129K) - MR Image, circular gradient, 256×256
 - `synthetic-us.dcm` (257K) - Ultrasound Image, speckle pattern, 512×512
 - `synthetic-cr-color.dcm` (193K) - Color RGB Image, gradient, 256×256×3
+
+**Acquired Public Samples** (via `scripts/acquire-sample-dicoms.sh`):
+- `pydicom-*` - parser edge cases and compressed transfer syntax fixtures
+- `highdicom-*` - CT, DX, segmentation, slide microscopy, and structured report objects
+- `cornerstone-*` - transfer syntax coverage across explicit/implicit, deflated, JPEG, JPEG-LS, JPEG2000, and RLE encodings
 
 ## Transfer Syntaxes Represented
 
@@ -88,7 +99,7 @@ To acquire more diverse DICOM files from public repositories:
 bash scripts/acquire-sample-dicoms.sh
 ```
 
-**Note:** This script attempts to download from open-source repositories. Success depends on network connectivity and source availability.
+**Note:** This script downloads a curated batch of more than 40 public DICOM files from open-source repositories with stable raw GitHub URLs. Success still depends on network connectivity and source availability.
 
 **Known Issues:**
 - GitHub raw content URLs may be rate-limited
@@ -102,27 +113,19 @@ For manual downloads, see "Manual Sources" below.
 Public DICOM sample repositories:
 
 1. **pydicom Test Files** (MIT License)
-   - URL: https://github.com/pydicom/pydicom/tree/master/src/pydicom/data/test_files
-   - Coverage: Full range of transfer syntaxes and modalities
+    - URL: https://github.com/pydicom/pydicom/tree/main/src/pydicom/data/test_files
+    - Coverage: Core parser cases, explicit/big-endian, JPEG, JPEG-LS, JPEG2000, and RGB secondary captures
    - License: MIT
 
-2. **Kamidata DICOM Images** (Open Source)
-   - URL: https://kamidata.github.io/images-js/
-   - Coverage: Common medical imaging modalities
-   - License: Free for non-commercial use
+2. **highdicom Test Files** (MIT License)
+    - URL: https://github.com/ImagingDataCommons/highdicom/tree/master/data/test_files
+    - Coverage: CT, DX, segmentations, slide microscopy, and structured reports
+    - License: MIT
 
-3. **NIST DICOM Samples** (Public Domain)
-   - URL: https://www.nist.gov/itl/iti/test-data
-   - Coverage: Compliance and conformance testing
-   - License: Public Domain
-
-4. **Mayo Clinic**: Free DICOM Files for Research
-   - URL: https://www.mayo.edu/research/documents/dicom-reference-files
-   - License: Educational use
-
-5. **Siemens, Philips, GE Healthcare**: Manufacturer test files
-   - Available through vendor documentation
-   - Proprietary formats and examples
+3. **cornerstone3D Test Images** (MIT License)
+    - URL: https://github.com/cornerstonejs/cornerstone3D/tree/main/packages/dicomImageLoader/testImages
+    - Coverage: Transfer syntax variants including JPEG, JPEG-LS, JPEG2000, deflated, RLE, and big-endian explicit VR
+    - License: MIT
 
 ### Creating Synthetic DICOM Files
 

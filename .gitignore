@@ -13,3 +13,4 @@ datastore
 .venv
 .build
 .local
+samples/
