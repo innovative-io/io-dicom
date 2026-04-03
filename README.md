@@ -29,6 +29,27 @@ Innovative IO DICOM Golang Library
 
 See `docs/project-structure.md` for package boundaries and maintenance conventions.
 
+## Sample DICOM Files
+
+The `samples/` directory contains DICOM test files for validation and testing. See [DICOM-SAMPLES.md](DICOM-SAMPLES.md) for:
+
+- **Existing samples**: 13 files covering various codecs (JPEG, RLE, JPEG2000), modalities, and data types
+- **Synthetic samples**: 4 generated DICOM files (CT, MR, Ultrasound, CR Color) built using the **io-dicom library**
+- **Acquisition tools**: Scripts for downloading additional public DICOM test files
+- **Usage examples**: How to use samples in Go tests
+
+Generate synthetic DICOM files using the io-dicom library:
+```bash
+go run ./cmd/generate-sample-dicoms/main.go -output samples
+# or
+bash scripts/generate-sample-dicoms.sh
+```
+
+Download additional public samples:
+```bash
+bash scripts/acquire-sample-dicoms.sh
+```
+
 ## DICOM Standards Alignment
 
 Section-by-section standards alignment tracking lives in
@@ -625,8 +646,7 @@ upstream pydicom DICOM data tables.
 Regenerate both files with:
 
 ```bash
-/usr/bin/python3 tools/update_dictionaries.py
-gofmt -w dictionary/tags/dicom_tags.go dictionary/transfersyntax/transfer_syntaxes.go
+go run ./cmd/update-dictionaries/main.go
 go test ./...
 ```
 
