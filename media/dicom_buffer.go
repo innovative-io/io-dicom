@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/implementation"
@@ -177,6 +178,26 @@ func (bd *dicomBuffer) WriteString(value string) {
 	bd.MS.Write([]byte(value), len(value))
 }
 
+func normalizeExplicitVR(tag *DICOMTag, ts *transfersyntax.TransferSyntax) string {
+	vr := strings.TrimSpace(tag.VR)
+	if vr == "OB or OW" {
+		if ts != nil && ts.UID != transfersyntax.ImplicitVRLittleEndian.UID && ts.UID != transfersyntax.ExplicitVRLittleEndian.UID && ts.UID != transfersyntax.DeflatedExplicitVRLittleEndian.UID {
+			return "OB"
+		}
+		return "OW"
+	}
+	return vr
+}
+
+func isLongExplicitVR(vr string) bool {
+	switch vr {
+	case "OB", "OW", "SQ", "UN", "UT":
+		return true
+	default:
+		return false
+	}
+}
+
 // ReadTag - read a single tag from the Stream
 func (bd *dicomBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 	group, err := bd.ReadUint16()
@@ -243,11 +264,17 @@ func (bd *dicomBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 
 // WriteTag - Write a single tag to stream
 func (bd *dicomBuffer) WriteTag(tag *DICOMTag, explicitVR bool) {
+	bd.writeTag(tag, explicitVR, nil)
+}
+
+func (bd *dicomBuffer) writeTag(tag *DICOMTag, explicitVR bool, ts *transfersyntax.TransferSyntax) {
+	writeVR := normalizeExplicitVR(tag, ts)
+
 	bd.WriteUint16(tag.Group)
 	bd.WriteUint16(tag.Element)
 	if (tag.Group != 0x0000) && (tag.Group != 0xfffe) && (explicitVR) {
-		bd.MS.Write([]byte(tag.VR), 2)
-		if (tag.VR == "OB") || (tag.VR == "OW") || (tag.VR == "SQ") || (tag.VR == "UN") || (tag.VR == "UT") {
+		bd.MS.Write([]byte(writeVR), 2)
+		if isLongExplicitVR(writeVR) {
 			bd.WriteUint16(0)
 			bd.WriteUint32(tag.Length)
 		} else {
@@ -386,7 +413,7 @@ func (bd *dicomBuffer) WriteObj(obj DICOMObject) {
 	//	bd.MS.Clear()
 	for i := 0; i < obj.TagCount(); i++ {
 		tag := obj.GetTagAt(i)
-		bd.WriteTag(tag, obj.IsExplicitVR())
+		bd.writeTag(tag, obj.IsExplicitVR(), obj.GetTransferSyntax())
 	}
 }
 

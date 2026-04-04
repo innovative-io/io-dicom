@@ -2,8 +2,11 @@ package media
 
 import (
 	"bufio"
+	"encoding/binary"
 	"net"
 	"testing"
+
+	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 )
 
 func TestDICOMBuffer_IsBigEndian(t *testing.T) {
@@ -111,5 +114,77 @@ func TestDICOMBuffer_Send(t *testing.T) {
 	}
 	if received[0] != 1 || received[1] != 2 || received[2] != 3 {
 		t.Fatalf("Send() received %v", received)
+	}
+}
+
+func TestDICOMBuffer_WriteObj_NormalizesAmbiguousPixelDataVRForNativeExplicitSyntax(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.SetExplicitVR(true)
+	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	obj.Add(&DICOMTag{
+		Group:   0x7FE0,
+		Element: 0x0010,
+		VR:      "OB or OW",
+		Length:  4,
+		Data:    []byte{1, 2, 3, 4},
+	})
+
+	buf := NewEmptyBufData()
+	buf.WriteObj(obj)
+	got := buf.GetAllBytes()
+
+	if string(got[4:6]) != "OW" {
+		t.Fatalf("pixel data VR = %q, want %q", got[4:6], "OW")
+	}
+	if reserved := binary.LittleEndian.Uint16(got[6:8]); reserved != 0 {
+		t.Fatalf("pixel data reserved bytes = %d, want 0", reserved)
+	}
+	if length := binary.LittleEndian.Uint32(got[8:12]); length != 4 {
+		t.Fatalf("pixel data length = %d, want 4", length)
+	}
+
+	roundtrip := NewEmptyDCMObj()
+	roundtrip.SetExplicitVR(true)
+	roundtrip.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	if err := NewBufDataFromBytes(got).ReadObj(roundtrip); err != nil {
+		t.Fatalf("ReadObj() error = %v", err)
+	}
+
+	pixelData := roundtrip.GetTagGE(0x7FE0, 0x0010)
+	if pixelData == nil {
+		t.Fatal("pixel data tag missing after roundtrip")
+	}
+	if pixelData.VR != "OW" {
+		t.Fatalf("roundtrip VR = %q, want %q", pixelData.VR, "OW")
+	}
+	if pixelData.Length != 4 {
+		t.Fatalf("roundtrip length = %d, want 4", pixelData.Length)
+	}
+}
+
+func TestDICOMBuffer_WriteObj_NormalizesAmbiguousPixelDataVRForEncapsulatedSyntax(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.SetExplicitVR(true)
+	obj.SetTransferSyntax(transfersyntax.JPEGBaseline8Bit)
+	obj.Add(&DICOMTag{
+		Group:   0x7FE0,
+		Element: 0x0010,
+		VR:      "OB or OW",
+		Length:  4,
+		Data:    []byte{1, 2, 3, 4},
+	})
+
+	buf := NewEmptyBufData()
+	buf.WriteObj(obj)
+	got := buf.GetAllBytes()
+
+	if string(got[4:6]) != "OB" {
+		t.Fatalf("pixel data VR = %q, want %q", got[4:6], "OB")
+	}
+	if reserved := binary.LittleEndian.Uint16(got[6:8]); reserved != 0 {
+		t.Fatalf("pixel data reserved bytes = %d, want 0", reserved)
+	}
+	if length := binary.LittleEndian.Uint32(got[8:12]); length != 4 {
+		t.Fatalf("pixel data length = %d, want 4", length)
 	}
 }
