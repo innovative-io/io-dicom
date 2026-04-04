@@ -606,6 +606,73 @@ func (obj *dicomObject) SetTransferSyntax(ts *transfersyntax.TransferSyntax) {
 	obj.TransferSyntax = ts
 }
 
+func parseBasicOffsetTable(data []byte) []uint32 {
+	if len(data) == 0 || len(data)%4 != 0 {
+		return nil
+	}
+	offsets := make([]uint32, len(data)/4)
+	for i := range offsets {
+		offsets[i] = binary.LittleEndian.Uint32(data[i*4 : i*4+4])
+	}
+	return offsets
+}
+
+func joinFragments(fragments [][]byte) []byte {
+	total := 0
+	for _, frag := range fragments {
+		total += len(frag)
+	}
+	out := make([]byte, total)
+	pos := 0
+	for _, frag := range fragments {
+		copy(out[pos:], frag)
+		pos += len(frag)
+	}
+	return out
+}
+
+func frameFragmentRangeByBOT(offsets []uint32, frame int, fragmentPayloadSizes []int) (int, int, bool) {
+	if frame < 0 || frame >= len(offsets) {
+		return 0, 0, false
+	}
+	if len(fragmentPayloadSizes) == 0 {
+		return 0, 0, false
+	}
+
+	acc := uint32(0)
+	startIdx := -1
+	for idx, payloadLen := range fragmentPayloadSizes {
+		itemStart := acc
+		itemSize := uint32(8 + payloadLen)
+		if offsets[frame] == itemStart {
+			startIdx = idx
+			break
+		}
+		acc += itemSize
+	}
+	if startIdx < 0 {
+		return 0, 0, false
+	}
+
+	if frame == len(offsets)-1 {
+		return startIdx, len(fragmentPayloadSizes), true
+	}
+
+	nextOffset := offsets[frame+1]
+	acc = 0
+	for idx, payloadLen := range fragmentPayloadSizes {
+		if acc == nextOffset {
+			if idx <= startIdx {
+				return 0, 0, false
+			}
+			return startIdx, idx, true
+		}
+		acc += uint32(8 + payloadLen)
+	}
+
+	return 0, 0, false
+}
+
 func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 	var i int
 	var rows, cols, bitsa, planar uint16
@@ -675,17 +742,58 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 				}
 
 				if tag.Length == 0xFFFFFFFF {
-					tagIdx := i + 2 + frame
-					if tagIdx >= len(obj.Tags) {
+					if i+1 >= len(obj.Tags) {
+						return nil, errors.New("missing basic offset table")
+					}
+
+					botItem := obj.GetTagAt(i + 1)
+					if botItem == nil || botItem.Group != 0xFFFE || botItem.Element != 0xE000 {
+						return nil, errors.New("invalid encapsulated pixel data layout")
+					}
+
+					fragments := make([][]byte, 0)
+					fragmentPayloadSizes := make([]int, 0)
+					for tagIdx := i + 2; tagIdx < len(obj.Tags); tagIdx++ {
+						t := obj.GetTagAt(tagIdx)
+						if t == nil {
+							continue
+						}
+						if t.Group == 0xFFFE && t.Element == 0xE0DD {
+							break
+						}
+						if t.Group == 0xFFFE && t.Element == 0xE000 {
+							fragments = append(fragments, t.Data)
+							fragmentPayloadSizes = append(fragmentPayloadSizes, len(t.Data))
+						}
+					}
+
+					if len(fragments) == 0 {
 						return nil, fmt.Errorf("frame %d out of range", frame)
 					}
-					t := obj.GetTagAt(tagIdx)
-					if t == nil {
-						return nil, fmt.Errorf("frame %d pixel item is nil", frame)
+
+					if frames <= 1 {
+						return joinFragments(fragments), nil
 					}
-					out := make([]byte, len(t.Data))
-					copy(out, t.Data)
-					return out, nil
+
+					if len(fragments) == int(frames) {
+						out := make([]byte, len(fragments[frame]))
+						copy(out, fragments[frame])
+						return out, nil
+					}
+
+					botOffsets := parseBasicOffsetTable(botItem.Data)
+					if len(botOffsets) >= int(frames) {
+						start, end, ok := frameFragmentRangeByBOT(botOffsets[:frames], frame, fragmentPayloadSizes)
+						if ok {
+							return joinFragments(fragments[start:end]), nil
+						}
+					}
+
+					if frame == 0 {
+						return joinFragments(fragments), nil
+					}
+
+					return nil, fmt.Errorf("frame %d out of range", frame)
 				} else {
 					if RGB && (planar == 1) {
 						var img_offset, img_size uint32

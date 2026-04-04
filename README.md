@@ -108,6 +108,7 @@ Notes:
 - C-STORE response field validation is enforced (`CommandDataSetType=0x0101` and non-zero `MessageIDBeingRespondedTo`).
 - C-ECHO response field validation is enforced (`CommandDataSetType=0x0101` and non-zero `MessageIDBeingRespondedTo`).
 - DICOM file writes now validate required output prerequisites before emitting file meta information: transfer syntax, SOP Class UID, and SOP Instance UID must all be present.
+- Encapsulated Pixel Data frame extraction now supports fragmented frame payloads: single-frame objects concatenate all fragments, and multi-frame objects can reconstruct fragmented frames using the Basic Offset Table when present.
 - For detailed C-MOVE usage patterns, error handling, and compliance information, see the [C-MOVE Implementation Guide](docs/dicom-cmove-implementation.md).
 
 ## DICOM Network Conformance Notes

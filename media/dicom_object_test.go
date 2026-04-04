@@ -472,6 +472,73 @@ func TestGetPixelData_UncompressedMultiFrameReturnsRequestedFrame(t *testing.T) 
 	}
 }
 
+func TestGetPixelData_EncapsulatedSingleFrameWithMultipleFragments(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.JPEGBaseline8Bit)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+
+	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
+	obj.WriteStringGE(0x0028, 0x0008, "IS", "1")
+	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
+	obj.WriteUint16GE(0x0028, 0x0011, "US", 4)
+	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
+
+	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{1, 2}, BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{3, 4}, BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+
+	frame0, err := obj.GetPixelData(0)
+	if err != nil {
+		t.Fatalf("GetPixelData(frame0) failed: %v", err)
+	}
+	if len(frame0) != 4 || frame0[0] != 1 || frame0[1] != 2 || frame0[2] != 3 || frame0[3] != 4 {
+		t.Fatalf("unexpected frame0 data: %v", frame0)
+	}
+}
+
+func TestGetPixelData_EncapsulatedMultiFrameWithFragmentedFrameUsesBOT(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.JPEGBaseline8Bit)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+
+	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
+	obj.WriteStringGE(0x0028, 0x0008, "IS", "2")
+	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
+	obj.WriteUint16GE(0x0028, 0x0011, "US", 4)
+	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
+
+	// BOT offsets are measured from the first fragment item tag after BOT.
+	// Frame 0 starts at offset 0; frame 1 starts after two fragments (2*(8 header + 2 payload) = 20).
+	bot := []byte{0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00}
+
+	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(bot)), VR: "DL", Data: bot, BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{10, 11}, BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{12, 13}, BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{20, 21}, BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+
+	frame0, err := obj.GetPixelData(0)
+	if err != nil {
+		t.Fatalf("GetPixelData(frame0) failed: %v", err)
+	}
+	if len(frame0) != 4 || frame0[0] != 10 || frame0[1] != 11 || frame0[2] != 12 || frame0[3] != 13 {
+		t.Fatalf("unexpected frame0 data: %v", frame0)
+	}
+
+	frame1, err := obj.GetPixelData(1)
+	if err != nil {
+		t.Fatalf("GetPixelData(frame1) failed: %v", err)
+	}
+	if len(frame1) != 2 || frame1[0] != 20 || frame1[1] != 21 {
+		t.Fatalf("unexpected frame1 data: %v", frame1)
+	}
+}
+
 func TestRGBRoundTripViaEncapsulatedCodecs(t *testing.T) {
 	tests := []struct {
 		name string
