@@ -382,15 +382,20 @@ func TestRLELosslessMultiFrameRoundTrip(t *testing.T) {
 		t.Fatalf("ChangeTransferSyntax back to ExplicitVRLittleEndian failed: %v", err)
 	}
 
-	out, err := obj.GetPixelData(0)
+	frame0, err := obj.GetPixelData(0)
 	if err != nil {
-		t.Fatalf("GetPixelData failed: %v", err)
+		t.Fatalf("GetPixelData(frame0) failed: %v", err)
 	}
-	if len(out) < 4 {
-		t.Fatalf("expected at least 4 bytes of pixel data, got %d", len(out))
+	if len(frame0) != 2 || frame0[0] != 1 || frame0[1] != 2 {
+		t.Fatalf("unexpected frame0 data after roundtrip: %v", frame0)
 	}
-	if out[0] != 1 || out[1] != 2 || out[2] != 3 || out[3] != 4 {
-		t.Fatalf("pixel data mismatch after roundtrip: %v", out[:4])
+
+	frame1, err := obj.GetPixelData(1)
+	if err != nil {
+		t.Fatalf("GetPixelData(frame1) failed: %v", err)
+	}
+	if len(frame1) != 2 || frame1[0] != 3 || frame1[1] != 4 {
+		t.Fatalf("unexpected frame1 data after roundtrip: %v", frame1)
 	}
 }
 
@@ -423,6 +428,48 @@ func newRGBRoundTripObject() DICOMObject {
 	FillTag(pixel)
 	obj.Add(pixel)
 	return obj
+}
+
+func TestGetPixelData_UncompressedMultiFrameReturnsRequestedFrame(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+
+	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
+	obj.WriteStringGE(0x0028, 0x0008, "IS", "2")
+	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
+	obj.WriteUint16GE(0x0028, 0x0011, "US", 2)
+	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
+	obj.WriteUint16GE(0x0028, 0x0101, "US", 8)
+	obj.WriteUint16GE(0x0028, 0x0103, "US", 0)
+
+	pixel := &DICOMTag{
+		Group:     0x7FE0,
+		Element:   0x0010,
+		Length:    4,
+		VR:        "OB",
+		Data:      []byte{10, 20, 30, 40},
+		BigEndian: false,
+	}
+	FillTag(pixel)
+	obj.Add(pixel)
+
+	frame0, err := obj.GetPixelData(0)
+	if err != nil {
+		t.Fatalf("GetPixelData(frame0) failed: %v", err)
+	}
+	if len(frame0) != 2 || frame0[0] != 10 || frame0[1] != 20 {
+		t.Fatalf("unexpected frame0 data: %v", frame0)
+	}
+
+	frame1, err := obj.GetPixelData(1)
+	if err != nil {
+		t.Fatalf("GetPixelData(frame1) failed: %v", err)
+	}
+	if len(frame1) != 2 || frame1[0] != 30 || frame1[1] != 40 {
+		t.Fatalf("unexpected frame1 data: %v", frame1)
+	}
 }
 
 func TestRGBRoundTripViaEncapsulatedCodecs(t *testing.T) {

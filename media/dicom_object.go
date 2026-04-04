@@ -704,8 +704,13 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 						}
 						planar = 0
 					} else {
-						out := make([]byte, len(tag.Data))
-						copy(out, tag.Data)
+						imgSize := size / frames
+						offset := uint32(frame) * imgSize
+						if offset+imgSize > uint32(len(tag.Data)) {
+							return nil, fmt.Errorf("frame %d out of range", frame)
+						}
+						out := make([]byte, imgSize)
+						copy(out, tag.Data[offset:offset+imgSize])
 						return out, nil
 					}
 				}
