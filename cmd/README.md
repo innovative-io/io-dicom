@@ -250,13 +250,13 @@ MSYS2 UCRT64 shell exactly as documented in the Linux steps above.
 
 | Tag | Codec | Required tools |
 |-----|-------|----------------|
-| `libjpeg` | JPEG 12/16-bit via libjpeg-turbo | `cjpeg`, `djpeg` |
+| `libjpeg` | JPEG 12/16-bit via libjpeg-turbo | `pkg-config`, libjpeg dev package |
 | `charls` | JPEG-LS via CharLS | `pkg-config`, CharLS dev package |
-| `openjpeg` | JPEG 2000 / HTJ2K via OpenJPEG | `opj_compress`, `opj_decompress` |
-| `libjxl` | JPEG XL via libjxl | `cjxl`, `djxl` |
-| `openjph` | JPIP / HTJ2K via OpenJPH | `ojph_compress`, `ojph_decompress` |
-| `ffmpeg` | MPEG-2/4/HEVC via FFmpeg | `ffmpeg`, `ffprobe` |
-| `st2110` | SMPTE ST 2110 via FFmpeg | `ffmpeg`, `ffprobe` |
+| `openjpeg` | JPEG 2000 / HTJ2K via OpenJPEG | `pkg-config`, OpenJPEG dev package (`libopenjp2.pc`) |
+| `libjxl` | JPEG XL via libjxl | `pkg-config`, libjxl dev package (`libjxl.pc`) |
+| `openjph` | JPIP / HTJ2K via OpenJPH | `pkg-config`, OpenJPH dev package (`openjph.pc`) |
+| `ffmpeg` | MPEG-2/4/HEVC via FFmpeg | `pkg-config`, FFmpeg dev packages (`libavcodec.pc`, `libavformat.pc`, `libavutil.pc`, `libswscale.pc`) |
+| `st2110` | SMPTE ST 2110 via FFmpeg | `pkg-config`, FFmpeg dev packages (`libavcodec.pc`, `libavformat.pc`, `libavutil.pc`, `libswscale.pc`) |
 
 ### Step 1 — Build codec dependencies from source
 

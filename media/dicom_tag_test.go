@@ -30,6 +30,13 @@ func TestDICOMTag_GetUInt_WrongLength(t *testing.T) {
 	}
 }
 
+func TestDICOMTag_GetUInt_TruncatedData(t *testing.T) {
+	tag := &DICOMTag{Length: 4, Data: []byte{0x01, 0x02, 0x03}}
+	if got := tag.GetUInt(); got != 0 {
+		t.Fatalf("GetUInt() with truncated data should return 0, got %d", got)
+	}
+}
+
 func TestDICOMTag_GetFloat_Valid(t *testing.T) {
 	tag := &DICOMTag{Length: 4, Data: []byte("3.14"), VR: "FL"}
 	v := tag.GetFloat()
@@ -59,5 +66,26 @@ func TestDICOMTag_GetUShort_WrongLength(t *testing.T) {
 	tag := &DICOMTag{Length: 0, Data: []byte{}}
 	if got := tag.GetUShort(); got != 0 {
 		t.Fatalf("GetUShort() with length 0 should return 0, got %d", got)
+	}
+}
+
+func TestDICOMTag_GetUShort_TruncatedData(t *testing.T) {
+	tag := &DICOMTag{Length: 2, Data: []byte{0x01}}
+	if got := tag.GetUShort(); got != 0 {
+		t.Fatalf("GetUShort() with truncated data should return 0, got %d", got)
+	}
+}
+
+func TestDICOMTag_GetString_TruncatedData(t *testing.T) {
+	tag := &DICOMTag{Length: 8, Data: []byte("ABC")}
+	if got := tag.GetString(); got != "ABC" {
+		t.Fatalf("GetString() with truncated data = %q, want %q", got, "ABC")
+	}
+}
+
+func TestDICOMTag_GetString_RespectsTagLength(t *testing.T) {
+	tag := &DICOMTag{Length: 3, Data: []byte("ABCDE")}
+	if got := tag.GetString(); got != "ABC" {
+		t.Fatalf("GetString() should clamp to tag length, got %q", got)
 	}
 }

@@ -109,6 +109,7 @@ Notes:
 - C-ECHO response field validation is enforced (`CommandDataSetType=0x0101` and non-zero `MessageIDBeingRespondedTo`).
 - DICOM file writes now validate required output prerequisites before emitting file meta information: transfer syntax, SOP Class UID, and SOP Instance UID must all be present.
 - Encapsulated Pixel Data frame extraction now supports fragmented frame payloads: single-frame objects concatenate all fragments, and multi-frame objects can reconstruct fragmented frames using the Basic Offset Table when present.
+- DICOM tag scalar and string accessors now clamp reads to the bytes actually loaded, so malformed or truncated tag payloads return empty/zero values instead of panicking.
 - For detailed C-MOVE usage patterns, error handling, and compliance information, see the [C-MOVE Implementation Guide](docs/dicom-cmove-implementation.md).
 
 ## DICOM Network Conformance Notes
@@ -237,11 +238,10 @@ the supported syntax families.
   for 12/16-bit profiles:
   - default builds keep pure-Go passthrough (`CGOEnabled == false`),
   - `-tags libjpeg` with cgo enables `CGOEnabled == true` and registers backend name `libjpeg`.
-  - the `libjpeg` backend now uses `cjpeg`/`djpeg` lossless paths for 12/16-bit
-    encode/decode behavior when tools and precision support are available in `PATH`,
-    with passthrough-compatible fallback semantics otherwise.
+  - the `libjpeg` backend now links directly against libjpeg-turbo for in-memory
+    12/16-bit lossless encode/decode behavior with passthrough-compatible fallback semantics.
   - prerequisites for tagged builds:
-    - libjpeg command-line tools must be installed (`cjpeg`, `djpeg`).
+    - `pkg-config` must resolve a libjpeg development package such as libjpeg-turbo.
 - `codecs/jpegls` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
 - `codecs/jpegls` now includes a build-tagged `charls` backend registration path:
@@ -257,48 +257,58 @@ the supported syntax families.
 - `codecs/jpeg2000` now includes a build-tagged `openjpeg` backend registration path:
   - default builds keep pure-Go passthrough (`CGOEnabled == false`),
   - `-tags openjpeg` with cgo enables `CGOEnabled == true` and registers backend name `openjpeg`.
-  - the `openjpeg` backend now uses OpenJPEG command-line tools (`opj_compress` and
-    `opj_decompress`) for encode/decode when available in `PATH`.
+  - the `openjpeg` backend now bridges directly to the OpenJPEG C API for
+    encode/decode, so it no longer depends on `opj_compress` or `opj_decompress`
+    at runtime.
   - prerequisites for tagged builds:
-    - OpenJPEG CLI tools must be installed (`opj_compress`, `opj_decompress`).
+    - `pkg-config` must be available,
+    - the OpenJPEG development package must be discoverable via `PKG_CONFIG_PATH`
+      (providing `libopenjp2.pc`).
 - `codecs/jpegxl` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
 - `codecs/jpegxl` now includes a build-tagged `libjxl` backend registration path:
   - default builds keep pure-Go passthrough (`CGOEnabled == false`),
   - `-tags libjxl` with cgo enables `CGOEnabled == true` and registers backend name `libjxl`.
-  - the `libjxl` backend now uses libjxl command-line tools (`cjxl` and `djxl`)
-    for encode/decode when available in `PATH`.
+  - the `libjxl` backend now bridges directly to the libjxl C API for
+    encode/decode, so it no longer depends on `cjxl` or `djxl` at runtime.
   - prerequisites for tagged builds:
-    - libjxl CLI tools must be installed (`cjxl`, `djxl`).
+    - `pkg-config` must be available,
+    - the libjxl development package must be discoverable via `PKG_CONFIG_PATH`
+      (providing `libjxl.pc`).
 - `codecs/mpeg` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
 - `codecs/mpeg` now includes a build-tagged `ffmpeg` backend registration path:
   - default builds keep pure-Go passthrough (`CGOEnabled == false`),
   - `-tags ffmpeg` with cgo enables `CGOEnabled == true` and registers backend name `ffmpeg`.
-  - the `ffmpeg` backend now uses FFmpeg command-line tools (`ffmpeg` and
-    `ffprobe`) for encode/decode when available in `PATH`.
+  - the `ffmpeg` backend now links directly against FFmpeg's libavcodec,
+    libavformat, libavutil, and libswscale APIs for in-memory encode/decode.
   - prerequisites for tagged builds:
-    - FFmpeg CLI tools must be installed (`ffmpeg`, `ffprobe`).
+    - `pkg-config` must be available,
+    - the FFmpeg development packages must be discoverable via `PKG_CONFIG_PATH`
+      (providing `libavcodec.pc`, `libavformat.pc`, `libavutil.pc`, and
+      `libswscale.pc`).
 - `codecs/jpip` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
 - `codecs/jpip` now includes a build-tagged `openjph` backend registration path:
   - default builds keep pure-Go passthrough (`CGOEnabled == false`),
   - `-tags openjph` with cgo enables `CGOEnabled == true` and registers backend name `openjph`.
-  - the `openjph` backend now uses OpenJPH tools (`ojph_compress`,
-    `ojph_decompress`) when available, and falls back to compatible OpenJPEG tools
-    (`opj_compress`, `opj_decompress`) for encode/decode.
+  - the `openjph` backend now links directly against the OpenJPH library for
+    in-memory encode/decode rather than shelling out to CLI tools.
   - prerequisites for tagged builds:
-    - OpenJPH CLI tools recommended (`ojph_compress`, `ojph_decompress`), or
-    - OpenJPEG CLI tools (`opj_compress`, `opj_decompress`).
+    - `pkg-config`, and
+    - an OpenJPH development package that exposes `openjph.pc`.
 - `codecs/smpte2110` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
 - `codecs/smpte2110` now includes a build-tagged `st2110` backend registration path:
   - default builds keep pure-Go passthrough (`CGOEnabled == false`),
   - `-tags st2110` with cgo enables `CGOEnabled == true` and registers backend name `st2110`.
-  - the `st2110` backend now uses FFmpeg command-line tools (`ffmpeg` and
-    `ffprobe`) to encode/decode frame payloads when available in `PATH`.
+  - the `st2110` backend now links directly against FFmpeg's libavcodec,
+    libavformat, libavutil, and libswscale APIs for in-memory encode/decode.
   - prerequisites for tagged builds:
-    - FFmpeg CLI tools must be installed (`ffmpeg`, `ffprobe`).
+    - `pkg-config` must be available,
+    - the FFmpeg development packages must be discoverable via `PKG_CONFIG_PATH`
+      (providing `libavcodec.pc`, `libavformat.pc`, `libavutil.pc`, and
+      `libswscale.pc`).
 - The root `codecs` package exposes a central manager with `UseBackends` and
   `AvailableBackends` to configure all codec families from one call.
 - The root `codecs` package also exposes `AvailableTransferSyntaxUIDs` and

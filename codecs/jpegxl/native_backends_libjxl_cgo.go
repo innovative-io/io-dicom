@@ -2,16 +2,340 @@
 
 package jpegxl
 
+/*
+#cgo pkg-config: libjxl
+
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <jxl/codestream_header.h>
+#include <jxl/color_encoding.h>
+#include <jxl/decode.h>
+#include <jxl/encode.h>
+#include <jxl/types.h>
+
+static void io_libjxl_set_error(char* err, size_t err_len, const char* msg) {
+	if (!err || err_len == 0) {
+		return;
+	}
+	if (!msg) {
+		err[0] = '\0';
+		return;
+	}
+	snprintf(err, err_len, "%s", msg);
+}
+
+static void io_libjxl_set_color_encoding(JxlColorEncoding* color, uint16_t samples) {
+	memset(color, 0, sizeof(*color));
+	color->color_space = samples == 1 ? JXL_COLOR_SPACE_GRAY : JXL_COLOR_SPACE_RGB;
+	color->white_point = JXL_WHITE_POINT_D65;
+	color->white_point_xy[0] = 0.3127;
+	color->white_point_xy[1] = 0.3290;
+	color->primaries = JXL_PRIMARIES_SRGB;
+	color->primaries_red_xy[0] = 0.639998686;
+	color->primaries_red_xy[1] = 0.330010138;
+	color->primaries_green_xy[0] = 0.300003784;
+	color->primaries_green_xy[1] = 0.600003357;
+	color->primaries_blue_xy[0] = 0.150002046;
+	color->primaries_blue_xy[1] = 0.059997204;
+	color->transfer_function = JXL_TRANSFER_FUNCTION_LINEAR;
+	color->gamma = 1.0;
+	color->rendering_intent = JXL_RENDERING_INTENT_RELATIVE;
+}
+
+static int io_libjxl_configure_basic_info(JxlBasicInfo* info, uint16_t width, uint16_t height, uint16_t samples, uint16_t bitsa) {
+	if (!info || width == 0 || height == 0 || (samples != 1 && samples != 3)) {
+		return 0;
+	}
+	JxlEncoderInitBasicInfo(info);
+	info->xsize = width;
+	info->ysize = height;
+	info->bits_per_sample = bitsa;
+	info->exponent_bits_per_sample = 0;
+	info->num_color_channels = samples;
+	info->num_extra_channels = 0;
+	info->alpha_bits = 0;
+	info->alpha_exponent_bits = 0;
+	info->alpha_premultiplied = JXL_FALSE;
+	info->orientation = JXL_ORIENT_IDENTITY;
+	info->uses_original_profile = JXL_TRUE;
+	return 1;
+}
+
+static int io_libjxl_encode(const uint8_t* src, size_t src_size,
+		uint16_t width, uint16_t height, uint16_t samples, uint16_t bitsa, int lossless,
+		uint8_t** out_data, size_t* out_size, char* err, size_t err_len) {
+	JxlEncoder* enc = NULL;
+	JxlEncoderFrameSettings* frame_settings = NULL;
+	uint8_t* encoded = NULL;
+	size_t encoded_capacity = 0;
+	JxlBasicInfo info;
+	JxlColorEncoding color;
+	JxlPixelFormat format;
+	JxlBitDepth bit_depth;
+	size_t expected;
+
+	if (!src || !out_data || !out_size || !(bitsa == 8 || bitsa == 12 || bitsa == 16)) {
+		io_libjxl_set_error(err, err_len, "invalid libjxl encode parameters");
+		return -1;
+	}
+	expected = (size_t)width * (size_t)height * (size_t)samples * (bitsa > 8 ? 2u : 1u);
+	if (expected == 0 || expected != src_size) {
+		io_libjxl_set_error(err, err_len, "raw payload size does not match image dimensions");
+		return -1;
+	}
+
+	enc = JxlEncoderCreate(NULL);
+	if (!enc) {
+		io_libjxl_set_error(err, err_len, "JxlEncoderCreate failed");
+		return -1;
+	}
+	if (!io_libjxl_configure_basic_info(&info, width, height, samples, bitsa)) {
+		io_libjxl_set_error(err, err_len, "unsupported libjxl image layout");
+		JxlEncoderDestroy(enc);
+		return -1;
+	}
+	if (JxlEncoderSetBasicInfo(enc, &info) != JXL_ENC_SUCCESS) {
+		io_libjxl_set_error(err, err_len, "JxlEncoderSetBasicInfo failed");
+		JxlEncoderDestroy(enc);
+		return -1;
+	}
+
+	io_libjxl_set_color_encoding(&color, samples);
+	if (JxlEncoderSetColorEncoding(enc, &color) != JXL_ENC_SUCCESS) {
+		io_libjxl_set_error(err, err_len, "JxlEncoderSetColorEncoding failed");
+		JxlEncoderDestroy(enc);
+		return -1;
+	}
+
+	frame_settings = JxlEncoderFrameSettingsCreate(enc, NULL);
+	if (!frame_settings) {
+		io_libjxl_set_error(err, err_len, "JxlEncoderFrameSettingsCreate failed");
+		JxlEncoderDestroy(enc);
+		return -1;
+	}
+	if (lossless) {
+		if (JxlEncoderSetFrameLossless(frame_settings, JXL_TRUE) != JXL_ENC_SUCCESS) {
+			io_libjxl_set_error(err, err_len, "JxlEncoderSetFrameLossless failed");
+			JxlEncoderDestroy(enc);
+			return -1;
+		}
+	} else if (JxlEncoderSetFrameDistance(frame_settings, 1.0f) != JXL_ENC_SUCCESS) {
+		io_libjxl_set_error(err, err_len, "JxlEncoderSetFrameDistance failed");
+		JxlEncoderDestroy(enc);
+		return -1;
+	}
+
+	memset(&format, 0, sizeof(format));
+	format.num_channels = samples;
+	format.data_type = bitsa > 8 ? JXL_TYPE_UINT16 : JXL_TYPE_UINT8;
+	format.endianness = bitsa > 8 ? JXL_BIG_ENDIAN : JXL_NATIVE_ENDIAN;
+	format.align = 0;
+
+	if (bitsa != 8) {
+		memset(&bit_depth, 0, sizeof(bit_depth));
+		bit_depth.type = JXL_BIT_DEPTH_FROM_CODESTREAM;
+		bit_depth.bits_per_sample = bitsa;
+		bit_depth.exponent_bits_per_sample = 0;
+		if (JxlEncoderSetFrameBitDepth(frame_settings, &bit_depth) != JXL_ENC_SUCCESS) {
+			io_libjxl_set_error(err, err_len, "JxlEncoderSetFrameBitDepth failed");
+			JxlEncoderDestroy(enc);
+			return -1;
+		}
+	}
+
+	if (JxlEncoderAddImageFrame(frame_settings, &format, src, src_size) != JXL_ENC_SUCCESS) {
+		JxlEncoderError encoder_error = JxlEncoderGetError(enc);
+		char buffer[128];
+		snprintf(buffer, sizeof(buffer), "JxlEncoderAddImageFrame failed (%d)", (int)encoder_error);
+		io_libjxl_set_error(err, err_len, buffer);
+		JxlEncoderDestroy(enc);
+		return -1;
+	}
+
+	JxlEncoderCloseInput(enc);
+	encoded_capacity = 4096;
+	encoded = (uint8_t*)malloc(encoded_capacity);
+	if (!encoded) {
+		io_libjxl_set_error(err, err_len, "failed to allocate libjxl output buffer");
+		JxlEncoderDestroy(enc);
+		return -1;
+	}
+
+	for (;;) {
+		uint8_t* next_out = encoded + *out_size;
+		size_t avail_out = encoded_capacity - *out_size;
+		JxlEncoderStatus status;
+		if (avail_out < 32) {
+			size_t next_capacity = encoded_capacity * 2;
+			uint8_t* next_buffer = (uint8_t*)realloc(encoded, next_capacity);
+			if (!next_buffer) {
+				io_libjxl_set_error(err, err_len, "failed to grow libjxl output buffer");
+				free(encoded);
+				JxlEncoderDestroy(enc);
+				return -1;
+			}
+			encoded = next_buffer;
+			encoded_capacity = next_capacity;
+			next_out = encoded + *out_size;
+			avail_out = encoded_capacity - *out_size;
+		}
+
+		status = JxlEncoderProcessOutput(enc, &next_out, &avail_out);
+		*out_size = encoded_capacity - avail_out - (size_t)(encoded != NULL ? 0 : 0);
+		if (status == JXL_ENC_SUCCESS) {
+			*out_size = (size_t)(next_out - encoded);
+			break;
+		}
+		if (status == JXL_ENC_NEED_MORE_OUTPUT) {
+			*out_size = (size_t)(next_out - encoded);
+			size_t next_capacity = encoded_capacity * 2;
+			uint8_t* next_buffer = (uint8_t*)realloc(encoded, next_capacity);
+			if (!next_buffer) {
+				io_libjxl_set_error(err, err_len, "failed to grow libjxl output buffer");
+				free(encoded);
+				JxlEncoderDestroy(enc);
+				return -1;
+			}
+			encoded = next_buffer;
+			encoded_capacity = next_capacity;
+			continue;
+		}
+		{
+			JxlEncoderError encoder_error = JxlEncoderGetError(enc);
+			char buffer[128];
+			snprintf(buffer, sizeof(buffer), "JxlEncoderProcessOutput failed (%d)", (int)encoder_error);
+			io_libjxl_set_error(err, err_len, buffer);
+			free(encoded);
+			JxlEncoderDestroy(enc);
+			return -1;
+		}
+	}
+
+	JxlEncoderDestroy(enc);
+	*out_data = encoded;
+	return 0;
+}
+
+static int io_libjxl_decode(const uint8_t* src, size_t src_size,
+		uint8_t* dst, size_t dst_size, char* err, size_t err_len) {
+	JxlDecoder* dec = NULL;
+	JxlBasicInfo info;
+	JxlPixelFormat format;
+	JxlBitDepth bit_depth;
+	int have_output = 0;
+
+	if (!src || !dst || src_size == 0 || dst_size == 0) {
+		io_libjxl_set_error(err, err_len, "invalid libjxl decode parameters");
+		return -1;
+	}
+
+	dec = JxlDecoderCreate(NULL);
+	if (!dec) {
+		io_libjxl_set_error(err, err_len, "JxlDecoderCreate failed");
+		return -1;
+	}
+	if (JxlDecoderSubscribeEvents(dec, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS) {
+		io_libjxl_set_error(err, err_len, "JxlDecoderSubscribeEvents failed");
+		JxlDecoderDestroy(dec);
+		return -1;
+	}
+	if (JxlDecoderSetInput(dec, src, src_size) != JXL_DEC_SUCCESS) {
+		io_libjxl_set_error(err, err_len, "JxlDecoderSetInput failed");
+		JxlDecoderDestroy(dec);
+		return -1;
+	}
+	JxlDecoderCloseInput(dec);
+
+	for (;;) {
+		JxlDecoderStatus status = JxlDecoderProcessInput(dec);
+		if (status == JXL_DEC_BASIC_INFO) {
+			size_t required_size = 0;
+			if (JxlDecoderGetBasicInfo(dec, &info) != JXL_DEC_SUCCESS) {
+				io_libjxl_set_error(err, err_len, "JxlDecoderGetBasicInfo failed");
+				JxlDecoderDestroy(dec);
+				return -1;
+			}
+			if (info.exponent_bits_per_sample != 0 || info.num_extra_channels != 0 ||
+				!(info.bits_per_sample == 8 || info.bits_per_sample == 12 || info.bits_per_sample == 16) ||
+				!(info.num_color_channels == 1 || info.num_color_channels == 3)) {
+				io_libjxl_set_error(err, err_len, "unsupported libjxl decoded image layout");
+				JxlDecoderDestroy(dec);
+				return -1;
+			}
+
+			memset(&format, 0, sizeof(format));
+			format.num_channels = info.num_color_channels;
+			format.data_type = info.bits_per_sample > 8 ? JXL_TYPE_UINT16 : JXL_TYPE_UINT8;
+			format.endianness = info.bits_per_sample > 8 ? JXL_BIG_ENDIAN : JXL_NATIVE_ENDIAN;
+			format.align = 0;
+
+			if (JxlDecoderImageOutBufferSize(dec, &format, &required_size) != JXL_DEC_SUCCESS) {
+				io_libjxl_set_error(err, err_len, "JxlDecoderImageOutBufferSize failed");
+				JxlDecoderDestroy(dec);
+				return -1;
+			}
+			if (required_size > dst_size) {
+				io_libjxl_set_error(err, err_len, "decoded payload does not fit output buffer");
+				JxlDecoderDestroy(dec);
+				return -1;
+			}
+			if (JxlDecoderSetImageOutBuffer(dec, &format, dst, dst_size) != JXL_DEC_SUCCESS) {
+				io_libjxl_set_error(err, err_len, "JxlDecoderSetImageOutBuffer failed");
+				JxlDecoderDestroy(dec);
+				return -1;
+			}
+			if (info.bits_per_sample != 8) {
+				memset(&bit_depth, 0, sizeof(bit_depth));
+				bit_depth.type = JXL_BIT_DEPTH_FROM_CODESTREAM;
+				bit_depth.bits_per_sample = info.bits_per_sample;
+				bit_depth.exponent_bits_per_sample = 0;
+				if (JxlDecoderSetImageOutBitDepth(dec, &bit_depth) != JXL_DEC_SUCCESS) {
+					io_libjxl_set_error(err, err_len, "JxlDecoderSetImageOutBitDepth failed");
+					JxlDecoderDestroy(dec);
+					return -1;
+				}
+			}
+			have_output = 1;
+			continue;
+		}
+		if (status == JXL_DEC_FULL_IMAGE) {
+			continue;
+		}
+		if (status == JXL_DEC_SUCCESS) {
+			JxlDecoderDestroy(dec);
+			return have_output ? 0 : -1;
+		}
+		if (status == JXL_DEC_ERROR) {
+			io_libjxl_set_error(err, err_len, "JxlDecoderProcessInput failed");
+			JxlDecoderDestroy(dec);
+			return -1;
+		}
+		if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
+			if (!have_output) {
+				io_libjxl_set_error(err, err_len, "decoder requested output buffer before basic info");
+				JxlDecoderDestroy(dec);
+				return -1;
+			}
+			continue;
+		}
+		if (status == JXL_DEC_NEED_MORE_INPUT) {
+			io_libjxl_set_error(err, err_len, "libjxl decoder requires more input");
+			JxlDecoderDestroy(dec);
+			return -1;
+		}
+	}
+}
+*/
+import "C"
+
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync"
-	"unicode"
+	"unsafe"
 
 	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
 )
@@ -23,9 +347,8 @@ func init() {
 }
 
 var (
-	errLibJXLToolingUnavailable = errors.New("libjxl tooling is unavailable in PATH")
-	errLibJXLInvalidRawSize     = errors.New("invalid raw payload size for dimensions")
-	errLibJXLUnsupportedPNM     = errors.New("unsupported pnm payload from libjxl")
+	errLibJXLInvalidRawSize = errors.New("invalid raw payload size for dimensions")
+	errLibJXLUnsupportedPNM = errors.New("unsupported pixel payload from libjxl")
 )
 
 type libjxlBackend struct{}
@@ -35,7 +358,7 @@ func (libjxlBackend) Name() string {
 }
 
 func (libjxlBackend) Ready() error {
-	return ensureLibJXLTools()
+	return nil
 }
 
 func (libjxlBackend) SupportedTransferSyntaxUIDs() []string {
@@ -46,47 +369,31 @@ func (libjxlBackend) Decode(encoded []byte, output []byte) error {
 	return libjxlBackend{}.DecodeContext(context.Background(), encoded, output)
 }
 
-func (libjxlBackend) DecodeContext(ctx context.Context, encoded []byte, output []byte) error {
+func (libjxlBackend) DecodeContext(_ context.Context, encoded []byte, output []byte) error {
 	if len(encoded) == 0 || len(output) == 0 {
 		return errInvalidJXLPayload
 	}
 	if len(encoded) > maxCodecPayloadBytes || len(output) > maxCodecPayloadBytes {
 		return errInvalidJXLPayload
 	}
-	if err := ensureLibJXLTools(); err != nil {
-		return err
+	errBuf := make([]C.char, 256)
+	rc := C.io_libjxl_decode(
+		(*C.uint8_t)(unsafe.Pointer(&encoded[0])),
+		C.size_t(len(encoded)),
+		(*C.uint8_t)(unsafe.Pointer(&output[0])),
+		C.size_t(len(output)),
+		(*C.char)(unsafe.Pointer(&errBuf[0])),
+		C.size_t(len(errBuf)),
+	)
+	if rc != 0 {
+		if msg := C.GoString((*C.char)(unsafe.Pointer(&errBuf[0]))); msg != "" {
+			if msg == "decoded payload does not fit output buffer" {
+				return errInvalidJXLPayload
+			}
+			return fmt.Errorf("libjxl decode: %s", msg)
+		}
+		return errors.New("libjxl decode failed")
 	}
-
-	tmpDir, err := os.MkdirTemp("", "io-dicom-libjxl-decode-*")
-	if err != nil {
-		return fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	inPath := filepath.Join(tmpDir, "input.jxl")
-	outPath := filepath.Join(tmpDir, "output.pnm")
-	if err := os.WriteFile(inPath, encoded, 0o600); err != nil {
-		return fmt.Errorf("write jxl payload: %w", err)
-	}
-
-	cmd := nativeenv.CommandContext(ctx, resolvedDJXL, inPath, outPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("djxl failed: %w: %s", err, stringsTrim(string(out)))
-	}
-
-	pnm, err := os.ReadFile(outPath)
-	if err != nil {
-		return fmt.Errorf("read decompressed payload: %w", err)
-	}
-
-	_, _, _, raw, err := parsePNM(pnm)
-	if err != nil {
-		return err
-	}
-	if len(raw) > len(output) {
-		return errInvalidJXLPayload
-	}
-	copy(output, raw)
 	return nil
 }
 
@@ -94,202 +401,69 @@ func (libjxlBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 	return libjxlBackend{}.EncodeContext(context.Background(), raw, width, height, samples, bitsa, lossless)
 }
 
-func (libjxlBackend) EncodeContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, lossless bool) ([]byte, error) {
+func (libjxlBackend) EncodeContext(_ context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, lossless bool) ([]byte, error) {
 	if len(raw) == 0 {
 		return nil, errInvalidJXLPayload
 	}
 	if len(raw) > maxCodecPayloadBytes {
 		return nil, errInvalidJXLPayload
 	}
-	if err := ensureLibJXLTools(); err != nil {
-		return nil, err
+	if width == 0 || height == 0 {
+		return nil, errInvalidJXLPayload
+	}
+	if samples != 1 && samples != 3 {
+		return nil, errLibJXLUnsupportedPNM
+	}
+	if bitsa != 8 && bitsa != 12 && bitsa != 16 {
+		return nil, errLibJXLUnsupportedPNM
+	}
+	expected := int(width) * int(height) * int(samples)
+	if bitsa > 8 {
+		expected *= 2
+	}
+	if len(raw) != expected {
+		return nil, errLibJXLInvalidRawSize
 	}
 
-	pnm, err := encodePNM(raw, int(width), int(height), int(samples), int(bitsa))
-	if err != nil {
-		return nil, err
+	errBuf := make([]C.char, 256)
+	var outPtr *C.uint8_t
+	var outSize C.size_t
+	rc := C.io_libjxl_encode(
+		(*C.uint8_t)(unsafe.Pointer(&raw[0])),
+		C.size_t(len(raw)),
+		C.uint16_t(width),
+		C.uint16_t(height),
+		C.uint16_t(samples),
+		C.uint16_t(bitsa),
+		C.int(boolToInt(lossless)),
+		&outPtr,
+		&outSize,
+		(*C.char)(unsafe.Pointer(&errBuf[0])),
+		C.size_t(len(errBuf)),
+	)
+	if rc != 0 {
+		if msg := C.GoString((*C.char)(unsafe.Pointer(&errBuf[0]))); msg != "" {
+			if msg == "raw payload size does not match image dimensions" {
+				return nil, errLibJXLInvalidRawSize
+			}
+			return nil, fmt.Errorf("libjxl encode: %s", msg)
+		}
+		return nil, errors.New("libjxl encode failed")
 	}
+	defer C.free(unsafe.Pointer(outPtr))
 
-	tmpDir, err := os.MkdirTemp("", "io-dicom-libjxl-encode-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	inPath := filepath.Join(tmpDir, "input.pnm")
-	outPath := filepath.Join(tmpDir, "output.jxl")
-	if err := os.WriteFile(inPath, pnm, 0o600); err != nil {
-		return nil, fmt.Errorf("write pnm payload: %w", err)
-	}
-
-	args := []string{inPath, outPath}
-	if lossless {
-		args = append(args, "--distance=0")
-	}
-	cmd := nativeenv.CommandContext(ctx, resolvedCJXL, args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("cjxl failed: %w: %s", err, stringsTrim(string(out)))
-	}
-
-	encoded, err := os.ReadFile(outPath)
-	if err != nil {
-		return nil, fmt.Errorf("read compressed payload: %w", err)
-	}
+	encoded := C.GoBytes(unsafe.Pointer(outPtr), C.int(outSize))
 	if len(encoded) == 0 {
 		return nil, errors.New("libjxl encode produced empty payload")
 	}
 	return encoded, nil
 }
 
-var (
-	resolvedCJXL     string
-	resolvedDJXL     string
-	libjxlToolsOnce  sync.Once
-	libjxlToolsError error
-)
-
-func ensureLibJXLTools() error {
-	libjxlToolsOnce.Do(func() {
-		p, err := nativeenv.LookPath("cjxl")
-		if err != nil {
-			libjxlToolsError = errLibJXLToolingUnavailable
-			return
-		}
-		q, err := nativeenv.LookPath("djxl")
-		if err != nil {
-			libjxlToolsError = errLibJXLToolingUnavailable
-			return
-		}
-		resolvedCJXL = p
-		resolvedDJXL = q
-	})
-	return libjxlToolsError
-}
-
-func encodePNM(raw []byte, width int, height int, samples int, bits int) ([]byte, error) {
-	if width <= 0 || height <= 0 {
-		return nil, errLibJXLUnsupportedPNM
+func boolToInt(value bool) int {
+	if value {
+		return 1
 	}
-	if samples != 1 && samples != 3 {
-		return nil, errLibJXLUnsupportedPNM
-	}
-	if bits != 8 && bits != 12 && bits != 16 {
-		return nil, errLibJXLUnsupportedPNM
-	}
-
-	bytesPerSample := 1
-	maxVal := 255
-	if bits > 8 {
-		bytesPerSample = 2
-		maxVal = (1 << bits) - 1
-	}
-	expected := width * height * samples * bytesPerSample
-	if len(raw) != expected {
-		return nil, errLibJXLInvalidRawSize
-	}
-
-	magic := "P5"
-	if samples == 3 {
-		magic = "P6"
-	}
-
-	header := fmt.Sprintf("%s\n%d %d\n%d\n", magic, width, height, maxVal)
-	out := make([]byte, 0, len(header)+len(raw))
-	out = append(out, []byte(header)...)
-	out = append(out, raw...)
-	return out, nil
-}
-
-func parsePNM(payload []byte) (width int, height int, samples int, raw []byte, err error) {
-	readToken := func(i *int) (string, error) {
-		for *i < len(payload) {
-			b := payload[*i]
-			if b == '#' {
-				for *i < len(payload) && payload[*i] != '\n' {
-					*i += 1
-				}
-			}
-			if *i < len(payload) && unicode.IsSpace(rune(payload[*i])) {
-				*i += 1
-				continue
-			}
-			break
-		}
-		if *i >= len(payload) {
-			return "", errLibJXLUnsupportedPNM
-		}
-		start := *i
-		for *i < len(payload) && !unicode.IsSpace(rune(payload[*i])) {
-			*i += 1
-		}
-		return string(payload[start:*i]), nil
-	}
-
-	i := 0
-	magic, err := readToken(&i)
-	if err != nil {
-		return 0, 0, 0, nil, err
-	}
-	if magic != "P5" && magic != "P6" {
-		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
-	}
-	if magic == "P5" {
-		samples = 1
-	} else {
-		samples = 3
-	}
-
-	wToken, err := readToken(&i)
-	if err != nil {
-		return 0, 0, 0, nil, err
-	}
-	hToken, err := readToken(&i)
-	if err != nil {
-		return 0, 0, 0, nil, err
-	}
-	mToken, err := readToken(&i)
-	if err != nil {
-		return 0, 0, 0, nil, err
-	}
-
-	width, err = strconv.Atoi(wToken)
-	if err != nil {
-		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
-	}
-	height, err = strconv.Atoi(hToken)
-	if err != nil {
-		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
-	}
-	if width <= 0 || height <= 0 {
-		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
-	}
-	maxVal, err := strconv.Atoi(mToken)
-	if err != nil {
-		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
-	}
-	if maxVal != 255 && maxVal != 4095 && maxVal != 65535 {
-		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
-	}
-
-	for i < len(payload) && unicode.IsSpace(rune(payload[i])) {
-		i++
-	}
-
-	bytesPerSample := 1
-	if maxVal > 255 {
-		bytesPerSample = 2
-	}
-	expected := width * height * samples * bytesPerSample
-	if expected <= 0 || len(payload)-i < expected {
-		return 0, 0, 0, nil, errLibJXLUnsupportedPNM
-	}
-	raw = make([]byte, expected)
-	copy(raw, payload[i:i+expected])
-	return width, height, samples, raw, nil
-}
-
-func stringsTrim(s string) string {
-	return string(bytes.TrimSpace([]byte(s)))
+	return 0
 }
 
 func registerNativeBackends() {

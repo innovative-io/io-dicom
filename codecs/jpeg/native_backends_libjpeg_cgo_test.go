@@ -5,8 +5,6 @@ package jpeg
 import (
 	"bytes"
 	"testing"
-
-	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
 )
 
 func TestLibJPEGBackendSelection(t *testing.T) {
@@ -18,12 +16,6 @@ func TestLibJPEGBackendSelection(t *testing.T) {
 	}
 	if BackendName() != "libjpeg" {
 		t.Fatalf("unexpected backend name: %s", BackendName())
-	}
-	if _, err := nativeenv.LookPath("cjpeg"); err != nil {
-		t.Skip("cjpeg not found in PATH")
-	}
-	if _, err := nativeenv.LookPath("djpeg"); err != nil {
-		t.Skip("djpeg not found in PATH")
 	}
 
 	raw12 := []byte{0x10, 0x00, 0x20, 0x00, 0x30, 0x00, 0x40, 0x00}

@@ -4,19 +4,7 @@ package mpeg
 
 import (
 	"testing"
-
-	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
 )
-
-func TestParseProbeDimensionsOutput(t *testing.T) {
-	width, height, err := parseProbeDimensionsOutput("2x2x\n")
-	if err != nil {
-		t.Fatalf("parseProbeDimensionsOutput returned error: %v", err)
-	}
-	if width != 2 || height != 2 {
-		t.Fatalf("unexpected dimensions: got %dx%d", width, height)
-	}
-}
 
 func TestFFmpegBackendSelection(t *testing.T) {
 	SetBackend(nil)
@@ -27,13 +15,6 @@ func TestFFmpegBackendSelection(t *testing.T) {
 	}
 	if BackendName() != "ffmpeg" {
 		t.Fatalf("unexpected backend name: %s", BackendName())
-	}
-
-	if _, err := nativeenv.LookPath("ffmpeg"); err != nil {
-		t.Skip("ffmpeg not found in PATH")
-	}
-	if _, err := nativeenv.LookPath("ffprobe"); err != nil {
-		t.Skip("ffprobe not found in PATH")
 	}
 
 	raw := []byte{1, 2, 3, 4}

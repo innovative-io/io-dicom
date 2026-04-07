@@ -22,7 +22,7 @@ type DICOMTag struct {
 
 // GetUShort convert tag.Data to uint16
 func (tag *DICOMTag) GetUShort() uint16 {
-	if tag.Length == 2 {
+	if tag.Length == 2 && len(tag.Data) >= 2 {
 		if tag.BigEndian {
 			return binary.BigEndian.Uint16(tag.Data)
 		}
@@ -34,7 +34,7 @@ func (tag *DICOMTag) GetUShort() uint16 {
 // GetUInt convert tag.Data to uint32
 func (tag *DICOMTag) GetUInt() uint32 {
 	var val uint32
-	if tag.Length == 4 {
+	if tag.Length == 4 && len(tag.Data) >= 4 {
 		if tag.BigEndian {
 			val = binary.BigEndian.Uint32(tag.Data)
 		} else {
@@ -46,11 +46,21 @@ func (tag *DICOMTag) GetUInt() uint32 {
 
 // GetString convert tag.Data to string
 func (tag *DICOMTag) GetString() string {
-	n := bytes.IndexByte(tag.Data, 0)
-	if n == -1 {
-		n = int(tag.Length)
+	if len(tag.Data) == 0 || tag.Length == 0 {
+		return ""
 	}
-	return strings.TrimSpace(string(tag.Data[:n]))
+
+	limit := len(tag.Data)
+	if int(tag.Length) < limit {
+		limit = int(tag.Length)
+	}
+	data := tag.Data[:limit]
+
+	n := bytes.IndexByte(data, 0)
+	if n == -1 {
+		n = len(data)
+	}
+	return strings.TrimSpace(string(data[:n]))
 }
 
 // GetFloat convert tag.Data to float32

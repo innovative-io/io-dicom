@@ -3,8 +3,6 @@ package jpeg2000
 import (
 	"os"
 	"testing"
-
-	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
 )
 
 func loadBytesFromFile(fileName string, t *testing.T) []byte {
@@ -19,12 +17,6 @@ func loadBytesFromFile(fileName string, t *testing.T) []byte {
 func TestJ2KdecodeSample(t *testing.T) {
 	if !CGOEnabled {
 		t.Skip("J2Kdecode sample requires the openjpeg native backend")
-	}
-	if _, err := nativeenv.LookPath("opj_compress"); err != nil {
-		t.Skip("opj_compress not found")
-	}
-	if _, err := nativeenv.LookPath("opj_decompress"); err != nil {
-		t.Skip("opj_decompress not found")
 	}
 	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
@@ -42,9 +34,6 @@ func TestJ2KdecodeSample(t *testing.T) {
 
 func TestJ2KencodeSample(t *testing.T) {
 	if CGOEnabled {
-		if _, err := nativeenv.LookPath("opj_compress"); err != nil {
-			t.Skip("opj_compress not found")
-		}
 		SetBackend(nil)
 		t.Cleanup(func() { SetBackend(nil) })
 		if err := UseBackend("openjpeg"); err != nil {
