@@ -13,6 +13,7 @@ JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 CHARLS_VERSION="${CHARLS_VERSION:-2.4.3}"
 OPENJPEG_VERSION="${OPENJPEG_VERSION:-2.5.3}"
 JPEGXL_VERSION="${JPEGXL_VERSION:-0.10.3}"
+OPENJPH_VERSION="${OPENJPH_VERSION:-0.26.3}"
 FFMPEG_VERSION="${FFMPEG_VERSION:-7.1}"
 LIBJPEG_TURBO_VERSION="${LIBJPEG_TURBO_VERSION:-3.0.3}"
 
@@ -123,6 +124,27 @@ build_jpegxl() {
   cmake --install "$build"
 }
 
+build_openjph() {
+  local src="$WORK_DIR/openjph-src"
+  local build="$WORK_DIR/openjph-build"
+  local tarball="$WORK_DIR/openjph-${OPENJPH_VERSION}.tar.gz"
+
+  echo "[codec-deps] building OpenJPH ${OPENJPH_VERSION}"
+  fetch_tarball "https://github.com/aous72/OpenJPH/archive/refs/tags/${OPENJPH_VERSION}.tar.gz" "$tarball"
+  extract_tarball "$tarball" "$src"
+
+  cmake -S "$src" -B "$build" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DBUILD_SHARED_LIBS=ON \
+    -DOJPH_BUILD_TESTS=OFF \
+    -DOJPH_ENABLE_TIFF_SUPPORT=OFF
+  cmake --build "$build" --parallel "$JOBS"
+  cmake --install "$build"
+}
+
 build_libjpeg_turbo() {
   local src="$WORK_DIR/libjpeg-turbo-src"
   local build="$WORK_DIR/libjpeg-turbo-build"
@@ -203,6 +225,7 @@ main() {
   build_charls
   build_openjpeg
   build_jpegxl
+  build_openjph
   build_libjpeg_turbo
   build_ffmpeg
   normalize_lib_layout
