@@ -143,6 +143,21 @@ build_openjph() {
     -DOJPH_ENABLE_TIFF_SUPPORT=OFF
   cmake --build "$build" --parallel "$JOBS"
   cmake --install "$build"
+
+  # OpenJPH does not ship a pkg-config file; write one so CGO can find it.
+  mkdir -p "$PREFIX/lib/pkgconfig"
+  cat > "$PREFIX/lib/pkgconfig/openjph.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: openjph
+Description: OpenJPH open source JPEG 2000 High Throughput (HTJ2K) implementation
+Version: ${OPENJPH_VERSION}
+Libs: -L\${libdir} -lopenjph
+Cflags: -I\${includedir}
+EOF
 }
 
 build_libjpeg_turbo() {
