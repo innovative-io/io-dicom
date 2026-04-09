@@ -511,8 +511,9 @@ func TestCStoreWriteRQ_ErrorMissingSOPInstanceUID(t *testing.T) {
 }
 
 func TestCStoreWriteRQ_ErrorMissingSOPClassUID(t *testing.T) {
+	// Neither the data object nor the PDU negotiation provides a SOP class UID.
 	m := newMockPDU("")
-	if err := dimse.CStoreWriteRQ(m, dicomDataObj(ctUID, "1.2.3")); err == nil {
+	if err := dimse.CStoreWriteRQ(m, dicomDataObj("", "1.2.3")); err == nil {
 		t.Error("CStoreWriteRQ: want error when AffectedSOPClassUID is missing")
 	}
 }

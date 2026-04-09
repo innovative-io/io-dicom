@@ -41,11 +41,16 @@ func validateCStoreStatus(status uint16, op string) error {
 func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	commandObj := media.NewEmptyDCMObj()
 
-	sopClassUID := sopClassUID(pdu)
-	if sopClassUID == "" {
+	// Prefer the data object's own SOP class UID so that C-STORE sub-operations
+	// sent by a C-GET SCP use the correct SOP class rather than the active PDU context.
+	scUID := dataObj.GetString(tags.SOPClassUID)
+	if scUID == "" {
+		scUID = sopClassUID(pdu)
+	}
+	if scUID == "" {
 		return errors.New("CStoreWriteRQ: AffectedSOPClassUID is required")
 	}
-	sopClassUIDLength := paddedLen(sopClassUID)
+	sopClassUIDLength := paddedLen(scUID)
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
@@ -59,7 +64,7 @@ func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	commandLength = commandLength + 8 + sopInstanceUIDLength
 
 	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
+	commandObj.WriteString(tags.AffectedSOPClassUID, scUID)
 	commandObj.WriteUint16(tags.CommandField, dicomcommand.CStoreRequest)
 	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
 	commandObj.WriteUint16(tags.Priority, priority.Medium)

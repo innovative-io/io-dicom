@@ -220,6 +220,50 @@ func Test_scu_StoreSCU(t *testing.T) {
 	}
 }
 
+func Test_scu_GetSCU(t *testing.T) {
+	_, testSCP := StartSCP(t, 1060)
+
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
+		return request.GetCalledAE() == "TEST_SCP"
+	})
+
+	testSCP.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, _ func(string) error, emit func(CGetProgress)) (CGetResult, error) {
+		return CGetResult{Status: dicomstatus.Success, Completed: 0}, nil
+	})
+
+	media.InitDict()
+
+	dest := &network.Destination{
+		Name:      "Test Destination",
+		CalledAE:  "TEST_SCP",
+		CallingAE: "TEST_SCU",
+		HostName:  "localhost",
+		Port:      1060,
+	}
+	d := NewSCU(dest)
+
+	received := 0
+	d.SetOnCGetStore(func(data media.DICOMObject) uint16 {
+		received++
+		return dicomstatus.Success
+	})
+
+	query := media.NewEmptyDCMObj()
+	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
+	query.WriteString(tags.StudyInstanceUID, "1.2.3.4")
+
+	status, err := d.GetSCU(context.Background(), query, 0)
+	if err != nil {
+		t.Fatalf("GetSCU: %v", err)
+	}
+	if status != dicomstatus.Success {
+		t.Fatalf("GetSCU status = 0x%04X, want Success (0x0000)", status)
+	}
+	if received != 0 {
+		t.Fatalf("received = %d, want 0 (no sub-ops sent)", received)
+	}
+}
+
 func StartSCP(t testing.TB, port int) (func(t testing.TB), SCP) {
 	testSCP := NewSCP(port)
 	go func() {

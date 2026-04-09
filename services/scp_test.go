@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -390,7 +391,7 @@ func TestSCP_CGetInFlightCancelOverridesFinalStatus(t *testing.T) {
 	})
 
 	handlerStarted := make(chan struct{})
-	testSCP.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, emit func(CGetProgress)) (CGetResult, error) {
+	testSCP.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, _ func(string) error, emit func(CGetProgress)) (CGetResult, error) {
 		close(handlerStarted)
 		emit(CGetProgress{Remaining: 1, Completed: 0, Failed: 0, Warnings: 0})
 		select {
@@ -532,7 +533,7 @@ func TestSCP_CGetRejectsNonMonotonicProgress(t *testing.T) {
 	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
 		return true
 	})
-	testSCP.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, emit func(CGetProgress)) (CGetResult, error) {
+	testSCP.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, _ func(string) error, emit func(CGetProgress)) (CGetResult, error) {
 		emit(CGetProgress{Remaining: 3, Completed: 0, Failed: 0, Warnings: 0})
 		emit(CGetProgress{Remaining: 4, Completed: 0, Failed: 0, Warnings: 0}) // invalid: remaining increased
 		return CGetResult{Status: dicomstatus.Success, Remaining: 0, Completed: 3, Failed: 0, Warnings: 0}, nil
@@ -640,7 +641,7 @@ func TestSCP_CGetCancelTimeoutAbortsAssociation(t *testing.T) {
 	})
 
 	handlerStarted := make(chan struct{})
-	testSCP.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, emit func(CGetProgress)) (CGetResult, error) {
+	testSCP.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, _ func(string) error, emit func(CGetProgress)) (CGetResult, error) {
 		close(handlerStarted)
 		emit(CGetProgress{Remaining: 1, Completed: 0, Failed: 0, Warnings: 0})
 		time.Sleep(2 * time.Second) // intentionally ignores ctx cancellation
@@ -740,4 +741,107 @@ func writeCMoveRQWithMessageID(pdu network.PDUService, dataObj media.DICOMObject
 		return err
 	}
 	return pdu.Write(dataObj, network.PDVDataset)
+}
+
+// TestSCP_CGetStoreSubop verifies that the SCP sends a C-STORE sub-operation
+// back to the SCU over the same association when storeFile is called, and that
+// the final C-GET-RSP reports Success.
+func TestSCP_CGetStoreSubop(t *testing.T) {
+	const samplePath = "../samples/test2.dcm"
+	if _, err := os.Stat(samplePath); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+
+	const port = 1059
+	_, testSCP := StartSCP(t, port)
+
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
+		return true
+	})
+
+	handlerDone := make(chan error, 1)
+	testSCP.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, storeFile func(string) error, emit func(CGetProgress)) (CGetResult, error) {
+		err := storeFile(samplePath)
+		handlerDone <- err
+		if err != nil {
+			return CGetResult{Status: dicomstatus.FailureUnableToProcess, Failed: 1}, nil
+		}
+		return CGetResult{Status: dicomstatus.Success, Completed: 1}, nil
+	})
+
+	media.InitDict()
+
+	pdu := network.NewPDUService()
+	pdu.SetCalledAE("SCP")
+	pdu.SetCallingAE("SCU")
+
+	// Propose C-GET SOP class and CT Image Storage (needed to receive sub-ops).
+	pcGet := network.NewPresentationContext()
+	pcGet.SetAbstractSyntax(sopclass.StudyRootQueryRetrieveInformationModelGet.UID)
+	pcGet.AddTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+	pdu.AddPresContexts(pcGet)
+
+	pcCT := network.NewPresentationContext()
+	pcCT.SetAbstractSyntax(sopclass.CTImageStorage.UID)
+	pcCT.AddTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+	pdu.AddPresContexts(pcCT)
+
+	if err := pdu.Connect(context.Background(), "localhost", strconv.Itoa(port)); err != nil {
+		t.Fatalf("pdu.Connect: %v", err)
+	}
+	defer pdu.Close()
+
+	query := media.NewEmptyDCMObj()
+	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
+	query.WriteString(tags.StudyInstanceUID, "1.2.3.4")
+
+	if err := writeCGetRQWithMessageID(pdu, query, 127); err != nil {
+		t.Fatalf("writeCGetRQWithMessageID: %v", err)
+	}
+
+	// The first PDU from the SCP should be a C-STORE-RQ sub-operation.
+	dco, err := pdu.NextPDU()
+	if err != nil {
+		t.Fatalf("NextPDU (C-STORE-RQ): %v", err)
+	}
+	cmd := dco.GetUShort(tags.CommandField)
+	if cmd != dicomcommand.CStoreRequest {
+		t.Fatalf("expected C-STORE-RQ (0x0001), got 0x%04X", cmd)
+	}
+
+	// Read the pixel data dataset.
+	if _, err := pdu.NextPDU(); err != nil {
+		t.Fatalf("NextPDU (C-STORE dataset): %v", err)
+	}
+
+	// Acknowledge the store.
+	if err := dimse.CStoreWriteRSP(pdu, dco, dicomstatus.Success); err != nil {
+		t.Fatalf("CStoreWriteRSP: %v", err)
+	}
+
+	// Verify the storeFile call in the handler succeeded.
+	select {
+	case storeErr := <-handlerDone:
+		if storeErr != nil {
+			t.Fatalf("storeFile returned error: %v", storeErr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for handler storeFile to complete")
+	}
+
+	// Read final C-GET-RSP.
+	pending := 0
+	_, status, err := dimse.CGetReadRSP(pdu, &pending)
+	if err != nil {
+		t.Fatalf("CGetReadRSP: %v", err)
+	}
+	for status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
+		_, status, err = dimse.CGetReadRSP(pdu, &pending)
+		if err != nil {
+			t.Fatalf("CGetReadRSP (pending loop): %v", err)
+		}
+	}
+	if status != dicomstatus.Success {
+		t.Fatalf("C-GET final status = 0x%04X, want Success (0x0000)", status)
+	}
 }

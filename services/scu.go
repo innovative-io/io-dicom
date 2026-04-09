@@ -12,6 +12,7 @@ import (
 	"github.com/innovative-io/io-dicom/dimse"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
+	"github.com/innovative-io/io-dicom/network/dicomcommand"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
 	"github.com/innovative-io/io-dicom/network/priority"
 )
@@ -26,12 +27,18 @@ type SCU interface {
 	StoreSCU(ctx context.Context, FileName string, timeout int) error
 	SetOnCFindResult(f func(result media.DICOMObject))
 	SetOnCMoveResult(f func(result media.DICOMObject))
+	// SetOnCGetStore registers a callback invoked for each C-STORE sub-operation
+	// received during a GetSCU call. Return the DICOM status to send back to the
+	// SCP (use dicomstatus.Success to accept). If not set, all C-STOREs are
+	// accepted with Success and the data is discarded.
+	SetOnCGetStore(f func(data media.DICOMObject) uint16)
 }
 
 type scu struct {
 	destination   *network.Destination
 	onCFindResult func(result media.DICOMObject)
 	onCMoveResult func(result media.DICOMObject)
+	onCGetStore   func(data media.DICOMObject) uint16
 }
 
 // NewSCU - Creates an interface to scu
@@ -129,8 +136,6 @@ func (d *scu) MoveSCU(ctx context.Context, destAET string, Query media.DICOMObje
 }
 
 func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) (uint16, error) {
-	var pending int
-
 	pdu := network.NewPDUService()
 	defer pdu.Close()
 	if err := d.openAssociation(ctx, pdu, sopclass.StudyRootQueryRetrieveInformationModelGet.UID, []string{}, timeout); err != nil {
@@ -141,15 +146,36 @@ func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) 
 		return dicomstatus.FailureProcessingFailure, err
 	}
 
+	// The C-GET SCP sends C-STORE-RQ sub-operations back over the same
+	// association before sending the final C-GET-RSP. Handle both message types.
 	for {
-		_, status, err := dimse.CGetReadRSP(pdu, &pending)
+		dco, err := pdu.NextPDU()
 		if err != nil {
 			return dicomstatus.FailureProcessingFailure, err
 		}
-		if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
-			continue
+		switch dco.GetUShort(tags.CommandField) {
+		case dicomcommand.CStoreRequest:
+			// Read the image data object sent by the SCP.
+			ddo, err := pdu.NextPDU()
+			if err != nil {
+				return dicomstatus.FailureProcessingFailure, fmt.Errorf("GetSCU: read C-STORE dataset: %w", err)
+			}
+			storeStatus := uint16(dicomstatus.Success)
+			if d.onCGetStore != nil {
+				storeStatus = d.onCGetStore(ddo)
+			}
+			if err := dimse.CStoreWriteRSP(pdu, dco, storeStatus); err != nil {
+				return dicomstatus.FailureProcessingFailure, fmt.Errorf("GetSCU: write C-STORE-RSP: %w", err)
+			}
+		case dicomcommand.CGetResponse:
+			status := dco.GetUShort(tags.Status)
+			if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
+				continue
+			}
+			return status, nil
+		default:
+			return dicomstatus.FailureProcessingFailure, fmt.Errorf("GetSCU: unexpected command 0x%04X", dco.GetUShort(tags.CommandField))
 		}
-		return status, nil
 	}
 }
 
@@ -190,6 +216,10 @@ func (d *scu) SetOnCFindResult(f func(result media.DICOMObject)) {
 
 func (d *scu) SetOnCMoveResult(f func(result media.DICOMObject)) {
 	d.onCMoveResult = f
+}
+
+func (d *scu) SetOnCGetStore(f func(data media.DICOMObject) uint16) {
+	d.onCGetStore = f
 }
 
 func (d *scu) openAssociation(ctx context.Context, pdu network.PDUService, abstractSyntax string, transferSyntaxes []string, timeout int) error {

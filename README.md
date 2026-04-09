@@ -572,9 +572,22 @@ scp.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest,
   return services.CFindResult{Status: dicomstatus.Success}, nil
 })
 
-scp.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, query media.DICOMObject, emit func(services.CGetProgress)) (services.CGetResult, error) {
-  emit(services.CGetProgress{Remaining: 1, Completed: 0, Failed: 0, Warnings: 0})
-  return services.CGetResult{Status: dicomstatus.Success, Remaining: 0, Completed: 1, Failed: 0, Warnings: 0}, nil
+scp.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, query media.DICOMObject, storeFile func(string) error, emit func(services.CGetProgress)) (services.CGetResult, error) {
+  files := []string{"/path/to/file.dcm"} // resolve matching files from your storage
+  total := len(files)
+  completed, failed := 0, 0
+  for _, path := range files {
+    if err := storeFile(path); err != nil {
+      failed++
+    } else {
+      completed++
+    }
+    remaining := total - completed - failed
+    if remaining > 0 {
+      emit(services.CGetProgress{Remaining: uint16(remaining), Completed: uint16(completed), Failed: uint16(failed)})
+    }
+  }
+  return services.CGetResult{Status: dicomstatus.Success, Remaining: 0, Completed: uint16(completed), Failed: uint16(failed)}, nil
 })
 
 scp.OnCMoveRequest(func(ctx context.Context, request network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject, emit func(services.CMoveProgress)) (services.CMoveResult, error) {

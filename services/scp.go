@@ -169,8 +169,13 @@ type CMoveResult struct {
 // CFindHandler is the callback signature for C-FIND requests. Call emit for each matching result object.
 type CFindHandler func(ctx context.Context, request network.AssociationRequest, findLevel string, data media.DICOMObject, emit func(media.DICOMObject)) (CFindResult, error)
 
-// CGetHandler is the callback signature for C-GET requests. Call emit to report sub-operation progress.
-type CGetHandler func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, emit func(CGetProgress)) (CGetResult, error)
+// CGetHandler is the callback signature for C-GET requests.
+// Call storeFile for each matching DICOM file to send it back to the SCU as a
+// C-STORE sub-operation over the same association; it returns nil on success or
+// a non-nil error if the transfer fails or the SCU rejected the store.
+// Call emit to report intermediate sub-operation progress counts.
+// Return CGetResult with the final Status and completed/failed/warning counts.
+type CGetHandler func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, storeFile func(path string) error, emit func(CGetProgress)) (CGetResult, error)
 
 // CMoveHandler is the callback signature for C-MOVE requests. Call emit to report sub-operation progress.
 type CMoveHandler func(ctx context.Context, request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject, emit func(CMoveProgress)) (CMoveResult, error)
@@ -525,26 +530,65 @@ func (s *scp) runCFindOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network
 	}
 }
 
-func (s *scp) runCGetOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.PDUService, queue *[]media.DICOMObject, requestCommandObj media.DICOMObject, assocRQ network.AssociationRequest, getLevel string, query media.DICOMObject, handler CGetHandler) error {
-	type getResponse struct {
-		result CGetResult
-		err    error
-	}
+// cgetStoreRequest is a request from the C-GET handler goroutine to send a
+// C-STORE sub-operation back to the SCU over the same association.
+type cgetStoreRequest struct {
+	path  string
+	reply chan error
+}
 
+// cgetStoreSubop loads a DICOM file, sends it to the SCU as a C-STORE-RQ, and
+// reads back the C-STORE-RSP. Must be called from the PDU event loop goroutine.
+func (s *scp) cgetStoreSubop(pdu network.PDUService, path string) error {
+	dco, err := media.NewDCMObjFromFile(path)
+	if err != nil {
+		return fmt.Errorf("scp: C-GET: load %q: %w", path, err)
+	}
+	if err := dimse.CStoreWriteRQ(pdu, dco); err != nil {
+		return fmt.Errorf("scp: C-GET: C-STORE-RQ: %w", err)
+	}
+	status, err := dimse.CStoreReadRSP(pdu)
+	if err != nil {
+		return fmt.Errorf("scp: C-GET: C-STORE-RSP: %w", err)
+	}
+	if status != dicomstatus.Success {
+		return fmt.Errorf("scp: C-GET: C-STORE rejected with status 0x%04X", status)
+	}
+	return nil
+}
+
+func (s *scp) runCGetOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.PDUService, queue *[]media.DICOMObject, requestCommandObj media.DICOMObject, assocRQ network.AssociationRequest, getLevel string, query media.DICOMObject, handler CGetHandler) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	storeReqCh := make(chan cgetStoreRequest, 1)
 	progressCh := make(chan subopProgress, 16)
 	resultCh := make(chan subopResult, 1)
 
 	go func() {
-		result, err := handler(ctx, assocRQ, getLevel, query, func(p CGetProgress) {
-			select {
-			case <-ctx.Done():
-				return
-			case progressCh <- subopProgress{p.Remaining, p.Completed, p.Failed, p.Warnings}:
-			}
-		})
+		result, err := handler(ctx, assocRQ, getLevel, query,
+			func(path string) error {
+				reply := make(chan error, 1)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case storeReqCh <- cgetStoreRequest{path: path, reply: reply}:
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case err := <-reply:
+					return err
+				}
+			},
+			func(p CGetProgress) {
+				select {
+				case <-ctx.Done():
+					return
+				case progressCh <- subopProgress{p.Remaining, p.Completed, p.Failed, p.Warnings}:
+				}
+			},
+		)
 		resultCh <- subopResult{
 			Status:    result.Status,
 			Remaining: result.Remaining,
@@ -555,7 +599,90 @@ func (s *scp) runCGetOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.
 		}
 	}()
 
-	return s.runSubopLoop(rw, conn, pdu, queue, requestCommandObj, assocRQ, progressCh, resultCh, cancel, dimse.CGetWriteRSP)
+	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	state := operationCounterState{}
+	canceled := false
+	var cancelDeadline time.Time
+
+	for {
+		if canceled && !cancelDeadline.IsZero() && time.Now().After(cancelDeadline) {
+			abortAssociation(rw, conn)
+			return errors.New("scp: C-GET sub-op handler did not exit within cancel grace window")
+		}
+
+		select {
+		case req := <-storeReqCh:
+			// Perform C-STORE sub-operation synchronously on the PDU event loop.
+			req.reply <- s.cgetStoreSubop(pdu, req.path)
+
+		case progress := <-progressCh:
+			if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+				cancel()
+				return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+			if err := dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+				return err
+			}
+
+		case resp := <-resultCh:
+			// Drain any remaining pending progress messages.
+			drain := true
+			for drain {
+				select {
+				case progress := <-progressCh:
+					if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+						return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+					}
+					if err := dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+						return err
+					}
+				default:
+					drain = false
+				}
+			}
+
+			if resp.Err != nil {
+				if canceled {
+					return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.Cancel, 0, state.completed, state.failed, state.warnings)
+				}
+				return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+
+			final := resp
+			if final.Completed == 0 && final.Failed == 0 && final.Warnings == 0 {
+				final.Completed = state.completed
+				final.Failed = state.failed
+				final.Warnings = state.warnings
+			}
+
+			status, remaining, completed, failed, warnings, err := state.finalize(final.Status, final.Remaining, final.Completed, final.Failed, final.Warnings, canceled)
+			if err != nil {
+				return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+			return dimse.CGetWriteRSP(pdu, requestCommandObj, status, remaining, completed, failed, warnings)
+
+		default:
+			dco, err := s.pollCommand(conn, pdu)
+			if err != nil {
+				return err
+			}
+			if dco == nil {
+				continue
+			}
+			if dco.GetUShort(tags.CommandField) == dicomcommand.CCancelRequest {
+				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
+				if cancelMessageID == messageID {
+					canceled = true
+					if cancelDeadline.IsZero() {
+						cancelDeadline = time.Now().Add(cancelGraceWindow)
+					}
+					cancel()
+				}
+				continue
+			}
+			*queue = append(*queue, dco)
+		}
+	}
 }
 
 func (s *scp) runCMoveOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.PDUService, queue *[]media.DICOMObject, requestCommandObj media.DICOMObject, assocRQ network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject, handler CMoveHandler) error {
