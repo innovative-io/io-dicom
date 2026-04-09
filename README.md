@@ -41,6 +41,16 @@ io-dicom -scp -datastore ./data -calledae DICOM_SCP -port 1040 -healthport 18040
 
 Set `-healthport 0` to disable the dedicated health listener.
 
+## Library Output Redirection
+
+Library-level human-readable output can be redirected without relying on process-wide `stdout` capture. Use `github.com/innovative-io/io-dicom/output.Redirect(writer)` to route:
+
+- default `log` output
+- default `slog` output
+- `media.DICOMObject.DumpTags()` output
+
+This is the hook used by `io-dicom-tools` so bridge-hosted library activity is surfaced in the app Console.
+
 ## Sample DICOM Files
 
 The `samples/` directory contains local DICOM test files for validation and testing. It is ignored by git to keep the repository size down. See [DICOM-SAMPLES.md](DICOM-SAMPLES.md) for:
@@ -385,6 +395,9 @@ PREFIX=$PWD/.local/codec-deps JOBS=8 ./tools/build_codec_deps_from_source.sh
   to avoid unnecessary source rebuilds when dependency definitions do not change.
 - Source dependency builds explicitly disable CMake tests (including GTest lookup)
   to keep CI deterministic and avoid test-only third-party requirements.
+- The source-built FFmpeg configuration is intentionally headless and disables
+  X11/XCB display integration so packaged macOS app runtimes do not inherit
+  those GUI-side dylib dependencies.
 - The source-build script also bootstraps libjxl's `third_party` tree via
   `deps.sh`, because GitHub release archives do not include those fetched
   dependencies by default.

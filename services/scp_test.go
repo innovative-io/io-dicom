@@ -43,7 +43,7 @@ func TestSCP_OnCEchoRequest_Allow(t *testing.T) {
 		Port:      1044,
 	}
 	scu := NewSCU(dest)
-	if err := scu.EchoSCU(0); err != nil {
+	if err := scu.EchoSCU(context.Background(), 0); err != nil {
 		t.Fatalf("EchoSCU: %v", err)
 	}
 	if !called {
@@ -75,7 +75,7 @@ func TestSCP_OnCEchoRequest_Reject(t *testing.T) {
 	// When the echo is rejected the SCP drops the response; the SCU should
 	// get an error (timeout, connection close, or bad response).
 	// We simply verify the call completes without panicking.
-	_ = scu.EchoSCU(1)
+	_ = scu.EchoSCU(context.Background(), 1)
 }
 
 // TestSCP_OnCMoveRequest verifies the OnCMoveRequest handler setter and that
@@ -101,7 +101,7 @@ func TestSCP_OnCMoveRequest(t *testing.T) {
 	}
 	scu := NewSCU(dest)
 
-	status, err := scu.MoveSCU("DEST_AE", utils.DefaultCMoveRequest("1.2.3.4"), 0)
+	status, err := scu.MoveSCU(context.Background(), "DEST_AE", utils.DefaultCMoveRequest("1.2.3.4"), 0)
 	if err != nil {
 		t.Fatalf("MoveSCU: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestSCP_CFindRejectsInvalidQueryRetrieveLevel(t *testing.T) {
 	query.WriteString(tags.PatientID, "P123")
 
 	scu := NewSCU(dest)
-	_, status, err := scu.FindSCU(query, 5)
+	_, status, err := scu.FindSCU(context.Background(), query, 5)
 	if err != nil {
 		t.Fatalf("FindSCU: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestSCP_CFindInFlightCancelPreemptsStreaming(t *testing.T) {
 	pc.AddTransferSyntax(transfersyntax.ImplicitVRLittleEndian.UID)
 	pdu.AddPresContexts(pc)
 
-	if err := pdu.Connect("localhost", strconv.Itoa(port)); err != nil {
+	if err := pdu.Connect(context.Background(), "localhost", strconv.Itoa(port)); err != nil {
 		t.Fatalf("pdu.Connect: %v", err)
 	}
 	defer pdu.Close()
@@ -320,7 +320,7 @@ func TestSCP_CFindCancelTimeoutAbortsAssociation(t *testing.T) {
 	pc.AddTransferSyntax(transfersyntax.ImplicitVRLittleEndian.UID)
 	pdu.AddPresContexts(pc)
 
-	if err := pdu.Connect("localhost", strconv.Itoa(port)); err != nil {
+	if err := pdu.Connect(context.Background(), "localhost", strconv.Itoa(port)); err != nil {
 		t.Fatalf("pdu.Connect: %v", err)
 	}
 	defer pdu.Close()
@@ -410,7 +410,7 @@ func TestSCP_CGetInFlightCancelOverridesFinalStatus(t *testing.T) {
 	pc.AddTransferSyntax(transfersyntax.ImplicitVRLittleEndian.UID)
 	pdu.AddPresContexts(pc)
 
-	if err := pdu.Connect("localhost", strconv.Itoa(port)); err != nil {
+	if err := pdu.Connect(context.Background(), "localhost", strconv.Itoa(port)); err != nil {
 		t.Fatalf("pdu.Connect: %v", err)
 	}
 	defer pdu.Close()
@@ -482,7 +482,7 @@ func TestSCP_CMoveInFlightCancelOverridesFinalStatus(t *testing.T) {
 	pc.AddTransferSyntax(transfersyntax.ImplicitVRLittleEndian.UID)
 	pdu.AddPresContexts(pc)
 
-	if err := pdu.Connect("localhost", strconv.Itoa(port)); err != nil {
+	if err := pdu.Connect(context.Background(), "localhost", strconv.Itoa(port)); err != nil {
 		t.Fatalf("pdu.Connect: %v", err)
 	}
 	defer pdu.Close()
@@ -547,7 +547,7 @@ func TestSCP_CGetRejectsNonMonotonicProgress(t *testing.T) {
 	pc.AddTransferSyntax(transfersyntax.ImplicitVRLittleEndian.UID)
 	pdu.AddPresContexts(pc)
 
-	if err := pdu.Connect("localhost", strconv.Itoa(port)); err != nil {
+	if err := pdu.Connect(context.Background(), "localhost", strconv.Itoa(port)); err != nil {
 		t.Fatalf("pdu.Connect: %v", err)
 	}
 	defer pdu.Close()
@@ -600,7 +600,7 @@ func TestSCP_CMoveRejectsNonMonotonicProgress(t *testing.T) {
 	pc.AddTransferSyntax(transfersyntax.ImplicitVRLittleEndian.UID)
 	pdu.AddPresContexts(pc)
 
-	if err := pdu.Connect("localhost", strconv.Itoa(port)); err != nil {
+	if err := pdu.Connect(context.Background(), "localhost", strconv.Itoa(port)); err != nil {
 		t.Fatalf("pdu.Connect: %v", err)
 	}
 	defer pdu.Close()
@@ -657,7 +657,7 @@ func TestSCP_CGetCancelTimeoutAbortsAssociation(t *testing.T) {
 	pc.AddTransferSyntax(transfersyntax.ImplicitVRLittleEndian.UID)
 	pdu.AddPresContexts(pc)
 
-	if err := pdu.Connect("localhost", strconv.Itoa(port)); err != nil {
+	if err := pdu.Connect(context.Background(), "localhost", strconv.Itoa(port)); err != nil {
 		t.Fatalf("pdu.Connect: %v", err)
 	}
 	defer pdu.Close()

@@ -2,6 +2,7 @@ package dimse_test
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -59,8 +60,8 @@ func (m *mockPDU) GetTransferSyntax(_ byte) *transfersyntax.TransferSyntax {
 	return transfersyntax.ExplicitVRLittleEndian
 }
 func (m *mockPDU) SetTimeout(_ int)                                                {}
-func (m *mockPDU) Connect(_, _ string) error                                       { return nil }
-func (m *mockPDU) ConnectTLS(_, _ string, _ *tls.Config) error                     { return nil }
+func (m *mockPDU) Connect(_ context.Context, _, _ string) error                    { return nil }
+func (m *mockPDU) ConnectTLS(_ context.Context, _, _ string, _ *tls.Config) error  { return nil }
 func (m *mockPDU) Close()                                                          {}
 func (m *mockPDU) GetCalledAE() string                                             { return "CALLED" }
 func (m *mockPDU) GetCallingAE() string                                            { return "CALLING" }

@@ -21,10 +21,7 @@ func CCancelWriteRQ(pdu network.PDUService, messageIDBeingRespondedTo uint16) er
 		return errors.New("CCancelWriteRQ: AffectedSOPClassUID is required")
 	}
 
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	// Command Group Length payload fields:
 	// Affected SOP Class UID, Command Field, Message ID,

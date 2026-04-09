@@ -101,7 +101,7 @@ func main() {
 		})
 
 		scp.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, queryLevel string, query media.DICOMObject, emit func(media.DICOMObject)) (services.CFindResult, error) {
-			query.DumpTags()
+			query.DumpTags(os.Stdout)
 			for i := 0; i < 10; i++ {
 				emit(utils.GenerateCFindRequest())
 			}
@@ -109,7 +109,7 @@ func main() {
 		})
 
 		scp.OnCMoveRequest(func(ctx context.Context, request network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject, emit func(services.CMoveProgress)) (services.CMoveResult, error) {
-			query.DumpTags()
+			query.DumpTags(os.Stdout)
 			return services.CMoveResult{Status: dicomstatus.Success}, nil
 		})
 
@@ -184,7 +184,7 @@ func main() {
 
 	if *cecho {
 		scu := services.NewSCU(destination)
-		err := scu.EchoSCU(30)
+		err := scu.EchoSCU(context.Background(), 30)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -195,10 +195,10 @@ func main() {
 		scu := services.NewSCU(destination)
 		scu.SetOnCFindResult(func(result media.DICOMObject) {
 			log.Printf("Found study %s\n", result.GetString(tags.StudyInstanceUID))
-			result.DumpTags()
+			result.DumpTags(os.Stdout)
 		})
 
-		count, status, err := scu.FindSCU(request, 0)
+		count, status, err := scu.FindSCU(context.Background(), request, 0)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -218,10 +218,10 @@ func main() {
 		scu.SetOnCFindResult(func(result media.DICOMObject) {
 			log.Printf("Worklist item: patient=%s accession=%s\n",
 				result.GetString(tags.PatientID), result.GetString(tags.AccessionNumber))
-			result.DumpTags()
+			result.DumpTags(os.Stdout)
 		})
 
-		count, status, err := scu.WorklistSCU(request, 0)
+		count, status, err := scu.WorklistSCU(context.Background(), request, 0)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -241,7 +241,7 @@ func main() {
 		request := utils.DefaultCMoveRequest(*studyUID)
 
 		scu := services.NewSCU(destination)
-		_, err := scu.MoveSCU(*destinationAE, request, 0)
+		_, err := scu.MoveSCU(context.Background(), *destinationAE, request, 0)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -253,7 +253,7 @@ func main() {
 			log.Fatalln("file is required for a C-Store")
 		}
 		scu := services.NewSCU(destination)
-		err := scu.StoreSCU(*fileName, 0)
+		err := scu.StoreSCU(context.Background(), *fileName, 0)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -268,7 +268,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		obj.DumpTags()
+		obj.DumpTags(os.Stdout)
 		return
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -126,6 +127,7 @@ type SCP interface {
 	OnCEchoRequest(f func(request network.AssociationRequest) bool)
 }
 
+// CGetProgress reports incremental sub-operation counts sent back to a C-GET SCU during retrieval.
 type CGetProgress struct {
 	Remaining uint16
 	Completed uint16
@@ -133,10 +135,12 @@ type CGetProgress struct {
 	Warnings  uint16
 }
 
+// CFindResult carries the final status code returned to the C-FIND SCU.
 type CFindResult struct {
 	Status uint16
 }
 
+// CGetResult carries the final status and sub-operation counts returned to the C-GET SCU.
 type CGetResult struct {
 	Status    uint16
 	Remaining uint16
@@ -145,6 +149,7 @@ type CGetResult struct {
 	Warnings  uint16
 }
 
+// CMoveProgress reports incremental sub-operation counts sent back to a C-MOVE SCU during retrieval.
 type CMoveProgress struct {
 	Remaining uint16
 	Completed uint16
@@ -152,6 +157,7 @@ type CMoveProgress struct {
 	Warnings  uint16
 }
 
+// CMoveResult carries the final status and sub-operation counts returned to the C-MOVE SCU.
 type CMoveResult struct {
 	Status    uint16
 	Remaining uint16
@@ -160,8 +166,13 @@ type CMoveResult struct {
 	Warnings  uint16
 }
 
+// CFindHandler is the callback signature for C-FIND requests. Call emit for each matching result object.
 type CFindHandler func(ctx context.Context, request network.AssociationRequest, findLevel string, data media.DICOMObject, emit func(media.DICOMObject)) (CFindResult, error)
+
+// CGetHandler is the callback signature for C-GET requests. Call emit to report sub-operation progress.
 type CGetHandler func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, emit func(CGetProgress)) (CGetResult, error)
+
+// CMoveHandler is the callback signature for C-MOVE requests. Call emit to report sub-operation progress.
 type CMoveHandler func(ctx context.Context, request network.AssociationRequest, moveDestAE string, moveLevel string, data media.DICOMObject, emit func(CMoveProgress)) (CMoveResult, error)
 
 type scp struct {
@@ -295,6 +306,125 @@ func (s *scp) pollCommand(conn net.Conn, pdu network.PDUService) (media.DICOMObj
 	return dco, nil
 }
 
+// subopProgress is the internal representation of a single sub-operation
+// progress event, shared across C-GET and C-MOVE.
+type subopProgress struct {
+	Remaining uint16
+	Completed uint16
+	Failed    uint16
+	Warnings  uint16
+}
+
+// subopResult is the internal final outcome of a multi-sub-operation handler.
+type subopResult struct {
+	Status    uint16
+	Remaining uint16
+	Completed uint16
+	Failed    uint16
+	Warnings  uint16
+	Err       error
+}
+
+// writeSubopRSP is the function signature shared by CGetWriteRSP and CMoveWriteRSP.
+type writeSubopRSP func(pdu network.PDUService, req media.DICOMObject, status uint16, remaining, completed, failed, warnings uint16) error
+
+// runSubopLoop is the shared C-GET / C-MOVE event loop. It drives the
+// progress and result channels, handles C-CANCEL, polls for interleaved
+// commands, and writes DIMSE responses via writeRSP.
+func (s *scp) runSubopLoop(
+	rw *bufio.ReadWriter,
+	conn net.Conn,
+	pdu network.PDUService,
+	queue *[]media.DICOMObject,
+	requestCommandObj media.DICOMObject,
+	assocRQ network.AssociationRequest,
+	progressCh <-chan subopProgress,
+	resultCh <-chan subopResult,
+	cancel context.CancelFunc,
+	writeRSP writeSubopRSP,
+) error {
+	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	state := operationCounterState{}
+	canceled := false
+	var cancelDeadline time.Time
+
+	for {
+		if canceled && !cancelDeadline.IsZero() && time.Now().After(cancelDeadline) {
+			abortAssociation(rw, conn)
+			return errors.New("scp: sub-op handler did not exit within cancel grace window")
+		}
+
+		select {
+		case progress := <-progressCh:
+			if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+				cancel()
+				return writeRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+			if err := writeRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+				return err
+			}
+		case resp := <-resultCh:
+			drain := true
+			for drain {
+				select {
+				case progress := <-progressCh:
+					if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+						return writeRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+					}
+					if err := writeRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
+						return err
+					}
+				default:
+					drain = false
+				}
+			}
+
+			if resp.Err != nil {
+				if canceled {
+					return writeRSP(pdu, requestCommandObj, dicomstatus.Cancel, 0, state.completed, state.failed, state.warnings)
+				}
+				return writeRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+
+			final := resp
+			if final.Completed == 0 && final.Failed == 0 && final.Warnings == 0 {
+				final.Completed = state.completed
+				final.Failed = state.failed
+				final.Warnings = state.warnings
+			}
+
+			status, remaining, completed, failed, warnings, err := state.finalize(final.Status, final.Remaining, final.Completed, final.Failed, final.Warnings, canceled)
+			if err != nil {
+				return writeRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
+			}
+
+			return writeRSP(pdu, requestCommandObj, status, remaining, completed, failed, warnings)
+		default:
+			dco, err := s.pollCommand(conn, pdu)
+			if err != nil {
+				return err
+			}
+			if dco == nil {
+				continue
+			}
+
+			if dco.GetUShort(tags.CommandField) == dicomcommand.CCancelRequest {
+				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
+				if cancelMessageID == messageID {
+					canceled = true
+					if cancelDeadline.IsZero() {
+						cancelDeadline = time.Now().Add(cancelGraceWindow)
+					}
+					cancel()
+				}
+				continue
+			}
+
+			*queue = append(*queue, dco)
+		}
+	}
+}
+
 func (s *scp) runCFindOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.PDUService, queue *[]media.DICOMObject, requestCommandObj media.DICOMObject, assocRQ network.AssociationRequest, findLevel string, query media.DICOMObject, handler CFindHandler) error {
 	type findResponse struct {
 		result CFindResult
@@ -404,205 +534,56 @@ func (s *scp) runCGetOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	progressCh := make(chan CGetProgress, 16)
-	resultCh := make(chan getResponse, 1)
+	progressCh := make(chan subopProgress, 16)
+	resultCh := make(chan subopResult, 1)
 
 	go func() {
-		result, err := handler(ctx, assocRQ, getLevel, query, func(progress CGetProgress) {
+		result, err := handler(ctx, assocRQ, getLevel, query, func(p CGetProgress) {
 			select {
 			case <-ctx.Done():
 				return
-			case progressCh <- progress:
+			case progressCh <- subopProgress{p.Remaining, p.Completed, p.Failed, p.Warnings}:
 			}
 		})
-		resultCh <- getResponse{result: result, err: err}
+		resultCh <- subopResult{
+			Status:    result.Status,
+			Remaining: result.Remaining,
+			Completed: result.Completed,
+			Failed:    result.Failed,
+			Warnings:  result.Warnings,
+			Err:       err,
+		}
 	}()
 
-	messageID := requestCommandObj.GetUShort(tags.MessageID)
-	state := operationCounterState{}
-	canceled := false
-	var cancelDeadline time.Time
-
-	for {
-		if canceled && !cancelDeadline.IsZero() && time.Now().After(cancelDeadline) {
-			abortAssociation(rw, conn)
-			return errors.New("scp: C-Get handler did not exit within cancel grace window")
-		}
-
-		select {
-		case progress := <-progressCh:
-			if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
-				cancel()
-				return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
-			}
-			if err := dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
-				return err
-			}
-		case resp := <-resultCh:
-			drain := true
-			for drain {
-				select {
-				case progress := <-progressCh:
-					if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
-						return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
-					}
-					if err := dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
-						return err
-					}
-				default:
-					drain = false
-				}
-			}
-
-			if resp.err != nil {
-				if canceled {
-					return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.Cancel, 0, state.completed, state.failed, state.warnings)
-				}
-				return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
-			}
-
-			final := resp.result
-			if final.Completed == 0 && final.Failed == 0 && final.Warnings == 0 {
-				final.Completed = state.completed
-				final.Failed = state.failed
-				final.Warnings = state.warnings
-			}
-
-			status, remaining, completed, failed, warnings, err := state.finalize(final.Status, final.Remaining, final.Completed, final.Failed, final.Warnings, canceled)
-			if err != nil {
-				return dimse.CGetWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
-			}
-
-			return dimse.CGetWriteRSP(pdu, requestCommandObj, status, remaining, completed, failed, warnings)
-		default:
-			dco, err := s.pollCommand(conn, pdu)
-			if err != nil {
-				return err
-			}
-			if dco == nil {
-				continue
-			}
-
-			if dco.GetUShort(tags.CommandField) == dicomcommand.CCancelRequest {
-				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
-				if cancelMessageID == messageID {
-					canceled = true
-					if cancelDeadline.IsZero() {
-						cancelDeadline = time.Now().Add(cancelGraceWindow)
-					}
-					cancel()
-				}
-				continue
-			}
-
-			*queue = append(*queue, dco)
-		}
-	}
+	return s.runSubopLoop(rw, conn, pdu, queue, requestCommandObj, assocRQ, progressCh, resultCh, cancel, dimse.CGetWriteRSP)
 }
 
 func (s *scp) runCMoveOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.PDUService, queue *[]media.DICOMObject, requestCommandObj media.DICOMObject, assocRQ network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject, handler CMoveHandler) error {
-	type moveResponse struct {
-		result CMoveResult
-		err    error
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	progressCh := make(chan CMoveProgress, 16)
-	resultCh := make(chan moveResponse, 1)
+	progressCh := make(chan subopProgress, 16)
+	resultCh := make(chan subopResult, 1)
 
 	go func() {
-		result, err := handler(ctx, assocRQ, moveDestAE, moveLevel, query, func(progress CMoveProgress) {
+		result, err := handler(ctx, assocRQ, moveDestAE, moveLevel, query, func(p CMoveProgress) {
 			select {
 			case <-ctx.Done():
 				return
-			case progressCh <- progress:
+			case progressCh <- subopProgress{p.Remaining, p.Completed, p.Failed, p.Warnings}:
 			}
 		})
-		resultCh <- moveResponse{result: result, err: err}
+		resultCh <- subopResult{
+			Status:    result.Status,
+			Remaining: result.Remaining,
+			Completed: result.Completed,
+			Failed:    result.Failed,
+			Warnings:  result.Warnings,
+			Err:       err,
+		}
 	}()
 
-	messageID := requestCommandObj.GetUShort(tags.MessageID)
-	state := operationCounterState{}
-	canceled := false
-	var cancelDeadline time.Time
-
-	for {
-		if canceled && !cancelDeadline.IsZero() && time.Now().After(cancelDeadline) {
-			abortAssociation(rw, conn)
-			return errors.New("scp: C-Move handler did not exit within cancel grace window")
-		}
-
-		select {
-		case progress := <-progressCh:
-			if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
-				cancel()
-				return dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
-			}
-			if err := dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
-				return err
-			}
-		case resp := <-resultCh:
-			drain := true
-			for drain {
-				select {
-				case progress := <-progressCh:
-					if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
-						return dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
-					}
-					if err := dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.Pending, progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {
-						return err
-					}
-				default:
-					drain = false
-				}
-			}
-
-			if resp.err != nil {
-				if canceled {
-					return dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.Cancel, 0, state.completed, state.failed, state.warnings)
-				}
-				return dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
-			}
-
-			final := resp.result
-			if final.Completed == 0 && final.Failed == 0 && final.Warnings == 0 {
-				final.Completed = state.completed
-				final.Failed = state.failed
-				final.Warnings = state.warnings
-			}
-
-			status, remaining, completed, failed, warnings, err := state.finalize(final.Status, final.Remaining, final.Completed, final.Failed, final.Warnings, canceled)
-			if err != nil {
-				return dimse.CMoveWriteRSP(pdu, requestCommandObj, dicomstatus.FailureProcessingFailure, 0, state.completed, state.failed+1, state.warnings)
-			}
-
-			return dimse.CMoveWriteRSP(pdu, requestCommandObj, status, remaining, completed, failed, warnings)
-		default:
-			dco, err := s.pollCommand(conn, pdu)
-			if err != nil {
-				return err
-			}
-			if dco == nil {
-				continue
-			}
-
-			if dco.GetUShort(tags.CommandField) == dicomcommand.CCancelRequest {
-				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
-				if cancelMessageID == messageID {
-					canceled = true
-					if cancelDeadline.IsZero() {
-						cancelDeadline = time.Now().Add(cancelGraceWindow)
-					}
-					cancel()
-				}
-				continue
-			}
-
-			*queue = append(*queue, dco)
-		}
-	}
+	return s.runSubopLoop(rw, conn, pdu, queue, requestCommandObj, assocRQ, progressCh, resultCh, cancel, dimse.CMoveWriteRSP)
 }
 
 func (s *scp) Start(ctx context.Context) error {
@@ -681,7 +662,9 @@ func (s *scp) handleConnection(conn net.Conn) {
 		} else {
 			dco, err = pdu.NextPDU()
 			if err != nil {
-				if !errors.Is(err, network.ErrAssociationReleased) &&
+				if errors.Is(err, io.EOF) {
+					slog.Debug("scp: connection closed (EOF)", "ADDRESS", conn.RemoteAddr())
+				} else if !errors.Is(err, network.ErrAssociationReleased) &&
 					!errors.Is(err, network.ErrAssociationAborted) &&
 					!errors.Is(err, network.ErrAssociationRejected) {
 					slog.Error("scp: network error", "ERROR", err)

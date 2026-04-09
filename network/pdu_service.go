@@ -2,6 +2,7 @@ package network
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -32,10 +33,13 @@ var ErrAssociationRejected = errors.New("DICOM association rejected")
 type PDUService interface {
 	GetTransferSyntax(pcid byte) *transfersyntax.TransferSyntax
 	SetTimeout(timeout int)
-	Connect(IP string, Port string) error
+	// Connect dials IP:Port over plain TCP and negotiates an A-ASSOCIATE.
+	// The context controls cancellation of the dial; use context.WithTimeout to
+	// apply an overall connection deadline via the caller rather than SetTimeout.
+	Connect(ctx context.Context, IP string, Port string) error
 	// ConnectTLS dials the remote AE over TLS and negotiates an A-ASSOCIATE.
 	// Pass nil for cfg to use the system certificate pool without a client certificate.
-	ConnectTLS(IP string, Port string, cfg *tls.Config) error
+	ConnectTLS(ctx context.Context, IP string, Port string, cfg *tls.Config) error
 	Close()
 	GetAAssociationRQ() AssociationRequest
 	GetCalledAE() string
@@ -198,11 +202,11 @@ func (pdu *pduService) SetTimeout(timeout int) {
 	pdu.Timeout = timeout
 }
 
-func (pdu *pduService) Connect(IP string, Port string) error {
+func (pdu *pduService) Connect(ctx context.Context, IP string, Port string) error {
 	pdu.AcceptedPresentationContexts = nil
 	pdu.Pdata.PresentationContextID = 0
 
-	conn, err := net.Dial("tcp", IP+":"+Port)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", IP+":"+Port)
 	if err != nil {
 		return errors.New("pduservice::Connect - " + err.Error())
 	}
@@ -211,11 +215,11 @@ func (pdu *pduService) Connect(IP string, Port string) error {
 
 // ConnectTLS dials the remote AE with TLS and negotiates an A-ASSOCIATE.
 // Pass nil for cfg to use the system certificate pool with no client certificate.
-func (pdu *pduService) ConnectTLS(IP string, Port string, cfg *tls.Config) error {
+func (pdu *pduService) ConnectTLS(ctx context.Context, IP string, Port string, cfg *tls.Config) error {
 	pdu.AcceptedPresentationContexts = nil
 	pdu.Pdata.PresentationContextID = 0
 
-	conn, err := tls.Dial("tcp", IP+":"+Port, normalizeClientTLSConfig(cfg))
+	conn, err := (&tls.Dialer{Config: normalizeClientTLSConfig(cfg)}).DialContext(ctx, "tcp", IP+":"+Port)
 	if err != nil {
 		return fmt.Errorf("pduservice::ConnectTLS - %w", err)
 	}

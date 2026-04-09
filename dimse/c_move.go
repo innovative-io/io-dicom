@@ -122,20 +122,14 @@ func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destination
 	commandObj := media.NewEmptyDCMObj()
 	commandObj.SetTransferSyntax(dataObj.GetTransferSyntax())
 
-	destinationAETitleLength := uint16(len(destinationAETitle))
-	if destinationAETitleLength%2 == 1 {
-		destinationAETitleLength++
-	}
+	destinationAETitleLength := paddedLen(destinationAETitle)
 
 	sopClassUID := sopClassUID(pdu)
 	if sopClassUID == "" {
 		return errors.New("CMoveWriteRQ: unable to determine SOP Class UID from presentation context")
 	}
 
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	// Determine if identifier dataset is present
 	commandDataSetType := dicomcommand.DataSetNone
@@ -289,10 +283,7 @@ func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 		return errors.New("CMoveWriteRSP: Affected SOP Class UID is required")
 	}
 
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	if err := validateSuboperationCounters(status, int(remaining), int(completed), int(failed), int(warnings)); err != nil {
 		return fmt.Errorf("CMoveWriteRSP: %w", err)

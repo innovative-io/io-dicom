@@ -31,14 +31,14 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Println("Dumping source tags")
-	srcDicom.DumpTags()
+	srcDicom.DumpTags(os.Stdout)
 
 	dstDicom, err := media.NewDCMObjFromFile(*destinationFile)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Dumping destination tags")
-	dstDicom.DumpTags()
+	dstDicom.DumpTags(os.Stdout)
 
 	if compare(srcDicom, dstDicom) {
 		os.Exit(1)

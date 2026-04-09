@@ -23,10 +23,7 @@ func CEchoWriteRQ(pdu network.PDUService) error {
 	if sopClassUID == "" {
 		return errors.New("CEchoWriteRQ: AffectedSOPClassUID is required")
 	}
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
@@ -79,10 +76,7 @@ func CEchoWriteRSP(pdu network.PDUService, commandObj media.DICOMObject) error {
 		return errors.New("CEchoWriteRSP: MessageID is required")
 	}
 
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 

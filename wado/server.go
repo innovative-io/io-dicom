@@ -209,10 +209,16 @@ func (s *wadoServer) retrieveFrames(w http.ResponseWriter, r *http.Request) {
 		if pixErr != nil {
 			continue
 		}
-		part, _ := mw.CreatePart(textproto.MIMEHeader{
+		part, partErr := mw.CreatePart(textproto.MIMEHeader{
 			"Content-Type": []string{"application/octet-stream"},
 		})
-		_, _ = part.Write(data)
+		if partErr != nil {
+			break
+		}
+		if _, writeErr := part.Write(data); writeErr != nil {
+			slog.Warn("wado: failed to write frame", "frame", f, "err", writeErr)
+			break
+		}
 	}
 	_ = mw.Close()
 }
@@ -309,10 +315,16 @@ func writeMultipartDICOM(w http.ResponseWriter, objects []media.DICOMObject) {
 	w.Header().Set("Content-Type", fmt.Sprintf(
 		`multipart/related; type="application/dicom"; boundary=%s`, mw.Boundary()))
 	for _, obj := range objects {
-		part, _ := mw.CreatePart(textproto.MIMEHeader{
+		part, partErr := mw.CreatePart(textproto.MIMEHeader{
 			"Content-Type": []string{"application/dicom"},
 		})
-		_, _ = part.Write(obj.WriteToBytes())
+		if partErr != nil {
+			break
+		}
+		if _, writeErr := part.Write(obj.WriteToBytes()); writeErr != nil {
+			slog.Warn("wado: failed to write DICOM object", "err", writeErr)
+			break
+		}
 	}
 	_ = mw.Close()
 }

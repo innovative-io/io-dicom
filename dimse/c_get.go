@@ -20,10 +20,7 @@ func CGetWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	if sopClassUID == "" {
 		return errors.New("CGetWriteRQ: Affected SOP Class UID is required")
 	}
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
@@ -117,10 +114,7 @@ func CGetWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, s
 		return err
 	}
 
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2)
 

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"testing"
@@ -80,7 +81,7 @@ func Test_scu_EchoSCU(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := NewSCU(tt.fields.destination)
-			if err := d.EchoSCU(tt.args.timeout); (err != nil) != tt.wantErr {
+			if err := d.EchoSCU(context.Background(), tt.args.timeout); (err != nil) != tt.wantErr {
 				t.Errorf("scu.EchoSCU() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -141,10 +142,10 @@ func Test_scu_FindSCU(t *testing.T) {
 			tt.args.Query.WriteString(tags.StudyDate, "20150617")
 			d := NewSCU(tt.fields.destination)
 			d.SetOnCFindResult(func(result media.DICOMObject) {
-				result.DumpTags()
+				result.DumpTags(io.Discard)
 			})
 
-			_, status, err := d.FindSCU(tt.args.Query, tt.args.timeout)
+			_, status, err := d.FindSCU(context.Background(), tt.args.Query, tt.args.timeout)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("scu.FindSCU() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -168,7 +169,7 @@ func Test_scu_StoreSCU(t *testing.T) {
 	})
 
 	testSCP.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
-		data.DumpTags()
+		data.DumpTags(io.Discard)
 		return dicomstatus.Success
 	})
 
@@ -212,7 +213,7 @@ func Test_scu_StoreSCU(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := NewSCU(tt.fields.destination)
-			if err := d.StoreSCU(tt.args.FileName, tt.args.timeout); (err != nil) != tt.wantErr {
+			if err := d.StoreSCU(context.Background(), tt.args.FileName, tt.args.timeout); (err != nil) != tt.wantErr {
 				t.Errorf("scu.StoreSCU() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

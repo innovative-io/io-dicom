@@ -169,6 +169,10 @@ but is slower at runtime:
 |------|-------|-----------------|---------------|
 | `nasm` | `brew install nasm` | `apt install nasm` | `dnf install nasm` |
 
+The repo source-build path also configures FFmpeg as a headless codec/runtime
+dependency and explicitly disables X11/XCB display integration so downstream
+macOS app bundles do not inherit those GUI-side dylib dependencies.
+
 #### macOS — install all prerequisites at once
 
 ```bash

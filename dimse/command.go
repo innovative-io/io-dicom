@@ -22,3 +22,15 @@ func sopClassUID(pdu network.PDUService) string {
 
 	return ""
 }
+
+// paddedLen returns the DICOM-padded byte length of s as a uint16.
+// DICOM VR values must have even byte lengths; an odd-length string is padded
+// to the next even length by the encoder, so the command-group-length
+// calculation must account for that extra byte.
+func paddedLen(s string) uint16 {
+	n := uint16(len(s))
+	if n%2 == 1 {
+		n++
+	}
+	return n
+}

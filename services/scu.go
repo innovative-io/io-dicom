@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -17,12 +18,12 @@ import (
 
 // SCU - interface to a scu
 type SCU interface {
-	EchoSCU(timeout int) error
-	FindSCU(Query media.DICOMObject, timeout int) (int, uint16, error)
-	WorklistSCU(Query media.DICOMObject, timeout int) (int, uint16, error)
-	MoveSCU(destAET string, Query media.DICOMObject, timeout int) (uint16, error)
-	GetSCU(Query media.DICOMObject, timeout int) (uint16, error)
-	StoreSCU(FileName string, timeout int) error
+	EchoSCU(ctx context.Context, timeout int) error
+	FindSCU(ctx context.Context, Query media.DICOMObject, timeout int) (int, uint16, error)
+	WorklistSCU(ctx context.Context, Query media.DICOMObject, timeout int) (int, uint16, error)
+	MoveSCU(ctx context.Context, destAET string, Query media.DICOMObject, timeout int) (uint16, error)
+	GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) (uint16, error)
+	StoreSCU(ctx context.Context, FileName string, timeout int) error
 	SetOnCFindResult(f func(result media.DICOMObject))
 	SetOnCMoveResult(f func(result media.DICOMObject))
 }
@@ -40,10 +41,10 @@ func NewSCU(destination *network.Destination) SCU {
 	}
 }
 
-func (d *scu) EchoSCU(timeout int) error {
+func (d *scu) EchoSCU(ctx context.Context, timeout int) error {
 	pdu := network.NewPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(pdu, sopclass.Verification.UID, []string{}, timeout); err != nil {
+	if err := d.openAssociation(ctx, pdu, sopclass.Verification.UID, []string{}, timeout); err != nil {
 		return err
 	}
 	if err := dimse.CEchoWriteRQ(pdu); err != nil {
@@ -52,13 +53,26 @@ func (d *scu) EchoSCU(timeout int) error {
 	return dimse.CEchoReadRSP(pdu)
 }
 
-func (d *scu) FindSCU(Query media.DICOMObject, timeout int) (int, uint16, error) {
+func (d *scu) FindSCU(ctx context.Context, Query media.DICOMObject, timeout int) (int, uint16, error) {
+	return d.cfindSCU(ctx, sopclass.StudyRootQueryRetrieveInformationModelFind.UID, Query, timeout)
+}
+
+// WorklistSCU sends a Modality Worklist C-FIND (SOP 1.2.840.10008.5.1.4.31)
+// and returns the match count, final status, and any error.
+func (d *scu) WorklistSCU(ctx context.Context, Query media.DICOMObject, timeout int) (int, uint16, error) {
+	return d.cfindSCU(ctx, sopclass.ModalityWorklistInformationModelFind.UID, Query, timeout)
+}
+
+// cfindSCU opens an association using abstractSyntax, sends a C-FIND request,
+// and drains all pending matches before returning the total count, final
+// status, and any transport or protocol error.
+func (d *scu) cfindSCU(ctx context.Context, abstractSyntax string, Query media.DICOMObject, timeout int) (int, uint16, error) {
 	results := 0
 	status := dicomstatus.FailureProcessingFailure
 
 	pdu := network.NewPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(pdu, sopclass.StudyRootQueryRetrieveInformationModelFind.UID, []string{}, timeout); err != nil {
+	if err := d.openAssociation(ctx, pdu, abstractSyntax, []string{}, timeout); err != nil {
 		return results, status, err
 	}
 
@@ -86,47 +100,12 @@ func (d *scu) FindSCU(Query media.DICOMObject, timeout int) (int, uint16, error)
 	return results, status, nil
 }
 
-// WorklistSCU sends a Modality Worklist C-FIND (SOP 1.2.840.10008.5.1.4.31)
-// and returns the match count, final status, and any error.
-func (d *scu) WorklistSCU(Query media.DICOMObject, timeout int) (int, uint16, error) {
-	results := 0
-	status := dicomstatus.FailureProcessingFailure
-
-	pdu := network.NewPDUService()
-	defer pdu.Close()
-	if err := d.openAssociation(pdu, sopclass.ModalityWorklistInformationModelFind.UID, []string{}, timeout); err != nil {
-		return results, status, err
-	}
-
-	if err := dimse.CFindWriteRQ(pdu, Query); err != nil {
-		return results, status, err
-	}
-
-	for {
-		ddo, s, err := dimse.CFindReadRSP(pdu)
-		status = s
-		if err != nil {
-			return results, status, err
-		}
-		if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
-			results++
-			if d.onCFindResult != nil {
-				d.onCFindResult(ddo)
-			}
-			continue
-		}
-		break
-	}
-
-	return results, status, nil
-}
-
-func (d *scu) MoveSCU(destAET string, Query media.DICOMObject, timeout int) (uint16, error) {
+func (d *scu) MoveSCU(ctx context.Context, destAET string, Query media.DICOMObject, timeout int) (uint16, error) {
 	var pending int
 
 	pdu := network.NewPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(pdu, sopclass.StudyRootQueryRetrieveInformationModelMove.UID, []string{}, timeout); err != nil {
+	if err := d.openAssociation(ctx, pdu, sopclass.StudyRootQueryRetrieveInformationModelMove.UID, []string{}, timeout); err != nil {
 		return dicomstatus.FailureProcessingFailure, err
 	}
 
@@ -149,12 +128,12 @@ func (d *scu) MoveSCU(destAET string, Query media.DICOMObject, timeout int) (uin
 	}
 }
 
-func (d *scu) GetSCU(Query media.DICOMObject, timeout int) (uint16, error) {
+func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) (uint16, error) {
 	var pending int
 
 	pdu := network.NewPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(pdu, sopclass.StudyRootQueryRetrieveInformationModelGet.UID, []string{}, timeout); err != nil {
+	if err := d.openAssociation(ctx, pdu, sopclass.StudyRootQueryRetrieveInformationModelGet.UID, []string{}, timeout); err != nil {
 		return dicomstatus.FailureProcessingFailure, err
 	}
 
@@ -174,7 +153,7 @@ func (d *scu) GetSCU(Query media.DICOMObject, timeout int) (uint16, error) {
 	}
 }
 
-func (d *scu) StoreSCU(FileName string, timeout int) error {
+func (d *scu) StoreSCU(ctx context.Context, FileName string, timeout int) error {
 	DDO, err := media.NewDCMObjFromFile(FileName)
 	if err != nil {
 		return err
@@ -187,7 +166,7 @@ func (d *scu) StoreSCU(FileName string, timeout int) error {
 
 	pdu := network.NewPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(pdu, SOPClassUID, []string{DDO.GetTransferSyntax().UID}, timeout); err != nil {
+	if err := d.openAssociation(ctx, pdu, SOPClassUID, []string{DDO.GetTransferSyntax().UID}, timeout); err != nil {
 		return err
 	}
 
@@ -213,7 +192,7 @@ func (d *scu) SetOnCMoveResult(f func(result media.DICOMObject)) {
 	d.onCMoveResult = f
 }
 
-func (d *scu) openAssociation(pdu network.PDUService, abstractSyntax string, transferSyntaxes []string, timeout int) error {
+func (d *scu) openAssociation(ctx context.Context, pdu network.PDUService, abstractSyntax string, transferSyntaxes []string, timeout int) error {
 	pdu.SetCallingAE(d.destination.CallingAE)
 	pdu.SetCalledAE(d.destination.CalledAE)
 	pdu.SetTimeout(timeout)
@@ -228,9 +207,9 @@ func (d *scu) openAssociation(pdu network.PDUService, abstractSyntax string, tra
 	pdu.AddPresContexts(presContext)
 
 	if d.destination.IsTLS {
-		return pdu.ConnectTLS(d.destination.HostName, strconv.Itoa(d.destination.Port), d.destination.TLSConfig)
+		return pdu.ConnectTLS(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port), d.destination.TLSConfig)
 	}
-	return pdu.Connect(d.destination.HostName, strconv.Itoa(d.destination.Port))
+	return pdu.Connect(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port))
 }
 
 func (d *scu) writeStoreRQ(pdu network.PDUService, DDO media.DICOMObject) error {

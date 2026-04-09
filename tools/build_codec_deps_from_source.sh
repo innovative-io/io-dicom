@@ -184,7 +184,13 @@ build_ffmpeg() {
     --disable-doc \
     --disable-ffplay \
     --disable-static \
-    --enable-shared
+    --enable-shared \
+    --disable-xlib \
+    --disable-libxcb \
+    --disable-libxcb-shm \
+    --disable-libxcb-xfixes \
+    --disable-libxcb-shape \
+    --disable-indev=xcbgrab
   make -j"$JOBS"
   make install
   popd >/dev/null

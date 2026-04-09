@@ -45,10 +45,7 @@ func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	if sopClassUID == "" {
 		return errors.New("CStoreWriteRQ: AffectedSOPClassUID is required")
 	}
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
@@ -58,10 +55,7 @@ func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	if sopInstanceUID == "" {
 		return errors.New("CStoreWriteRQ: SOPInstanceUID is required")
 	}
-	sopInstanceUIDLength := uint32(len(sopInstanceUID))
-	if sopInstanceUIDLength%2 == 1 {
-		sopInstanceUIDLength++
-	}
+	sopInstanceUIDLength := uint32(paddedLen(sopInstanceUID))
 	commandLength = commandLength + 8 + sopInstanceUIDLength
 
 	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
@@ -129,16 +123,10 @@ func CStoreWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject,
 		return err
 	}
 
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	// sopInstanceUIDLength must be computed from sopInstanceUID, not sopClassUID.
-	sopInstanceUIDLength := uint16(len(sopInstanceUID))
-	if sopInstanceUIDLength%2 == 1 {
-		sopInstanceUIDLength++
-	}
+	sopInstanceUIDLength := paddedLen(sopInstanceUID)
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2 + 8 + sopInstanceUIDLength)
 

@@ -33,12 +33,3 @@ func GetTag(group uint16, element uint16) *Tag {
 func GetTags() []*Tag {
 	return tags
 }
-
-func GetGroupElement(Name string) (group uint16, element uint16) {
-	for _, tag := range tags {
-		if tag.Name == Name {
-			return tag.Group, tag.Element
-		}
-	}
-	return 0, 0
-}

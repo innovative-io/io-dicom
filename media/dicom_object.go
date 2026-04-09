@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -32,7 +33,7 @@ type DICOMObject interface {
 	Add(tag *DICOMTag)
 	AddConceptNameSeq(group uint16, element uint16, CodeValue string, CodeMeaning string)
 	AddSRText(text string)
-	DumpTags()
+	DumpTags(w io.Writer)
 	IsExplicitVR() bool
 	SetExplicitVR(explicit bool)
 	IsBigEndian() bool
@@ -241,7 +242,8 @@ func (obj *dicomObject) InsertTag(index int, tag *DICOMTag) {
 	if index < 0 || index > len(obj.Tags) {
 		return
 	}
-	obj.Tags = append(obj.Tags[:index+1], obj.Tags[index:]...)
+	obj.Tags = append(obj.Tags, nil)
+	copy(obj.Tags[index+1:], obj.Tags[index:])
 	obj.Tags[index] = tag
 	obj.tagIndex = nil // invalidate; rebuilt on next lookup
 }
@@ -255,18 +257,18 @@ func (obj *dicomObject) DelTag(index int) {
 	obj.tagIndex = nil // invalidate; rebuilt on next lookup
 }
 
-func (obj *dicomObject) DumpTags() {
+func (obj *dicomObject) DumpTags(w io.Writer) {
 	ts := "<none>"
 	if obj.TransferSyntax != nil {
 		ts = obj.TransferSyntax.Name
 	}
-	fmt.Printf("Transfer Syntax : %s\n", ts)
-	fmt.Printf("Tags            : %d\n", len(obj.Tags))
-	obj.dumpSeq(0)
-	fmt.Println()
+	_, _ = fmt.Fprintf(w, "Transfer Syntax : %s\n", ts)
+	_, _ = fmt.Fprintf(w, "Tags            : %d\n", len(obj.Tags))
+	obj.dumpSeq(w, 0)
+	_, _ = fmt.Fprintln(w)
 }
 
-func (obj *dicomObject) dumpSeq(indent int) {
+func (obj *dicomObject) dumpSeq(writer io.Writer, indent int) {
 	prefix := strings.Repeat("  ", indent)
 
 	for _, tag := range obj.Tags {
@@ -274,7 +276,7 @@ func (obj *dicomObject) dumpSeq(indent int) {
 		if tag.Group == 0xFFFE {
 			switch tag.Element {
 			case 0xE000:
-				fmt.Printf("%s--- item ---\n", prefix)
+				_, _ = fmt.Fprintf(writer, "%s--- item ---\n", prefix)
 			case 0xE00D, 0xE0DD:
 				// item/sequence end — omit, nesting already expressed by indent
 			}
@@ -282,20 +284,20 @@ func (obj *dicomObject) dumpSeq(indent int) {
 		}
 
 		if tag.VR == "SQ" {
-			fmt.Printf("%s(%04X,%04X) SQ  %s\n", prefix, tag.Group, tag.Element, tag.Description)
+			_, _ = fmt.Fprintf(writer, "%s(%04X,%04X) SQ  %s\n", prefix, tag.Group, tag.Element, tag.Description)
 			if seq, ok := tag.ReadSeq(obj.IsExplicitVR()).(*dicomObject); ok {
-				seq.dumpSeq(indent + 1)
+				seq.dumpSeq(writer, indent+1)
 			}
 			continue
 		}
 
 		if tag.Length > 128 || tag.Length == 0xFFFFFFFF {
-			fmt.Printf("%s(%04X,%04X) %-4s %s : (%d bytes)\n", prefix, tag.Group, tag.Element, tag.VR, tag.Description, tag.Length)
+			_, _ = fmt.Fprintf(writer, "%s(%04X,%04X) %-4s %s : (%d bytes)\n", prefix, tag.Group, tag.Element, tag.VR, tag.Description, tag.Length)
 			continue
 		}
 
 		value := obj.formatTagValue(tag)
-		fmt.Printf("%s(%04X,%04X) %-4s %s : %s\n", prefix, tag.Group, tag.Element, tag.VR, tag.Description, value)
+		_, _ = fmt.Fprintf(writer, "%s(%04X,%04X) %-4s %s : %s\n", prefix, tag.Group, tag.Element, tag.VR, tag.Description, value)
 	}
 }
 
@@ -343,27 +345,32 @@ func (obj *dicomObject) GetUShort(tag *tags.Tag) uint16 {
 	return obj.GetUShortGE(tag.Group, tag.Element)
 }
 
-// GetUShortGE - return the Uint16 for this group & element
-func (obj *dicomObject) GetUShortGE(group uint16, element uint16) uint16 {
-	var index int
-	var currentTag *DICOMTag
+// findTagGE performs a top-level-only linear scan that skips tags nested
+// inside sequences and returns the first matching tag with a non-empty,
+// non-undefined-length value, or nil if none is found.
+func (obj *dicomObject) findTagGE(group uint16, element uint16) *DICOMTag {
 	sequenceDepth := 0
-	for index = 0; index < obj.TagCount(); index++ {
-		currentTag = obj.GetTagAt(index)
-		if ((currentTag.VR == "SQ") && (currentTag.Length == 0xFFFFFFFF)) || ((currentTag.Group == 0xFFFE) && (currentTag.Element == 0xE000) && (currentTag.Length == 0xFFFFFFFF)) {
+	for i := 0; i < obj.TagCount(); i++ {
+		t := obj.GetTagAt(i)
+		if ((t.VR == "SQ") && (t.Length == 0xFFFFFFFF)) || ((t.Group == 0xFFFE) && (t.Element == 0xE000) && (t.Length == 0xFFFFFFFF)) {
 			sequenceDepth++
 		}
-		if (sequenceDepth == 0) && (currentTag.Length > 0) && (currentTag.Length != 0xFFFFFFFF) {
-			if (currentTag.Group == group) && (currentTag.Element == element) {
-				break
+		if (sequenceDepth == 0) && (t.Length > 0) && (t.Length != 0xFFFFFFFF) {
+			if (t.Group == group) && (t.Element == element) {
+				return t
 			}
 		}
-		if ((currentTag.Group == 0xFFFE) && (currentTag.Element == 0xE00D)) || ((currentTag.Group == 0xFFFE) && (currentTag.Element == 0xE0DD)) {
+		if ((t.Group == 0xFFFE) && (t.Element == 0xE00D)) || ((t.Group == 0xFFFE) && (t.Element == 0xE0DD)) {
 			sequenceDepth--
 		}
 	}
-	if index < obj.TagCount() {
-		return currentTag.GetUShort()
+	return nil
+}
+
+// GetUShortGE - return the Uint16 for this group & element
+func (obj *dicomObject) GetUShortGE(group uint16, element uint16) uint16 {
+	if t := obj.findTagGE(group, element); t != nil {
+		return t.GetUShort()
 	}
 	return 0
 }
@@ -374,25 +381,8 @@ func (obj *dicomObject) GetUInt(tag *tags.Tag) uint32 {
 
 // GetUIntGE - return the Uint32 for this group & element
 func (obj *dicomObject) GetUIntGE(group uint16, element uint16) uint32 {
-	var index int
-	var currentTag *DICOMTag
-	sequenceDepth := 0
-	for index = 0; index < obj.TagCount(); index++ {
-		currentTag = obj.GetTagAt(index)
-		if ((currentTag.VR == "SQ") && (currentTag.Length == 0xFFFFFFFF)) || ((currentTag.Group == 0xFFFE) && (currentTag.Element == 0xE000) && (currentTag.Length == 0xFFFFFFFF)) {
-			sequenceDepth++
-		}
-		if (sequenceDepth == 0) && (currentTag.Length > 0) && (currentTag.Length != 0xFFFFFFFF) {
-			if (currentTag.Group == group) && (currentTag.Element == element) {
-				break
-			}
-		}
-		if ((currentTag.Group == 0xFFFE) && (currentTag.Element == 0xE00D)) || ((currentTag.Group == 0xFFFE) && (currentTag.Element == 0xE0DD)) {
-			sequenceDepth--
-		}
-	}
-	if index < obj.TagCount() {
-		return currentTag.GetUInt()
+	if t := obj.findTagGE(group, element); t != nil {
+		return t.GetUInt()
 	}
 	return 0
 }
@@ -403,25 +393,8 @@ func (obj *dicomObject) GetString(tag *tags.Tag) string {
 
 // GetStringGE - return the String for this group & element
 func (obj *dicomObject) GetStringGE(group uint16, element uint16) string {
-	var index int
-	var currentTag *DICOMTag
-	sequenceDepth := 0
-	for index = 0; index < obj.TagCount(); index++ {
-		currentTag = obj.GetTagAt(index)
-		if ((currentTag.VR == "SQ") && (currentTag.Length == 0xFFFFFFFF)) || ((currentTag.Group == 0xFFFE) && (currentTag.Element == 0xE000) && (currentTag.Length == 0xFFFFFFFF)) {
-			sequenceDepth++
-		}
-		if (sequenceDepth == 0) && (currentTag.Length > 0) && (currentTag.Length != 0xFFFFFFFF) {
-			if (currentTag.Group == group) && (currentTag.Element == element) {
-				break
-			}
-		}
-		if ((currentTag.Group == 0xFFFE) && (currentTag.Element == 0xE00D)) || ((currentTag.Group == 0xFFFE) && (currentTag.Element == 0xE0DD)) {
-			sequenceDepth--
-		}
-	}
-	if index < obj.TagCount() {
-		return currentTag.GetString()
+	if t := obj.findTagGE(group, element); t != nil {
+		return t.GetString()
 	}
 	return ""
 }
@@ -631,6 +604,22 @@ func joinFragments(fragments [][]byte) []byte {
 	return out
 }
 
+// deplanarizeRGBFrames converts RGB pixel data from planar format (all R values
+// followed by all G values followed by all B values, per frame) to interleaved
+// RGB format in dst. src and dst may overlap or be the same slice.
+// frameSize is the byte count of one frame (rows * cols * 3).
+func deplanarizeRGBFrames(dst, src []byte, frameSize, frames uint32) {
+	for f := uint32(0); f < frames; f++ {
+		off := frameSize * f
+		pixels := frameSize / 3
+		for j := uint32(0); j < pixels; j++ {
+			dst[3*j+off] = src[j+off]
+			dst[3*j+1+off] = src[j+pixels+off]
+			dst[3*j+2+off] = src[j+2*pixels+off]
+		}
+	}
+}
+
 func frameFragmentRangeByBOT(offsets []uint32, frame int, fragmentPayloadSizes []int) (int, int, bool) {
 	if frame < 0 || frame >= len(offsets) {
 		return 0, 0, false
@@ -796,21 +785,16 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 					return nil, fmt.Errorf("frame %d out of range", frame)
 				} else {
 					if RGB && (planar == 1) {
-						var img_offset, img_size uint32
-						img_size = size / frames
-						img := make([]byte, img_size)
-						for f := uint32(0); f < frames; f++ {
-							img_offset = img_size * f
-							for j := uint32(0); j < img_size/3; j++ {
-								img[3*j] = tag.Data[j+img_offset]
-								img[3*j+1] = tag.Data[j+img_size/3+img_offset]
-								img[3*j+2] = tag.Data[j+2*img_size/3+img_offset]
-							}
-							if f == uint32(frame) {
-								return img, nil
-							}
+						imgSize := size / frames
+						off := imgSize * uint32(frame)
+						pixels := imgSize / 3
+						img := make([]byte, imgSize)
+						for j := uint32(0); j < pixels; j++ {
+							img[3*j] = tag.Data[j+off]
+							img[3*j+1] = tag.Data[j+pixels+off]
+							img[3*j+2] = tag.Data[j+2*pixels+off]
 						}
-						planar = 0
+						return img, nil
 					} else {
 						imgSize := size / frames
 						offset := uint32(frame) * imgSize
@@ -920,16 +904,7 @@ func (obj *dicomObject) ChangeTransferSyntaxContext(ctx context.Context, outTS *
 					}
 				} else { // Uncompressed
 					if RGB && (planar == 1) { // change from planar=1 to planar=0
-						var img_offset, img_size uint32
-						img_size = size / frames
-						for f := uint32(0); f < frames; f++ {
-							img_offset = img_size * f
-							for j := uint32(0); j < img_size/3; j++ {
-								img[3*j+img_offset] = tag.Data[j+img_offset]
-								img[3*j+1+img_offset] = tag.Data[j+img_size/3+img_offset]
-								img[3*j+2+img_offset] = tag.Data[j+2*img_size/3+img_offset]
-							}
-						}
+						deplanarizeRGBFrames(img, tag.Data, size/frames, frames)
 						planar = 0
 					} else {
 						copy(img, tag.Data)
@@ -953,28 +928,22 @@ func (obj *dicomObject) ChangeTransferSyntaxContext(ctx context.Context, outTS *
 	return fmt.Errorf("there was an error changing the transfer syntax")
 }
 
+// newChildObject allocates a dicomObject that inherits the byte-order and VR
+// encoding of its parent. Used for building nested SQ item/sequence pairs.
+func newChildObject(parent *dicomObject) *dicomObject {
+	return &dicomObject{
+		Tags:       make([]*DICOMTag, 0),
+		ExplicitVR: parent.ExplicitVR,
+		BigEndian:  parent.BigEndian,
+		SQtag:      new(DICOMTag),
+	}
+}
+
 // AddConceptNameSeq - Concept Name Sequence for DICOM SR
 func (obj *dicomObject) AddConceptNameSeq(group uint16, element uint16, CodeValue string, CodeMeaning string) {
-	item := &dicomObject{
-		Tags:           make([]*DICOMTag, 0),
-		TransferSyntax: nil,
-		ExplicitVR:     false,
-		BigEndian:      false,
-		SQtag:          new(DICOMTag),
-	}
-	seq := &dicomObject{
-		Tags:           make([]*DICOMTag, 0),
-		TransferSyntax: nil,
-		ExplicitVR:     false,
-		BigEndian:      false,
-		SQtag:          new(DICOMTag),
-	}
+	item := newChildObject(obj)
+	seq := newChildObject(obj)
 	tag := new(DICOMTag)
-
-	item.BigEndian = obj.BigEndian
-	item.ExplicitVR = obj.ExplicitVR
-	seq.BigEndian = obj.BigEndian
-	seq.ExplicitVR = obj.ExplicitVR
 
 	item.WriteString(tags.CodeValue, CodeValue)
 	item.WriteString(tags.CodingSchemeDesignator, "odb")
@@ -987,26 +956,9 @@ func (obj *dicomObject) AddConceptNameSeq(group uint16, element uint16, CodeValu
 
 // AddSRText - add Text to SR
 func (obj *dicomObject) AddSRText(text string) {
-	item := &dicomObject{
-		Tags:           make([]*DICOMTag, 0),
-		TransferSyntax: nil,
-		ExplicitVR:     false,
-		BigEndian:      false,
-		SQtag:          new(DICOMTag),
-	}
-	seq := &dicomObject{
-		Tags:           make([]*DICOMTag, 0),
-		TransferSyntax: nil,
-		ExplicitVR:     false,
-		BigEndian:      false,
-		SQtag:          new(DICOMTag),
-	}
+	item := newChildObject(obj)
+	seq := newChildObject(obj)
 	tag := new(DICOMTag)
-
-	item.BigEndian = obj.BigEndian
-	item.ExplicitVR = obj.ExplicitVR
-	seq.BigEndian = obj.BigEndian
-	seq.ExplicitVR = obj.ExplicitVR
 
 	item.WriteString(tags.RelationshipType, "CONTAINS")
 	item.WriteString(tags.ValueType, "TEXT")

@@ -19,10 +19,7 @@ func CFindWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	if sopClassUID == "" {
 		return errors.New("CFindWriteRQ: AffectedSOPClassUID is required")
 	}
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
@@ -117,10 +114,7 @@ func CFindWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 		return errors.New("CFindWriteRSP: MessageID is required")
 	}
 
-	sopClassUIDLength := uint16(len(sopClassUID))
-	if sopClassUIDLength%2 == 1 {
-		sopClassUIDLength++
-	}
+	sopClassUIDLength := paddedLen(sopClassUID)
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 

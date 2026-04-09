@@ -141,7 +141,7 @@ func Test_scu_EchoSCU_TLS(t *testing.T) {
 	}
 
 	scu := NewSCU(dest)
-	if err := scu.EchoSCU(10); err != nil {
+	if err := scu.EchoSCU(context.Background(), 10); err != nil {
 		t.Fatalf("TLS C-Echo failed: %v", err)
 	}
 }
@@ -177,7 +177,7 @@ func Test_scu_EchoSCU_TLS_wrongCA(t *testing.T) {
 	}
 
 	scu := NewSCU(dest)
-	err := scu.EchoSCU(10)
+	err := scu.EchoSCU(context.Background(), 10)
 	if err == nil {
 		t.Fatal("expected TLS handshake to fail with wrong CA, but it succeeded")
 	}
@@ -205,7 +205,7 @@ func Test_scu_EchoSCU_TLSPort_PlainClient(t *testing.T) {
 	}
 
 	scu := NewSCU(dest)
-	err := scu.EchoSCU(5)
+	err := scu.EchoSCU(context.Background(), 5)
 	if err == nil {
 		t.Fatal("expected plain SCU to fail against TLS SCP, but it succeeded")
 	}

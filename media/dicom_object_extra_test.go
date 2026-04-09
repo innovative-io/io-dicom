@@ -1,9 +1,12 @@
 package media
 
 import (
+	"bytes"
 	"encoding/binary"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -230,7 +233,20 @@ func TestDICOMObject_DumpTags_DoesNotPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Just verifying it doesn't panic.
-	obj.DumpTags()
+	obj.DumpTags(io.Discard)
+}
+
+func TestDICOMObject_DumpTags_WritesToProvidedWriter(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.WriteString(tags.PatientName, "DOE^JANE")
+
+	var buffer bytes.Buffer
+	obj.DumpTags(&buffer)
+
+	got := buffer.String()
+	if !strings.Contains(got, "Patient's Name : DOE^JANE") {
+		t.Fatalf("DumpTags() output = %q, want Patient's Name line", got)
+	}
 }
 
 // Verify the UL formatTagValue path via GetUIntGE then via a tag with VR=UL
@@ -240,5 +256,5 @@ func TestDICOMObject_formatTagValue_UL(t *testing.T) {
 	binary.LittleEndian.PutUint32(data, 1024)
 	obj.Add(&DICOMTag{Group: 0x0028, Element: 0x0120, VR: "UL", Length: 4, Data: data})
 	// DumpTags exercises formatTagValue for UL
-	obj.DumpTags()
+	obj.DumpTags(io.Discard)
 }

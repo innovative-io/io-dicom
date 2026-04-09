@@ -221,7 +221,7 @@ func (bd *dicomBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 
 	if (tag.Group != 0x0000) && (tag.Group != 0xfffe) && (internalVR) {
 		tag.VR = bd.readString(2)
-		if (tag.VR == "OB") || (tag.VR == "OW") || (tag.VR == "SQ") || (tag.VR == "UN") || (tag.VR == "UT") {
+		if isLongExplicitVR(tag.VR) {
 			_, err := bd.ReadUint16()
 			if err != nil {
 				return nil, err
