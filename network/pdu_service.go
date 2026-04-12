@@ -44,6 +44,7 @@ type PDUService interface {
 	GetAAssociationRQ() AssociationRequest
 	GetCalledAE() string
 	GetCallingAE() string
+	GetRemoteAddress() string
 	SetCalledAE(calledAE string)
 	SetCallingAE(callingAE string)
 	SetConn(rw *bufio.ReadWriter)
@@ -446,6 +447,13 @@ func (pdu *pduService) GetCallingAE() string {
 	return pdu.AssocRQ.GetCallingAE()
 }
 
+func (pdu *pduService) GetRemoteAddress() string {
+	if pdu.conn == nil || pdu.conn.RemoteAddr() == nil {
+		return ""
+	}
+	return pdu.conn.RemoteAddr().String()
+}
+
 func (pdu *pduService) SetCalledAE(calledAE string) {
 	pdu.AssocRQ.SetCalledAE(calledAE)
 }
@@ -534,6 +542,12 @@ func (pdu *pduService) interogateAAssociateAC() bool {
 }
 
 func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
+	if pdu.conn != nil && pdu.conn.RemoteAddr() != nil {
+		pdu.AssocRQ.SetRemoteAddress(pdu.conn.RemoteAddr().String())
+	} else {
+		pdu.AssocRQ.SetRemoteAddress("")
+	}
+
 	if tlsConn, ok := pdu.conn.(*tls.Conn); ok {
 		state := tlsConn.ConnectionState()
 		pdu.AssocRQ.SetPeerCertificates(state.PeerCertificates)

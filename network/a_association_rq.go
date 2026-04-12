@@ -21,6 +21,8 @@ type AssociationRequest interface {
 	SetCallingAE(aeTitle string)
 	GetCalledAE() string
 	SetCalledAE(aeTitle string)
+	GetRemoteAddress() string
+	SetRemoteAddress(address string)
 	GetPresContexts() []PresentationContext
 	GetUserInformation() UserInformation
 	SetUserInformation(userInfo UserInformation)
@@ -50,6 +52,7 @@ type associationRequest struct {
 	PresContexts     []PresentationContext
 	UserInfo         UserInformation
 	PeerCertificates []*x509.Certificate
+	RemoteAddress    string
 }
 
 // NewAssociationRequest - NewAssociationRequest
@@ -92,6 +95,14 @@ func (aarq *associationRequest) GetCalledAE() string {
 
 func (aarq *associationRequest) SetCalledAE(aeTitle string) {
 	formatAETitle(&aarq.CalledAE, aeTitle)
+}
+
+func (aarq *associationRequest) GetRemoteAddress() string {
+	return aarq.RemoteAddress
+}
+
+func (aarq *associationRequest) SetRemoteAddress(address string) {
+	aarq.RemoteAddress = address
 }
 
 func (aarq *associationRequest) GetPresContexts() []PresentationContext {

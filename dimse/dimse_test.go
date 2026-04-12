@@ -65,6 +65,7 @@ func (m *mockPDU) ConnectTLS(_ context.Context, _, _ string, _ *tls.Config) erro
 func (m *mockPDU) Close()                                                          {}
 func (m *mockPDU) GetCalledAE() string                                             { return "CALLED" }
 func (m *mockPDU) GetCallingAE() string                                            { return "CALLING" }
+func (m *mockPDU) GetRemoteAddress() string                                        { return "127.0.0.1:104" }
 func (m *mockPDU) SetCalledAE(_ string)                                            {}
 func (m *mockPDU) SetCallingAE(_ string)                                           {}
 func (m *mockPDU) SetConn(_ *bufio.ReadWriter)                                     {}
