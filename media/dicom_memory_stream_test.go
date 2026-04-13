@@ -3,6 +3,7 @@ package media
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"os"
 	"strings"
 	"testing"
@@ -65,18 +66,6 @@ func TestMemoryStream_Get(t *testing.T) {
 	}
 }
 
-func TestMemoryStream_GetInt(t *testing.T) {
-	ms := NewMemoryStreamFromBytes([]byte{0x00, 0x00, 0x00, 0x07})
-	v, err := ms.GetInt()
-	if err != nil || v != 7 {
-		t.Fatalf("GetInt() = %v, %v", v, err)
-	}
-	_, err = ms.GetInt()
-	if err == nil {
-		t.Fatal("GetInt() should error past end")
-	}
-}
-
 func TestMemoryStream_ReadData(t *testing.T) {
 	ms := NewMemoryStreamFromBytes([]byte{1, 2, 3, 4, 5})
 	dst := make([]byte, 3)
@@ -89,6 +78,39 @@ func TestMemoryStream_ReadData(t *testing.T) {
 	oversized := make([]byte, 10)
 	if err := ms.ReadData(oversized); err == nil {
 		t.Fatal("ReadData() should error when not enough data")
+	}
+}
+
+func TestMemoryStream_ReadSlice(t *testing.T) {
+	raw := []byte{0x01, 0x02, 0x03, 0x04}
+	ms := NewMemoryStreamFromBytes(raw)
+	sl, err := ms.ReadSlice(2)
+	if err != nil || string(sl) != "\x01\x02" {
+		t.Fatalf("ReadSlice(2) = %v, %v", sl, err)
+	}
+	if &sl[0] != &raw[0] {
+		t.Fatal("ReadSlice should alias backing buffer")
+	}
+	sl2, err := ms.ReadSlice(2)
+	if err != nil || string(sl2) != "\x03\x04" {
+		t.Fatalf("ReadSlice second = %v", sl2)
+	}
+	_, err = ms.ReadSlice(1)
+	if err == nil {
+		t.Fatal("ReadSlice past end should error")
+	}
+}
+
+func TestMemoryStream_ReadUint16Endian(t *testing.T) {
+	ms := NewMemoryStreamFromBytes([]byte{0x01, 0x02, 0x03, 0x04})
+	v, err := ms.ReadUint16Endian(false)
+	if err != nil || v != binary.LittleEndian.Uint16([]byte{0x01, 0x02}) {
+		t.Fatalf("LE ReadUint16 = %v, %v", v, err)
+	}
+	ms.SetPosition(0)
+	v, err = ms.ReadUint16Endian(true)
+	if err != nil || v != binary.BigEndian.Uint16([]byte{0x01, 0x02}) {
+		t.Fatalf("BE ReadUint16 = %v, %v", v, err)
 	}
 }
 
@@ -105,17 +127,6 @@ func TestMemoryStream_ReadFully(t *testing.T) {
 	}
 	if string(ms.GetData()) != "hello world" {
 		t.Fatalf("ReadFully() data = %q", ms.GetData())
-	}
-}
-
-func TestMemoryStream_SetSize(t *testing.T) {
-	ms := NewMemoryStreamFromBytes([]byte{1, 2, 3, 4})
-	if ms.GetSize() != 4 {
-		t.Fatalf("initial size = %d", ms.GetSize())
-	}
-	ms.SetSize(2)
-	if ms.GetSize() != 2 {
-		t.Fatalf("after SetSize(2) size = %d", ms.GetSize())
 	}
 }
 

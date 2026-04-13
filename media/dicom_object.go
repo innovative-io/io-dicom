@@ -79,7 +79,6 @@ type dicomObject struct {
 	TransferSyntax *transfersyntax.TransferSyntax
 	ExplicitVR     bool
 	BigEndian      bool
-	SQtag          *DICOMTag
 }
 
 // tagKey encodes group and element into a single uint32 map key.
@@ -105,11 +104,10 @@ func (obj *dicomObject) ensureTagIndex() {
 func NewEmptyDCMObj() DICOMObject {
 	return &dicomObject{
 		Tags:           make([]*DICOMTag, 0),
-		tagIndex:       make(map[uint32]*DICOMTag),
+		tagIndex:       nil, // built lazily on first lookup
 		TransferSyntax: nil,
 		ExplicitVR:     false,
 		BigEndian:      false,
-		SQtag:          &DICOMTag{},
 	}
 }
 
@@ -137,12 +135,14 @@ func parseBufData(bufdata DICOMBuffer) (DICOMObject, error) {
 	}
 
 	dicomObj := &dicomObject{
-		Tags:           make([]*DICOMTag, 0),
-		tagIndex:       make(map[uint32]*DICOMTag),
+		// Pre-allocate Tags with capacity for 512 entries — enough to hold typical
+		// DICOM files (100–500 tags) without any slice growth. Using a fixed value
+		// avoids over-allocating on pixel-data-heavy files where fileSize/256 >> tagCount.
+		Tags:           make([]*DICOMTag, 0, 512),
+		tagIndex:       nil, // built lazily on first lookup; no need to pre-create
 		TransferSyntax: transferSyntax,
 		ExplicitVR:     false,
 		BigEndian:      false,
-		SQtag:          &DICOMTag{},
 	}
 
 	if dicomObj.TransferSyntax == nil {
@@ -328,6 +328,8 @@ func (obj *dicomObject) formatTagValue(tag *DICOMTag) string {
 		return "(invalid)"
 	case "FL":
 		return fmt.Sprintf("%g", tag.GetFloat())
+	case "FD":
+		return fmt.Sprintf("%g", tag.GetFloat64())
 	case "OB", "OW", "UN":
 		return fmt.Sprintf("(%d bytes)", tag.Length)
 	default:
@@ -411,7 +413,23 @@ func (obj *dicomObject) Add(tag *DICOMTag) {
 }
 
 func (obj *dicomObject) WriteToBytes() []byte {
-	bufdata := NewEmptyBufData()
+	if err := ValidateFileWrite(obj); err != nil {
+		return nil
+	}
+
+	// Pre-size the output buffer by summing the actual data length of every tag
+	// (plus a worst-case 12-byte explicit VR header) and adding meta overhead.
+	// This avoids the repeated doubling reallocations that start from 4096 bytes.
+	estimatedSize := 256 // preamble (128) + DICM (4) + meta tags (~124)
+	for i := 0; i < obj.TagCount(); i++ {
+		t := obj.GetTagAt(i)
+		if t.Length != 0xFFFFFFFF {
+			estimatedSize += 12 + int(t.Length)
+		} else {
+			estimatedSize += 12 // undefined-length tag (encapsulated pixel data parent)
+		}
+	}
+	bufdata := NewEmptyBufDataWithCapacity(estimatedSize)
 
 	if obj.TransferSyntax.UID == transfersyntax.ExplicitVRBigEndian.UID {
 		bufdata.SetBigEndian(true)
@@ -456,10 +474,10 @@ func ValidateFileWrite(obj DICOMObject) error {
 
 // Wrote - Write a DICOM Object to a DICOM File
 func (obj *dicomObject) WriteToFile(fileName string) error {
-	if err := ValidateFileWrite(obj); err != nil {
-		return err
-	}
 	data := obj.WriteToBytes()
+	if data == nil {
+		return ValidateFileWrite(obj)
+	}
 	return os.WriteFile(fileName, data, 0o600)
 }
 
@@ -935,7 +953,6 @@ func newChildObject(parent *dicomObject) *dicomObject {
 		Tags:       make([]*DICOMTag, 0),
 		ExplicitVR: parent.ExplicitVR,
 		BigEndian:  parent.BigEndian,
-		SQtag:      new(DICOMTag),
 	}
 }
 

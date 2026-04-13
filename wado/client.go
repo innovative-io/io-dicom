@@ -137,7 +137,16 @@ func (c *wadoClient) StoreInstances(ctx context.Context, studyUID string, object
 				writeErr = err
 				break
 			}
-			if _, err := part.Write(obj.WriteToBytes()); err != nil {
+			payload := obj.WriteToBytes()
+			if len(payload) == 0 {
+				if err := media.ValidateFileWrite(obj); err != nil {
+					writeErr = err
+				} else {
+					writeErr = fmt.Errorf("empty DICOM payload")
+				}
+				break
+			}
+			if _, err := part.Write(payload); err != nil {
 				writeErr = err
 				break
 			}

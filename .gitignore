@@ -14,3 +14,4 @@ datastore
 .build
 .local
 samples/
+bench/transcode/dcmtk_transcode_bench

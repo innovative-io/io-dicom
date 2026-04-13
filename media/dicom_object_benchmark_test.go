@@ -98,3 +98,60 @@ func BenchmarkWriteToBytes_Test2(b *testing.B) {
 func BenchmarkWriteToBytes_JPEG8(b *testing.B) {
 	benchmarkWriteToBytes(b, "../samples/jpeg8.dcm")
 }
+
+// --- ParseIndex benchmarks (fast index path) ---
+
+func benchmarkParseIndexFromFile(b *testing.B, fileName string) {
+	b.Helper()
+	muteParserLogsForBenchmarks()
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		rec, err := ParseIndexFromFile(fileName)
+		if err != nil {
+			b.Fatalf("ParseIndexFromFile(%s) failed: %v", fileName, err)
+		}
+		if rec == nil {
+			b.Fatalf("ParseIndexFromFile(%s) returned nil record", fileName)
+		}
+	}
+}
+
+func benchmarkParseIndexFromBytes(b *testing.B, fileName string) {
+	b.Helper()
+	muteParserLogsForBenchmarks()
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		b.Fatalf("failed to read sample %s: %v", fileName, err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		rec, err := ParseIndexFromBytes(data)
+		if err != nil {
+			b.Fatalf("ParseIndexFromBytes(%s) failed: %v", fileName, err)
+		}
+		if rec == nil {
+			b.Fatalf("ParseIndexFromBytes(%s) returned nil record", fileName)
+		}
+	}
+}
+
+func BenchmarkParseIndexFromFile_Test2(b *testing.B) {
+	benchmarkParseIndexFromFile(b, "../samples/test2.dcm")
+}
+
+func BenchmarkParseIndexFromFile_JPEG8(b *testing.B) {
+	benchmarkParseIndexFromFile(b, "../samples/jpeg8.dcm")
+}
+
+func BenchmarkParseIndexFromBytes_Test2(b *testing.B) {
+	benchmarkParseIndexFromBytes(b, "../samples/test2.dcm")
+}
+
+func BenchmarkParseIndexFromBytes_JPEG8(b *testing.B) {
+	benchmarkParseIndexFromBytes(b, "../samples/jpeg8.dcm")
+}

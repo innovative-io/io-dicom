@@ -15,14 +15,17 @@ type MemoryStream interface {
 	GetByte() (byte, error)
 	GetUint16() (uint16, error)
 	GetUint32() (uint32, error)
-	GetInt() (int, error)
 	GetPosition() int
 	SetPosition(position int)
 	GetSize() int
-	SetSize(size int)
 	Append(data []byte) (int, error)
 	ReadData(input []byte) error
 	Read(count int) ([]byte, error)
+	// ReadSlice returns the next n bytes as a view into the stream buffer and advances the position.
+	// The slice aliases stream memory; it remains valid for the lifetime of the underlying backing array.
+	ReadSlice(n int) ([]byte, error)
+	ReadUint16Endian(bigEndian bool) (uint16, error)
+	ReadUint32Endian(bigEndian bool) (uint32, error)
 	ReadFully(rw *bufio.ReadWriter, length int) error
 	Write(buffer []byte, count int) (int, error)
 	Clear()
@@ -36,8 +39,26 @@ type memoryStream struct {
 
 // NewEmptyMemoryStream - Creates an interface to a new empty memoryStream
 func NewEmptyMemoryStream() MemoryStream {
+	return newEmptyMemoryStream()
+}
+
+// newEmptyMemoryStream returns the concrete *memoryStream for intra-package use
+// where the concrete type avoids interface-call escape of stack variables.
+func newEmptyMemoryStream() *memoryStream {
 	return &memoryStream{
 		Data:     make([]byte, 0, 4096),
+		Position: 0,
+		Size:     0,
+	}
+}
+
+// newMemoryStreamWithCapacity returns the concrete *memoryStream for intra-package use.
+func newMemoryStreamWithCapacity(capacity int) *memoryStream {
+	if capacity < 4096 {
+		capacity = 4096
+	}
+	return &memoryStream{
+		Data:     make([]byte, 0, capacity),
 		Position: 0,
 		Size:     0,
 	}
@@ -102,15 +123,6 @@ func (ms *memoryStream) Get() (int, error) {
 	return int(b), nil
 }
 
-func (ms *memoryStream) GetInt() (int, error) {
-	if ms.Position+3 >= ms.Size {
-		return 0, errors.New("no more data to read")
-	}
-	b := ms.Data[ms.Position : ms.Position+4]
-	ms.Position += 4
-	return int(binary.BigEndian.Uint32(b)), nil
-}
-
 func (ms *memoryStream) ReadData(dst []byte) error {
 	if ms.Position+len(dst) > ms.Size {
 		return errors.New("no more data to read")
@@ -146,19 +158,49 @@ func (ms *memoryStream) GetSize() int {
 	return ms.Size
 }
 
-func (ms *memoryStream) SetSize(size int) {
-	ms.Size = size
-}
-
 // Read - Read from MemoryStream into Buffer count bytes
 func (ms *memoryStream) Read(count int) ([]byte, error) {
-	buffer := make([]byte, count)
 	if count+ms.Position > ms.Size {
 		return nil, errors.New("MemoryStream::Read, count+ms.Position > ms.Size")
 	}
+	buffer := make([]byte, count)
 	copy(buffer, ms.Data[ms.Position:ms.Position+count])
 	ms.Position = ms.Position + count
 	return buffer, nil
+}
+
+// ReadSlice returns a subslice view without copying; see MemoryStream.ReadSlice.
+func (ms *memoryStream) ReadSlice(n int) ([]byte, error) {
+	if n+ms.Position > ms.Size {
+		return nil, errors.New("MemoryStream::ReadSlice, n+ms.Position > ms.Size")
+	}
+	start := ms.Position
+	ms.Position += n
+	return ms.Data[start : start+n], nil
+}
+
+func (ms *memoryStream) ReadUint16Endian(bigEndian bool) (uint16, error) {
+	if ms.Position+2 > ms.Size {
+		return 0, errors.New("MemoryStream::ReadUint16Endian: not enough data")
+	}
+	b := ms.Data[ms.Position : ms.Position+2]
+	ms.Position += 2
+	if bigEndian {
+		return binary.BigEndian.Uint16(b), nil
+	}
+	return binary.LittleEndian.Uint16(b), nil
+}
+
+func (ms *memoryStream) ReadUint32Endian(bigEndian bool) (uint32, error) {
+	if ms.Position+4 > ms.Size {
+		return 0, errors.New("MemoryStream::ReadUint32Endian: not enough data")
+	}
+	b := ms.Data[ms.Position : ms.Position+4]
+	ms.Position += 4
+	if bigEndian {
+		return binary.BigEndian.Uint32(b), nil
+	}
+	return binary.LittleEndian.Uint32(b), nil
 }
 
 func (ms *memoryStream) Append(data []byte) (int, error) {
@@ -198,8 +240,14 @@ func (ms *memoryStream) Write(buffer []byte, count int) (int, error) {
 	endPos := ms.Position + count
 
 	if endPos > len(ms.Data) {
-		grow := endPos - len(ms.Data)
-		ms.Data = append(ms.Data, make([]byte, grow)...)
+		if endPos <= cap(ms.Data) {
+			// Extend within pre-allocated capacity — zero allocation.
+			ms.Data = ms.Data[:endPos]
+		} else {
+			// Must grow beyond current capacity; fall back to append.
+			grow := endPos - len(ms.Data)
+			ms.Data = append(ms.Data, make([]byte, grow)...)
+		}
 	}
 
 	copy(ms.Data[ms.Position:endPos], buffer[:count])

@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"log/slog"
-	"strings"
 
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/implementation"
@@ -43,14 +42,26 @@ type DICOMBuffer interface {
 
 type dicomBuffer struct {
 	BigEndian bool
-	MS        MemoryStream
+	// MS is stored as the concrete *memoryStream (not the MemoryStream interface)
+	// so that calls like WriteUint16/WriteUint32 can pass stack-allocated arrays
+	// without the compiler forcing them onto the heap via interface-call escape.
+	MS *memoryStream
 }
 
 // NewEmptyBufData -
 func NewEmptyBufData() DICOMBuffer {
 	return &dicomBuffer{
 		BigEndian: false,
-		MS:        NewEmptyMemoryStream(),
+		MS:        newEmptyMemoryStream(),
+	}
+}
+
+// NewEmptyBufDataWithCapacity creates an empty DICOMBuffer with a pre-allocated
+// backing buffer of the given byte capacity, avoiding early growth reallocations.
+func NewEmptyBufDataWithCapacity(capacity int) DICOMBuffer {
+	return &dicomBuffer{
+		BigEndian: false,
+		MS:        newMemoryStreamWithCapacity(capacity),
 	}
 }
 
@@ -58,7 +69,7 @@ func NewEmptyBufData() DICOMBuffer {
 func NewBufDataFromBytes(data []byte) DICOMBuffer {
 	return &dicomBuffer{
 		BigEndian: false,
-		MS:        NewMemoryStreamFromBytes(data),
+		MS:        NewMemoryStreamFromBytes(data).(*memoryStream),
 	}
 }
 
@@ -70,7 +81,7 @@ func NewBufDataFromFile(fileName string) (DICOMBuffer, error) {
 	}
 	return &dicomBuffer{
 		BigEndian: false,
-		MS:        ms,
+		MS:        ms.(*memoryStream),
 	}, nil
 }
 
@@ -103,33 +114,15 @@ func (bd *dicomBuffer) Read(count int) ([]byte, error) {
 }
 
 func (bd *dicomBuffer) ReadByte() (byte, error) {
-	c, err := bd.MS.Read(1)
-	if err != nil {
-		return 0, err
-	}
-	return c[0], nil
+	return bd.MS.GetByte()
 }
 
 func (bd *dicomBuffer) ReadUint16() (uint16, error) {
-	c, err := bd.MS.Read(2)
-	if err != nil {
-		return 0, err
-	}
-	if bd.BigEndian {
-		return binary.BigEndian.Uint16(c), nil
-	}
-	return binary.LittleEndian.Uint16(c), nil
+	return bd.MS.ReadUint16Endian(bd.BigEndian)
 }
 
 func (bd *dicomBuffer) ReadUint32() (uint32, error) {
-	c, err := bd.MS.Read(4)
-	if err != nil {
-		return 0, err
-	}
-	if bd.BigEndian {
-		return binary.BigEndian.Uint32(c), nil
-	}
-	return binary.LittleEndian.Uint32(c), nil
+	return bd.MS.ReadUint32Endian(bd.BigEndian)
 }
 
 func (bd *dicomBuffer) Write(data []byte, count int) (int, error) {
@@ -179,7 +172,7 @@ func (bd *dicomBuffer) WriteString(value string) {
 }
 
 func normalizeExplicitVR(tag *DICOMTag, ts *transfersyntax.TransferSyntax) string {
-	vr := strings.TrimSpace(tag.VR)
+	vr := tag.VR
 	if vr == "OB or OW" {
 		if ts != nil && ts.UID != transfersyntax.ImplicitVRLittleEndian.UID && ts.UID != transfersyntax.ExplicitVRLittleEndian.UID && ts.UID != transfersyntax.DeflatedExplicitVRLittleEndian.UID {
 			return "OB"
@@ -190,8 +183,10 @@ func normalizeExplicitVR(tag *DICOMTag, ts *transfersyntax.TransferSyntax) strin
 }
 
 func isLongExplicitVR(vr string) bool {
+	// Per DICOM PS3.5 Table 7.1-2, these VRs use 2 reserved bytes + 32-bit length.
+	// OD/OF/OL/OV were added in DICOM 2011-2019; SV/UC/UR/UV added 2014-2019.
 	switch vr {
-	case "OB", "OW", "SQ", "UN", "UT":
+	case "OB", "OD", "OF", "OL", "OV", "OW", "SQ", "SV", "UC", "UN", "UR", "UT", "UV":
 		return true
 	default:
 		return false
@@ -220,7 +215,7 @@ func (bd *dicomBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 	}
 
 	if (tag.Group != 0x0000) && (tag.Group != 0xfffe) && (internalVR) {
-		tag.VR = bd.readString(2)
+		tag.VR = bd.readVR()
 		if isLongExplicitVR(tag.VR) {
 			_, err := bd.ReadUint16()
 			if err != nil {
@@ -252,11 +247,11 @@ func (bd *dicomBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 	}
 
 	if (tag.Length != 0) && (tag.Length != 0xFFFFFFFF) {
-		if data, err := bd.MS.Read(int(tag.Length)); err == nil {
-			tag.Data = data
-		} else {
+		data, err := bd.MS.Read(int(tag.Length))
+		if err != nil {
 			return nil, err
 		}
+		tag.Data = data
 	}
 	FillTag(tag)
 	return tag, nil
@@ -270,21 +265,47 @@ func (bd *dicomBuffer) WriteTag(tag *DICOMTag, explicitVR bool) {
 func (bd *dicomBuffer) writeTag(tag *DICOMTag, explicitVR bool, ts *transfersyntax.TransferSyntax) {
 	writeVR := normalizeExplicitVR(tag, ts)
 
+	// Derive the length to serialize from the actual data length to guarantee the
+	// header length field always matches the payload bytes written.  Undefined-length
+	// (0xFFFFFFFF) tags are preserved as-is because their content is written as
+	// separate child items rather than inline data.
+	writeLen := tag.Length
+	if writeLen != 0xFFFFFFFF {
+		dataLen := uint32(len(tag.Data))
+		if dataLen < writeLen {
+			slog.Warn("media: writeTag data shorter than declared length; truncating",
+				"group", tag.Group, "element", tag.Element,
+				"declared", writeLen, "actual", dataLen)
+			writeLen = dataLen
+		}
+	}
+
 	bd.WriteUint16(tag.Group)
 	bd.WriteUint16(tag.Element)
 	if (tag.Group != 0x0000) && (tag.Group != 0xfffe) && (explicitVR) {
-		bd.MS.Write([]byte(writeVR), 2)
+		var vrBuf [2]byte
+		switch len(writeVR) {
+		case 0:
+			vrBuf[0], vrBuf[1] = ' ', ' '
+		case 1:
+			vrBuf[0] = writeVR[0]
+			vrBuf[1] = ' '
+		default:
+			vrBuf[0] = writeVR[0]
+			vrBuf[1] = writeVR[1]
+		}
+		bd.MS.Write(vrBuf[:], 2)
 		if isLongExplicitVR(writeVR) {
 			bd.WriteUint16(0)
-			bd.WriteUint32(tag.Length)
+			bd.WriteUint32(writeLen)
 		} else {
-			bd.WriteUint16(uint16(tag.Length))
+			bd.WriteUint16(uint16(writeLen))
 		}
 	} else {
-		bd.WriteUint32(tag.Length)
+		bd.WriteUint32(writeLen)
 	}
-	if (tag.Length != 0) && (tag.Length != 0xFFFFFFFF) {
-		bd.MS.Write(tag.Data, int(tag.Length))
+	if (writeLen != 0) && (writeLen != 0xFFFFFFFF) {
+		bd.MS.Write(tag.Data, int(writeLen))
 	}
 }
 
@@ -379,10 +400,13 @@ func (bd *dicomBuffer) WriteMeta(SOPClassUID string, SOPInstanceUID string, Tran
 	// Implementation Version Name
 	bd.WriteStringTag(0x02, 0x13, "SH", implementation.GetImplementationVersion(), explicitVR)
 
-	// calculate group length and go Back to group size tag
+	// Calculate group length and seek back to overwrite the placeholder.
+	// The File Meta Information is always encoded as explicit VR little endian
+	// per DICOM PS 3.10, so we use LittleEndian explicitly regardless of
+	// the dataset transfer syntax.
 	ptr := bd.GetPosition()
 	largo = uint32(bd.GetSize() - 12 - 128 - 4)
-	binary.BigEndian.PutUint32(groupLength[:], largo)
+	binary.LittleEndian.PutUint32(groupLength[:], largo)
 	bd.SetPosition(128 + 4 + 8)
 	bd.MS.Write(groupLength[:], 4)
 	bd.SetPosition(ptr)
@@ -395,9 +419,8 @@ func (bd *dicomBuffer) ReadObj(obj DICOMObject) error {
 		if err != nil {
 			return err
 		}
-		if !obj.IsExplicitVR() {
-			tag.VR = GetDictionaryVR(tag.Group, tag.Element)
-		}
+		// ReadTag already performs the dictionary VR lookup for implicit VR files;
+		// no second lookup is needed here.
 		if tag.Length%2 != 0 && tag.VR != "SQ" && tag.Length != 0xffffffff {
 			slog.Warn("media: odd-length tag", "name", tag.Name, "group", tag.Group, "element", tag.Element)
 		}
@@ -419,7 +442,7 @@ func (bd *dicomBuffer) WriteObj(obj DICOMObject) {
 
 func (bd *dicomBuffer) Send(rw *bufio.ReadWriter) error {
 	bd.SetPosition(0)
-	buffer, _ := bd.MS.Read(bd.GetSize())
+	buffer := bd.MS.GetData()
 	bd.MS.Clear()
 
 	_, err := rw.Write(buffer)
@@ -435,6 +458,100 @@ func (bd *dicomBuffer) GetAllBytes() []byte {
 }
 
 func (bd *dicomBuffer) readString(length int) string {
-	temp, _ := bd.MS.Read(length)
+	temp, err := bd.MS.Read(length)
+	if err != nil {
+		return ""
+	}
 	return string(temp)
+}
+
+// readVR reads the 2-byte VR field from the stream and returns an interned
+// string constant, avoiding the heap allocation that string() conversion
+// would otherwise cause on every explicit-VR tag.
+func (bd *dicomBuffer) readVR() string {
+	if bd.MS.Position+2 > bd.MS.Size {
+		return ""
+	}
+	b0 := bd.MS.Data[bd.MS.Position]
+	b1 := bd.MS.Data[bd.MS.Position+1]
+	bd.MS.Position += 2
+	return internVR(b0, b1)
+}
+
+// internVR returns a pre-allocated constant string for all 34 standard DICOM VRs
+// (per DICOM PS3.5 Table 7.1-1 / 7.1-2). Unknown 2-byte sequences fall back to
+// a heap-allocated string.
+func internVR(b0, b1 byte) string {
+	switch uint16(b0)<<8 | uint16(b1) {
+	case 0x4145:
+		return "AE"
+	case 0x4153:
+		return "AS"
+	case 0x4154:
+		return "AT"
+	case 0x4353:
+		return "CS"
+	case 0x4441:
+		return "DA"
+	case 0x4453:
+		return "DS"
+	case 0x4454:
+		return "DT"
+	case 0x4644:
+		return "FD"
+	case 0x464C:
+		return "FL"
+	case 0x4953:
+		return "IS"
+	case 0x4C4F:
+		return "LO"
+	case 0x4C54:
+		return "LT"
+	case 0x4F42:
+		return "OB"
+	case 0x4F44:
+		return "OD"
+	case 0x4F46:
+		return "OF"
+	case 0x4F4C:
+		return "OL"
+	case 0x4F56:
+		return "OV"
+	case 0x4F57:
+		return "OW"
+	case 0x504E:
+		return "PN"
+	case 0x5348:
+		return "SH"
+	case 0x534C:
+		return "SL"
+	case 0x5351:
+		return "SQ"
+	case 0x5353:
+		return "SS"
+	case 0x5354:
+		return "ST"
+	case 0x5356:
+		return "SV"
+	case 0x544D:
+		return "TM"
+	case 0x5543:
+		return "UC"
+	case 0x5549:
+		return "UI"
+	case 0x554C:
+		return "UL"
+	case 0x554E:
+		return "UN"
+	case 0x5552:
+		return "UR"
+	case 0x5553:
+		return "US"
+	case 0x5554:
+		return "UT"
+	case 0x5556:
+		return "UV"
+	default:
+		return string([]byte{b0, b1})
+	}
 }

@@ -3,6 +3,7 @@ package media
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -63,11 +64,38 @@ func (tag *DICOMTag) GetString() string {
 	return strings.TrimSpace(string(data[:n]))
 }
 
-// GetFloat convert tag.Data to float32
+// GetFloat decodes a DICOM FL (IEEE 754 single-precision, PS3.5).
 func (tag *DICOMTag) GetFloat() float32 {
+	if tag.Length == 4 && len(tag.Data) >= 4 && tag.VR == "FL" {
+		var bits uint32
+		if tag.BigEndian {
+			bits = binary.BigEndian.Uint32(tag.Data)
+		} else {
+			bits = binary.LittleEndian.Uint32(tag.Data)
+		}
+		return math.Float32frombits(bits)
+	}
 	val := tag.GetString()
 	if s, err := strconv.ParseFloat(val, 32); err == nil {
 		return float32(s)
+	}
+	return 0.0
+}
+
+// GetFloat64 decodes a DICOM FD (IEEE 754 double-precision, PS3.5).
+func (tag *DICOMTag) GetFloat64() float64 {
+	if tag.Length == 8 && len(tag.Data) >= 8 && tag.VR == "FD" {
+		var bits uint64
+		if tag.BigEndian {
+			bits = binary.BigEndian.Uint64(tag.Data)
+		} else {
+			bits = binary.LittleEndian.Uint64(tag.Data)
+		}
+		return math.Float64frombits(bits)
+	}
+	val := tag.GetString()
+	if s, err := strconv.ParseFloat(val, 64); err == nil {
+		return s
 	}
 	return 0.0
 }
@@ -76,7 +104,7 @@ func (tag *DICOMTag) GetFloat() float32 {
 func (tag *DICOMTag) WriteSeq(group uint16, element uint16, seq DICOMObject) {
 	bufdata := &dicomBuffer{
 		BigEndian: false,
-		MS:        NewEmptyMemoryStream(),
+		MS:        newEmptyMemoryStream(),
 	}
 
 	bufdata.BigEndian = seq.IsBigEndian()
@@ -99,7 +127,7 @@ func (tag *DICOMTag) WriteSeq(group uint16, element uint16, seq DICOMObject) {
 	}
 	if tag.Length > 0 {
 		bufdata.SetPosition(0)
-		data, _ := bufdata.MS.Read(int(tag.Length))
+		data, _ := bufdata.MS.ReadSlice(int(tag.Length))
 		tag.Data = data
 	}
 }
@@ -109,7 +137,7 @@ func (tag *DICOMTag) ReadSeq(ExplicitVR bool) DICOMObject {
 	seq := NewEmptyDCMObj()
 	bufdata := &dicomBuffer{
 		BigEndian: false,
-		MS:        NewEmptyMemoryStream(),
+		MS:        newEmptyMemoryStream(),
 	}
 
 	bufdata.Write(tag.Data, int(tag.Length))
@@ -118,7 +146,7 @@ func (tag *DICOMTag) ReadSeq(ExplicitVR bool) DICOMObject {
 	for bufdata.MS.GetPosition() < bufdata.MS.GetSize() {
 		temptag, err := bufdata.ReadTag(ExplicitVR)
 		if err != nil {
-			continue
+			break // position does not advance on error; continuing would loop forever
 		}
 
 		if !ExplicitVR {

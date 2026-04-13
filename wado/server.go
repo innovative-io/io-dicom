@@ -321,7 +321,14 @@ func writeMultipartDICOM(w http.ResponseWriter, objects []media.DICOMObject) {
 		if partErr != nil {
 			break
 		}
-		if _, writeErr := part.Write(obj.WriteToBytes()); writeErr != nil {
+		payload := obj.WriteToBytes()
+		if len(payload) == 0 {
+			if err := media.ValidateFileWrite(obj); err != nil {
+				slog.Warn("wado: DICOM object not serializable", "err", err)
+			}
+			break
+		}
+		if _, writeErr := part.Write(payload); writeErr != nil {
 			slog.Warn("wado: failed to write DICOM object", "err", writeErr)
 			break
 		}
@@ -362,8 +369,10 @@ func objectToJSONTags(obj media.DICOMObject) map[string]dicomJSONTag {
 			entry.Value = []interface{}{tag.GetUShort()}
 		case "UL":
 			entry.Value = []interface{}{tag.GetUInt()}
-		case "FL", "FD":
+		case "FL":
 			entry.Value = []interface{}{tag.GetFloat()}
+		case "FD":
+			entry.Value = []interface{}{tag.GetFloat64()}
 		case "OB", "OW", "OD", "OF", "UN":
 			// Inline small bulk data; larger values are omitted for JSON responses.
 			if len(tag.Data) > 0 && len(tag.Data) <= 4096 {

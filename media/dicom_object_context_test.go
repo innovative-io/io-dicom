@@ -51,7 +51,6 @@ func TestChangeTransferSyntaxContextPropagatesCodecContext(t *testing.T) {
 		TransferSyntax: transfersyntax.JPEG2000Lossless,
 		ExplicitVR:     true,
 		BigEndian:      false,
-		SQtag:          &DICOMTag{},
 	}
 	obj.WriteString(tags.PhotometricInterpretation, "MONOCHROME2")
 	obj.WriteUint16(tags.Rows, 1)

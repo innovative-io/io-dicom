@@ -28,6 +28,18 @@ var codeByKey map[uint32]*tags.Tag
 var codeVRByKey map[uint32]string
 var initOnce sync.Once
 
+// unknownTag is a package-level sentinel returned by GetDictionaryTag for
+// unrecognised group/element pairs. Using a single shared instance avoids
+// a heap allocation on every cache miss in the hot tag-parsing loop.
+var unknownTag = &tags.Tag{
+	Group:       0,
+	Element:     0,
+	VR:          "UN",
+	VM:          "",
+	Name:        "Unknown",
+	Description: "Unknown",
+}
+
 func dictionaryKey(group uint16, element uint16) uint32 {
 	return uint32(group)<<16 | uint32(element)
 }
@@ -67,14 +79,7 @@ func GetDictionaryTag(group uint16, element uint16) *tags.Tag {
 	if tag, ok := codeByKey[dictionaryKey(group, element)]; ok {
 		return tag
 	}
-	return &tags.Tag{
-		Group:       0,
-		Element:     0,
-		VR:          "UN",
-		VM:          "",
-		Name:        "Unknown",
-		Description: "Unknown",
-	}
+	return unknownTag
 }
 
 // GetDictionaryVR - get info from Dictionary

@@ -3,14 +3,12 @@ package httpclient
 import (
 	"bytes"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -54,29 +52,6 @@ func NewHTTPClient(params HTTPClientParams) HTTPClient {
 	return &httpClient{
 		Params: params,
 	}
-}
-
-// GetOAuthToken - Gets a token from OAuth2 endpoint
-func GetOAuthToken(tokenURL string, form url.Values) (map[string]string, error) {
-	params := HTTPClientParams{
-		URL:         tokenURL,
-		ContentType: "application/x-www-form-urlencoded",
-	}
-
-	client := NewHTTPClient(params)
-
-	response, err := client.Post(strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-
-	token := make(map[string]string)
-	err = json.Unmarshal(response, &token)
-	if err != nil {
-		return nil, err
-	}
-
-	return token, nil
 }
 
 // Delete sends DELETE request
