@@ -22,6 +22,9 @@ var sampleFilesForIndex = []string{
 
 // TestParseIndexFromFile_Smoke verifies basic success on well-known sample files.
 func TestParseIndexFromFile_Smoke(t *testing.T) {
+	if _, err := os.Stat(sampleFilesForIndex[0]); err != nil {
+		t.Skipf("sample fixtures unavailable: %v", err)
+	}
 	for _, path := range sampleFilesForIndex {
 		t.Run(path, func(t *testing.T) {
 			rec, err := ParseIndexFromFile(path)
@@ -43,6 +46,9 @@ func TestParseIndexFromFile_Smoke(t *testing.T) {
 
 // TestParseIndexFromBytes_Smoke verifies ParseIndexFromBytes on the same set.
 func TestParseIndexFromBytes_Smoke(t *testing.T) {
+	if _, err := os.Stat(sampleFilesForIndex[0]); err != nil {
+		t.Skipf("sample fixtures unavailable: %v", err)
+	}
 	for _, path := range sampleFilesForIndex {
 		t.Run(path, func(t *testing.T) {
 			data, err := os.ReadFile(path)
@@ -67,6 +73,9 @@ func TestParseIndexFromBytes_Smoke(t *testing.T) {
 // it compares every IndexRecord field against the corresponding tag extracted
 // by a full NewDCMObjFromFile parse.
 func TestParseIndexMatchesFullParse(t *testing.T) {
+	if _, err := os.Stat(sampleFilesForIndex[0]); err != nil {
+		t.Skipf("sample fixtures unavailable: %v", err)
+	}
 	for _, path := range sampleFilesForIndex {
 		t.Run(path, func(t *testing.T) {
 			rec, err := ParseIndexFromFile(path)
@@ -143,6 +152,9 @@ func TestParseIndexFromBytes_TooSmall(t *testing.T) {
 // and ParseIndexFromFile produce identical records for the same file.
 func TestParseIndexFromBytes_FileBytesMatchFile(t *testing.T) {
 	path := "../samples/jpeg8.dcm"
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("sample fixtures unavailable: %v", err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
