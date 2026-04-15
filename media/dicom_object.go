@@ -40,6 +40,7 @@ type DICOMObject interface {
 	SetBigEndian(bigEndian bool)
 	GetDate(tag *tags.Tag) time.Time
 	GetPixelData(frame int) ([]byte, error)
+	GetDecompressedFrame(ctx context.Context, frameIndex int) ([]byte, error)
 	GetTagAt(i int) *DICOMTag
 	GetTag(tag *tags.Tag) *DICOMTag
 	GetTagGE(group uint16, element uint16) *DICOMTag
@@ -739,10 +740,9 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 				} else {
 					frames = 1
 				}
-				if sizePx == 0 || sizePx > uint64(maxPixelDataBytes) {
+				if sizePx == 0 {
 					return nil, fmt.Errorf("DICOMObject::GetPixelData, invalid pixel data size %d", sizePx)
 				}
-				size := uint32(sizePx)
 
 				if frame >= int(frames) {
 					return nil, errors.New("invalid frame")
@@ -802,6 +802,11 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 
 					return nil, fmt.Errorf("frame %d out of range", frame)
 				} else {
+					// Uncompressed path: total pixel data must fit within the allocation cap.
+					if sizePx > uint64(maxPixelDataBytes) {
+						return nil, fmt.Errorf("DICOMObject::GetPixelData, invalid pixel data size %d", sizePx)
+					}
+					size := uint32(sizePx)
 					if RGB && (planar == 1) {
 						imgSize := size / frames
 						off := imgSize * uint32(frame)
@@ -831,6 +836,237 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("there was an error getting pixel data")
+}
+
+// decompressSingleFrame decodes a single compressed frame into out.
+// The caller must pre-allocate out with the exact uncompressed frame size.
+func decompressSingleFrame(ctx context.Context, tsUID string, compressed []byte, bitsa uint16, photoInt string, out []byte) error {
+	compLen := uint32(len(compressed))
+	outLen := uint32(len(out))
+	switch tsUID {
+	case transfersyntax.DeflatedImageFrameCompression.UID:
+		inflated, err := transcoder.InflateFrame(compressed, int(outLen))
+		if err != nil {
+			return err
+		}
+		copy(out, inflated)
+	case transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian.UID:
+		if int(outLen) > len(compressed) {
+			return errors.New("encapsulated uncompressed frame too small")
+		}
+		copy(out, compressed[:outLen])
+	case transfersyntax.RLELossless.UID:
+		return transcoder.RLEdecode(compressed, out, compLen, outLen, photoInt)
+	case transfersyntax.JPEGLosslessSV1.UID,
+		transfersyntax.JPEGLossless.UID:
+		if bitsa == 8 {
+			return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
+		}
+		return jpeg.DIJG16decodeContext(ctx, compressed, compLen, out, outLen)
+	case transfersyntax.JPEGBaseline8Bit.UID:
+		if bitsa == 8 {
+			return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
+		}
+		return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
+	case transfersyntax.JPEGExtended12Bit.UID:
+		return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
+	case transfersyntax.JPEGLSLossless.UID,
+		transfersyntax.JPEGLSNearLossless.UID:
+		return jpegls.JLSdecodeContext(ctx, compressed, compLen, out)
+	case transfersyntax.JPEG2000Lossless.UID,
+		transfersyntax.JPEG2000MCLossless.UID,
+		transfersyntax.HTJ2KLossless.UID,
+		transfersyntax.HTJ2KLosslessRPCL.UID,
+		transfersyntax.JPEG2000.UID,
+		transfersyntax.JPEG2000MC.UID,
+		transfersyntax.HTJ2K.UID:
+		return jpeg2000.J2KdecodeContext(ctx, compressed, compLen, out)
+	case transfersyntax.JPEGXLLossless.UID,
+		transfersyntax.JPEGXLJPEGRecompression.UID,
+		transfersyntax.JPEGXL.UID:
+		return jpegxl.JXLdecodeContext(ctx, compressed, compLen, out)
+	case transfersyntax.JPIPHTJ2KReferenced.UID,
+		transfersyntax.JPIPHTJ2KReferencedDeflate.UID:
+		return jpip.JPIPdecodeContext(ctx, compressed, compLen, out, tsUID)
+	case transfersyntax.MPEG2MPML.UID,
+		transfersyntax.MPEG2MPMLF.UID,
+		transfersyntax.MPEG2MPHL.UID,
+		transfersyntax.MPEG2MPHLF.UID,
+		transfersyntax.MPEG4HP41.UID,
+		transfersyntax.MPEG4HP41F.UID,
+		transfersyntax.MPEG4HP41BD.UID,
+		transfersyntax.MPEG4HP41BDF.UID,
+		transfersyntax.MPEG4HP422D.UID,
+		transfersyntax.MPEG4HP422DF.UID,
+		transfersyntax.MPEG4HP423D.UID,
+		transfersyntax.MPEG4HP423DF.UID,
+		transfersyntax.MPEG4HP42STEREO.UID,
+		transfersyntax.MPEG4HP42STEREOF.UID,
+		transfersyntax.HEVCMP51.UID,
+		transfersyntax.HEVCM10P51.UID:
+		return mpeg.MPEGdecodeContext(ctx, compressed, compLen, out, tsUID)
+	case transfersyntax.SMPTEST211020UncompressedProgressiveActiveVideo.UID,
+		transfersyntax.SMPTEST211020UncompressedInterlacedActiveVideo.UID,
+		transfersyntax.SMPTEST211030PCMDigitalAudio.UID:
+		return smpte2110.SMPTE2110decodeContext(ctx, compressed, compLen, out, tsUID)
+	default:
+		return fmt.Errorf("unsupported transfer syntax for single-frame decompression: %s", tsUID)
+	}
+	return nil
+}
+
+// GetDecompressedFrame returns the raw uncompressed pixel bytes for the requested frame.
+// Unlike GetPixelData, this method only allocates memory for a single frame's uncompressed
+// data, making it safe for large multi-frame objects whose total pixel data exceeds
+// maxPixelDataBytes. For encapsulated (compressed) transfer syntaxes the frame is
+// extracted from its fragment and decompressed in-place.
+func (obj *dicomObject) GetDecompressedFrame(ctx context.Context, frameIndex int) ([]byte, error) {
+	var rows, cols, bitsa, planar uint16
+	var photoInt string
+	sq := 0
+	frames := uint32(0)
+	RGB := false
+	icon := false
+
+	if !transfersyntax.SupportedTransferSyntax(obj.TransferSyntax.UID) {
+		return nil, fmt.Errorf("unsupported transfer syntax %s", obj.TransferSyntax.Name)
+	}
+
+	for i := 0; i < len(obj.Tags); i++ {
+		tag := obj.GetTagAt(i)
+		if ((tag.VR == "SQ") && (tag.Length == 0xFFFFFFFF)) || ((tag.Group == 0xFFFE) && (tag.Element == 0xE000) && (tag.Length == 0xFFFFFFFF)) {
+			sq++
+		}
+		if sq == 0 {
+			if (tag.Group == 0x0028) && (!icon) {
+				switch tag.Element {
+				case 0x04:
+					photoInt = tag.GetString()
+					if !strings.Contains(photoInt, "MONO") {
+						RGB = true
+					}
+				case 0x06:
+					planar = tag.GetUShort()
+				case 0x08:
+					uframes, err := strconv.Atoi(tag.GetString())
+					if err != nil {
+						frames = 0
+					} else {
+						frames = uint32(uframes)
+					}
+				case 0x10:
+					rows = tag.GetUShort()
+				case 0x11:
+					cols = tag.GetUShort()
+				case 0x0100:
+					bitsa = tag.GetUShort()
+				}
+			}
+			if (tag.Group == 0x0088) && (tag.Element == 0x0200) && (tag.Length == 0xFFFFFFFF) {
+				icon = true
+			}
+			if (tag.Group == 0x6003) && (tag.Element == 0x1010) && (tag.Length == 0xFFFFFFFF) {
+				icon = true
+			}
+			if (tag.Group == 0x7FE0) && (tag.Element == 0x0010) && (!icon) {
+				// Per-frame size only — no frames multiplication.
+				frameSz := uint64(cols) * uint64(rows) * uint64(bitsa) / 8
+				if RGB {
+					frameSz = 3 * frameSz
+				}
+				if frameSz == 0 || frameSz > uint64(maxPixelDataBytes) {
+					return nil, fmt.Errorf("DICOMObject::GetDecompressedFrame, invalid frame size %d", frameSz)
+				}
+				if frames == 0 {
+					frames = 1
+				}
+				if frameIndex >= int(frames) {
+					return nil, errors.New("invalid frame index")
+				}
+				frameSize := uint32(frameSz)
+
+				if tag.Length == 0xFFFFFFFF {
+					// Encapsulated (compressed): extract fragment bytes then decompress.
+					if i+1 >= len(obj.Tags) {
+						return nil, errors.New("missing basic offset table")
+					}
+					botItem := obj.GetTagAt(i + 1)
+					if botItem == nil || botItem.Group != 0xFFFE || botItem.Element != 0xE000 {
+						return nil, errors.New("invalid encapsulated pixel data layout")
+					}
+					fragments := make([][]byte, 0)
+					fragmentPayloadSizes := make([]int, 0)
+					for tagIdx := i + 2; tagIdx < len(obj.Tags); tagIdx++ {
+						t := obj.GetTagAt(tagIdx)
+						if t == nil {
+							continue
+						}
+						if t.Group == 0xFFFE && t.Element == 0xE0DD {
+							break
+						}
+						if t.Group == 0xFFFE && t.Element == 0xE000 {
+							fragments = append(fragments, t.Data)
+							fragmentPayloadSizes = append(fragmentPayloadSizes, len(t.Data))
+						}
+					}
+					if len(fragments) == 0 {
+						return nil, fmt.Errorf("frame %d out of range", frameIndex)
+					}
+					var compressedFrame []byte
+					if frames <= 1 {
+						compressedFrame = joinFragments(fragments)
+					} else if len(fragments) == int(frames) {
+						compressedFrame = fragments[frameIndex]
+					} else {
+						botOffsets := parseBasicOffsetTable(botItem.Data)
+						if len(botOffsets) >= int(frames) {
+							start, end, ok := frameFragmentRangeByBOT(botOffsets[:frames], frameIndex, fragmentPayloadSizes)
+							if ok {
+								compressedFrame = joinFragments(fragments[start:end])
+							}
+						}
+						if compressedFrame == nil {
+							if frameIndex == 0 {
+								compressedFrame = joinFragments(fragments)
+							} else {
+								return nil, fmt.Errorf("frame %d out of range", frameIndex)
+							}
+						}
+					}
+					out := make([]byte, frameSize)
+					if err := decompressSingleFrame(ctx, obj.TransferSyntax.UID, compressedFrame, bitsa, photoInt, out); err != nil {
+						return nil, fmt.Errorf("DICOMObject::GetDecompressedFrame, decompress failed: %w", err)
+					}
+					return out, nil
+				}
+
+				// Uncompressed path: slice the requested frame from the flat pixel data.
+				// The full pixel data is already in tag.Data (loaded by NewDCMObjFromFile).
+				if RGB && (planar == 1) {
+					off := frameSize * uint32(frameIndex)
+					pixels := frameSize / 3
+					img := make([]byte, frameSize)
+					for j := uint32(0); j < pixels; j++ {
+						img[3*j] = tag.Data[j+off]
+						img[3*j+1] = tag.Data[j+pixels+off]
+						img[3*j+2] = tag.Data[j+2*pixels+off]
+					}
+					return img, nil
+				}
+				offset := uint32(frameIndex) * frameSize
+				if offset+frameSize > uint32(len(tag.Data)) {
+					return nil, fmt.Errorf("frame %d out of range", frameIndex)
+				}
+				out := make([]byte, frameSize)
+				copy(out, tag.Data[offset:offset+frameSize])
+				return out, nil
+			}
+		}
+		if ((tag.Group == 0xFFFE) && (tag.Element == 0xE00D)) || ((tag.Group == 0xFFFE) && (tag.Element == 0xE0DD)) {
+			sq--
+		}
+	}
+	return nil, errors.New("DICOMObject::GetDecompressedFrame, pixel data tag not found")
 }
 
 func (obj *dicomObject) ChangeTransferSyntax(outTS *transfersyntax.TransferSyntax) error {

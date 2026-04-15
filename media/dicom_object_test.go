@@ -1,6 +1,8 @@
 package media
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"testing"
 
@@ -998,5 +1000,123 @@ func TestGetStringGE_ReturnsEmptyWhenTagAbsent(t *testing.T) {
 	got := obj.GetStringGE(0x9999, 0x9999)
 	if got != "" {
 		t.Errorf("GetStringGE: want empty string for absent tag, got %q", got)
+	}
+}
+
+// ── GetPixelData / GetDecompressedFrame large-frame-count tests ──────────────
+
+// TestGetPixelData_LargeEncapsulatedTotalSizeNoLongerRejected verifies that
+// GetPixelData succeeds for encapsulated pixel data even when the theoretical
+// uncompressed total size exceeds maxPixelDataBytes. The function should return
+// the raw compressed bytes for the requested frame without allocating the full
+// uncompressed buffer.
+func TestGetPixelData_LargeEncapsulatedTotalSizeNoLongerRejected(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.JPEGBaseline8Bit)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+
+	// 16384×16384 pixels × 3 bytes × 5000 frames ≈ 4 TB uncompressed — well above 512 MiB cap.
+	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
+	obj.WriteStringGE(0x0028, 0x0008, "IS", "5000")
+	obj.WriteUint16GE(0x0028, 0x0010, "US", 16384)
+	obj.WriteUint16GE(0x0028, 0x0011, "US", 16384)
+	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
+
+	compressedBytes := []byte{0xFF, 0xD8, 0x01, 0x02} // mock compressed frame
+	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(compressedBytes)), VR: "DL", Data: compressedBytes, BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+
+	frame0, err := obj.GetPixelData(0)
+	if err != nil {
+		t.Fatalf("GetPixelData on large encapsulated object failed: %v", err)
+	}
+	if len(frame0) != len(compressedBytes) {
+		t.Fatalf("expected %d bytes, got %d", len(compressedBytes), len(frame0))
+	}
+}
+
+// TestGetDecompressedFrame_UncompressedMultiFrame verifies that GetDecompressedFrame
+// correctly slices individual frames from flat uncompressed pixel data.
+func TestGetDecompressedFrame_UncompressedMultiFrame(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+
+	frame0Data := []byte{10, 20, 30, 40}
+	frame1Data := []byte{50, 60, 70, 80}
+	pixelData := append(frame0Data, frame1Data...)
+
+	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
+	obj.WriteStringGE(0x0028, 0x0008, "IS", "2")
+	obj.WriteUint16GE(0x0028, 0x0010, "US", 2) // rows
+	obj.WriteUint16GE(0x0028, 0x0011, "US", 2) // cols
+	obj.WriteUint16GE(0x0028, 0x0100, "US", 8) // bits allocated
+	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: uint32(len(pixelData)), VR: "OB", Data: pixelData, BigEndian: false})
+
+	ctx := context.Background()
+
+	f0, err := obj.GetDecompressedFrame(ctx, 0)
+	if err != nil {
+		t.Fatalf("GetDecompressedFrame(0) failed: %v", err)
+	}
+	if !bytes.Equal(f0, frame0Data) {
+		t.Fatalf("frame0: got %v, want %v", f0, frame0Data)
+	}
+
+	f1, err := obj.GetDecompressedFrame(ctx, 1)
+	if err != nil {
+		t.Fatalf("GetDecompressedFrame(1) failed: %v", err)
+	}
+	if !bytes.Equal(f1, frame1Data) {
+		t.Fatalf("frame1: got %v, want %v", f1, frame1Data)
+	}
+}
+
+// TestGetDecompressedFrame_LargeEncapsulatedTotalSizeOK verifies that
+// GetDecompressedFrame succeeds for an encapsulated object whose theoretical
+// total uncompressed size exceeds maxPixelDataBytes — the key scenario that
+// triggered the original "invalid pixel data size" error.
+//
+// Because the test uses ExplicitVRLittleEndian for the target after mocking, we
+// use EncapsulatedUncompressedExplicitVRLittleEndian so decompressSingleFrame
+// can copy without needing an external codec.
+func TestGetDecompressedFrame_LargeEncapsulatedTotalSizeOK(t *testing.T) {
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+
+	// 512×512 × 8 bits × 8192 frames = 2 GiB uncompressed — exceeds 512 MiB cap.
+	const rows, cols, bits, frames = 512, 512, 8, 8192
+	framePayload := make([]byte, rows*cols) // one real frame of zeros
+	for i := range framePayload {
+		framePayload[i] = byte(i % 256)
+	}
+
+	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
+	obj.WriteStringGE(0x0028, 0x0008, "IS", "8192")
+	obj.WriteUint16GE(0x0028, 0x0010, "US", rows)
+	obj.WriteUint16GE(0x0028, 0x0011, "US", cols)
+	obj.WriteUint16GE(0x0028, 0x0100, "US", bits)
+
+	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT
+	// Add only one real fragment — requesting frame 0 should use the single fragment.
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(framePayload)), VR: "DL", Data: framePayload, BigEndian: false})
+	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+
+	out, err := obj.GetDecompressedFrame(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("GetDecompressedFrame failed for large encapsulated object: %v", err)
+	}
+	if len(out) != rows*cols {
+		t.Fatalf("expected %d bytes, got %d", rows*cols, len(out))
+	}
+	if out[255] != framePayload[255] {
+		t.Fatalf("pixel mismatch at index 255: got %d, want %d", out[255], framePayload[255])
 	}
 }
