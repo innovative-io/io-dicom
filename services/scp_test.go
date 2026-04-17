@@ -164,6 +164,57 @@ func TestSCP_CFindRejectsInvalidQueryRetrieveLevel(t *testing.T) {
 	}
 }
 
+func TestSCP_CFindAllowsEmptyQueryRetrieveLevelForWorklist(t *testing.T) {
+	_, testSCP := StartSCP(t, 1048)
+
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
+		return true
+	})
+	testSCP.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, findLevel string, data media.DICOMObject, emit func(media.DICOMObject)) (CFindResult, error) {
+		if findLevel != "" {
+			t.Fatalf("findLevel = %q, want empty string for worklist", findLevel)
+		}
+		result := media.NewEmptyDCMObj()
+		result.WriteString(tags.PatientID, "MWL-001")
+		result.WriteString(tags.PatientName, "Test^Worklist")
+		emit(result)
+		return CFindResult{Status: dicomstatus.Success}, nil
+	})
+
+	media.InitDict()
+	dest := &network.Destination{
+		Name:      "Worklist SCP",
+		CalledAE:  "SCP",
+		CallingAE: "SCU",
+		HostName:  "localhost",
+		Port:      1048,
+		IsCFind:   true,
+	}
+
+	query := media.NewEmptyDCMObj()
+	query.WriteString(tags.PatientName, "Test*")
+
+	scu := NewSCU(dest)
+	results := 0
+	scu.SetOnCFindResult(func(result media.DICOMObject) {
+		results++
+	})
+
+	count, status, err := scu.WorklistSCU(context.Background(), query, 5)
+	if err != nil {
+		t.Fatalf("WorklistSCU: %v", err)
+	}
+	if status != dicomstatus.Success {
+		t.Fatalf("WorklistSCU status = 0x%04X, want Success", status)
+	}
+	if count != 1 {
+		t.Fatalf("WorklistSCU count = %d, want 1", count)
+	}
+	if results != 1 {
+		t.Fatalf("callback results = %d, want 1", results)
+	}
+}
+
 func TestSCP_CCancelTracking_ConsumeOnce(t *testing.T) {
 	s := NewSCP(1050).(*scp)
 

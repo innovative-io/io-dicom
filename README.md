@@ -137,7 +137,9 @@ Notes:
 ## Query/Retrieve Identifier Validation
 
 - SCP validates `QueryRetrieveLevel` for C-FIND, C-GET, and C-MOVE requests.
-- Accepted levels are `PATIENT`, `STUDY`, `SERIES`, `IMAGE`, and `FRAME`.
+- Accepted query/retrieve levels are `PATIENT`, `STUDY`, `SERIES`, `IMAGE`, and `FRAME`.
+- C-FIND also accepts an empty `QueryRetrieveLevel` for Modality Worklist style queries.
+- C-GET and C-MOVE still require an explicit non-empty query/retrieve level.
 - Invalid levels return `0xA900` (`FailureIdentifierDoesNotMatchSOPClass`) before handler execution.
 
 ## Breaking Changes

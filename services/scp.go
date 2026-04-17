@@ -245,6 +245,13 @@ func isValidQueryRetrieveLevel(level string) bool {
 	}
 }
 
+func isValidCFindQueryRetrieveLevel(level string) bool {
+	if strings.TrimSpace(level) == "" {
+		return true
+	}
+	return isValidQueryRetrieveLevel(level)
+}
+
 func (s *scp) markCanceled(messageID uint16) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -836,7 +843,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 				slog.Error("scp: C-Find failed to read request", "ERROR", err.Error())
 				return
 			}
-			if !isValidQueryRetrieveLevel(ddo.GetString(tags.QueryRetrieveLevel)) {
+			if !isValidCFindQueryRetrieveLevel(ddo.GetString(tags.QueryRetrieveLevel)) {
 				if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), dicomstatus.FailureIdentifierDoesNotMatchSOPClass); err != nil {
 					slog.Error("scp: C-Find failed to write invalid-identifier response", "ERROR", err.Error())
 					return
