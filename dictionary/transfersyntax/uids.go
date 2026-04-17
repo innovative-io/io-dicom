@@ -86,3 +86,11 @@ func SupportedTransferSyntax(uid string) bool {
 	}
 	return false
 }
+
+func GetSupportedTransferSyntaxUIDs() []string {
+	uids := make([]string, 0, len(supportedTransferSyntaxes))
+	for _, ts := range supportedTransferSyntaxes {
+		uids = append(uids, ts.UID)
+	}
+	return uids
+}

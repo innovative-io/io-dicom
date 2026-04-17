@@ -41,6 +41,11 @@ type scu struct {
 	onCGetStore   func(data media.DICOMObject) uint16
 }
 
+type associationPresentationContext struct {
+	abstractSyntax   string
+	transferSyntaxes []string
+}
+
 // NewSCU - Creates an interface to scu
 func NewSCU(destination *network.Destination) SCU {
 	return &scu{
@@ -138,7 +143,17 @@ func (d *scu) MoveSCU(ctx context.Context, destAET string, Query media.DICOMObje
 func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) (uint16, error) {
 	pdu := network.NewPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(ctx, pdu, sopclass.StudyRootQueryRetrieveInformationModelGet.UID, []string{}, timeout); err != nil {
+	contexts := []associationPresentationContext{{
+		abstractSyntax: sopclass.StudyRootQueryRetrieveInformationModelGet.UID,
+	}}
+	storageTransferSyntaxes := transfersyntax.GetSupportedTransferSyntaxUIDs()
+	for _, storageClass := range sopclass.GetStorageSOPClasses() {
+		contexts = append(contexts, associationPresentationContext{
+			abstractSyntax:   storageClass.UID,
+			transferSyntaxes: storageTransferSyntaxes,
+		})
+	}
+	if err := d.openAssociationWithContexts(ctx, pdu, contexts, timeout); err != nil {
 		return dicomstatus.FailureProcessingFailure, err
 	}
 
@@ -223,18 +238,27 @@ func (d *scu) SetOnCGetStore(f func(data media.DICOMObject) uint16) {
 }
 
 func (d *scu) openAssociation(ctx context.Context, pdu network.PDUService, abstractSyntax string, transferSyntaxes []string, timeout int) error {
+	return d.openAssociationWithContexts(ctx, pdu, []associationPresentationContext{{
+		abstractSyntax:   abstractSyntax,
+		transferSyntaxes: transferSyntaxes,
+	}}, timeout)
+}
+
+func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUService, contexts []associationPresentationContext, timeout int) error {
 	pdu.SetCallingAE(d.destination.CallingAE)
 	pdu.SetCalledAE(d.destination.CalledAE)
 	pdu.SetTimeout(timeout)
 
 	network.Resetuniq()
-	presContext := network.NewPresentationContext()
-	presContext.SetAbstractSyntax(abstractSyntax)
-	for _, ts := range transferSyntaxes {
-		presContext.AddTransferSyntax(ts)
+	for _, contextSpec := range contexts {
+		presContext := network.NewPresentationContext()
+		presContext.SetAbstractSyntax(contextSpec.abstractSyntax)
+		for _, ts := range contextSpec.transferSyntaxes {
+			presContext.AddTransferSyntax(ts)
+		}
+		presContext.AddTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+		pdu.AddPresContexts(presContext)
 	}
-	presContext.AddTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
-	pdu.AddPresContexts(presContext)
 
 	if d.destination.IsTLS {
 		return pdu.ConnectTLS(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port), d.destination.TLSConfig)

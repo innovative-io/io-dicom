@@ -592,6 +592,9 @@ scp.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, 
   return services.CGetResult{Status: dicomstatus.Success, Remaining: 0, Completed: uint16(completed), Failed: uint16(failed)}, nil
 })
 
+// GetSCU negotiates storage presentation contexts automatically so C-GET SCPs
+// can return matching instances as C-STORE sub-operations on the same association.
+
 scp.OnCMoveRequest(func(ctx context.Context, request network.AssociationRequest, moveDestAE string, moveLevel string, query media.DICOMObject, emit func(services.CMoveProgress)) (services.CMoveResult, error) {
   query.DumpTags()
   return services.CMoveResult{Status: dicomstatus.Success}, nil

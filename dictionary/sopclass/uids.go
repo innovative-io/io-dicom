@@ -1,5 +1,7 @@
 package sopclass
 
+import "strings"
+
 type SOPClass struct {
 	UID         string
 	Name        string
@@ -23,4 +25,14 @@ func GetSOPClassFromUID(uid string) *SOPClass {
 		}
 	}
 	return nil
+}
+
+func GetStorageSOPClasses() []*SOPClass {
+	storageClasses := make([]*SOPClass, 0)
+	for _, sop := range sopClasses {
+		if strings.HasPrefix(sop.UID, "1.2.840.10008.5.1.4.1.1.") {
+			storageClasses = append(storageClasses, sop)
+		}
+	}
+	return storageClasses
 }
