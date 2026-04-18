@@ -15,8 +15,8 @@ Innovative IO DICOM Golang Library
   - `cmd/compare/`: DICOM metadata comparison utility
   - `cmd/utilities/`: helper binary for utility workflows
 - `media/`: DICOM object model, parsing, encoding, and pixel pipeline orchestration
-- `network/`: DICOM network protocol data units and association primitives
-- `services/`: SCU/SCP high-level service APIs
+- `network/`: DICOM network protocol data units and association primitives, including optional raw encoded PDU capture callbacks at the transport boundary that expose exact inbound wire bytes and exact outbound serialized bytes
+- `services/`: SCU/SCP high-level service APIs, including plumbing for session-level raw PDU observers
 - `dimse/`: DIMSE command handlers (C-ECHO, C-FIND, C-GET, C-MOVE, C-STORE, N-service response helpers)
 - `dictionary/`: DICOM tags, SOP classes, transfer syntaxes, coding schemes
 - `codecs/jpeg/`: JPEG codec implementation and pure-Go fallback behavior

@@ -125,6 +125,7 @@ type SCP interface {
 	// OnCEchoRequest registers an optional handler invoked for every C-ECHO
 	// request. Return false to reject the echo (no response is sent).
 	OnCEchoRequest(f func(request network.AssociationRequest) bool)
+	OnRawPDU(f func(event network.RawPDUEvent))
 }
 
 // CGetProgress reports incremental sub-operation counts sent back to a C-GET SCU during retrieval.
@@ -200,6 +201,7 @@ type scp struct {
 	onCStoreRequest      func(request network.AssociationRequest, data media.DICOMObject) uint16
 	onCCancelRequest     func(request network.AssociationRequest, messageID uint16)
 	onCEchoRequest       func(request network.AssociationRequest) bool
+	onRawPDU             func(event network.RawPDUEvent)
 	canceledMessageIDs   map[uint16]struct{}
 }
 
@@ -776,7 +778,9 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 	s.mu.RLock()
 	assocHandler := s.onAssociationRequest
+	onRawPDU := s.onRawPDU
 	s.mu.RUnlock()
+	pdu.SetOnRawPDU(onRawPDU)
 	if assocHandler != nil {
 		pdu.SetOnAssociationRequest(assocHandler)
 	}
@@ -1190,4 +1194,10 @@ func (s *scp) OnCEchoRequest(f func(request network.AssociationRequest) bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onCEchoRequest = f
+}
+
+func (s *scp) OnRawPDU(f func(event network.RawPDUEvent)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onRawPDU = f
 }

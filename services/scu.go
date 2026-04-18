@@ -32,6 +32,7 @@ type SCU interface {
 	// SCP (use dicomstatus.Success to accept). If not set, all C-STOREs are
 	// accepted with Success and the data is discarded.
 	SetOnCGetStore(f func(data media.DICOMObject) uint16)
+	SetOnRawPDU(f func(event network.RawPDUEvent))
 }
 
 type scu struct {
@@ -39,6 +40,7 @@ type scu struct {
 	onCFindResult func(result media.DICOMObject)
 	onCMoveResult func(result media.DICOMObject)
 	onCGetStore   func(data media.DICOMObject) uint16
+	onRawPDU      func(event network.RawPDUEvent)
 }
 
 type associationPresentationContext struct {
@@ -237,6 +239,10 @@ func (d *scu) SetOnCGetStore(f func(data media.DICOMObject) uint16) {
 	d.onCGetStore = f
 }
 
+func (d *scu) SetOnRawPDU(f func(event network.RawPDUEvent)) {
+	d.onRawPDU = f
+}
+
 func (d *scu) openAssociation(ctx context.Context, pdu network.PDUService, abstractSyntax string, transferSyntaxes []string, timeout int) error {
 	return d.openAssociationWithContexts(ctx, pdu, []associationPresentationContext{{
 		abstractSyntax:   abstractSyntax,
@@ -248,6 +254,7 @@ func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUSe
 	pdu.SetCallingAE(d.destination.CallingAE)
 	pdu.SetCalledAE(d.destination.CalledAE)
 	pdu.SetTimeout(timeout)
+	pdu.SetOnRawPDU(d.onRawPDU)
 
 	network.Resetuniq()
 	for _, contextSpec := range contexts {

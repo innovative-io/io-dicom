@@ -2,10 +2,12 @@ package network
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"time"
@@ -28,6 +30,22 @@ var ErrAssociationAborted = errors.New("DICOM association aborted")
 // incoming A-ASSOCIATE-RQ. The SCP must close the transport connection after rejection
 // (DICOM PS 3.8 §9.3.4).
 var ErrAssociationRejected = errors.New("DICOM association rejected")
+
+type RawPDUDirection string
+
+const (
+	RawPDUDirectionInbound  RawPDUDirection = "inbound"
+	RawPDUDirectionOutbound RawPDUDirection = "outbound"
+)
+
+type RawPDUEvent struct {
+	Direction     RawPDUDirection
+	PDUType       byte
+	Data          []byte
+	CallingAE     string
+	CalledAE      string
+	RemoteAddress string
+}
 
 // PDUService - struct for PDUService
 type PDUService interface {
@@ -53,6 +71,7 @@ type PDUService interface {
 	AddPresContexts(presentationContext PresentationContext)
 	GetPresentationContextID() byte
 	SetOnAssociationRequest(f func(request AssociationRequest) bool)
+	SetOnRawPDU(f func(event RawPDUEvent))
 	Write(DCO media.DICOMObject, ItemType byte) error
 }
 
@@ -72,6 +91,7 @@ type pduService struct {
 	Pdata                        PresentationDataTransfer
 	Timeout                      int
 	OnAssociationRequest         func(request AssociationRequest) bool
+	onRawPDU                     func(event RawPDUEvent)
 }
 
 // NewPDUService - creates a pointer to PDUService
@@ -256,56 +276,38 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 	pdu.AssocRQ.SetImplementationClassUID(implementation.GetImplementationClassUID())
 	pdu.AssocRQ.SetImplementationVersionName(implementation.GetImplementationVersion())
 
-	if err := pdu.AssocRQ.Write(pdu.readWriter); err != nil {
+	if err := pdu.writeEncodedPDU(byte(pdutype.AssociationRequest), func(rw *bufio.ReadWriter) error {
+		return pdu.AssocRQ.Write(rw)
+	}); err != nil {
 		return err
 	}
 
-	pdu.ms = media.NewEmptyMemoryStream()
-
-	if err := pdu.ms.ReadFully(rw, 10); err != nil {
-		return err
-	}
-
-	ItemType, err := pdu.ms.GetByte()
+	itemType, rawData, err := pdu.readIncomingPDU()
 	if err != nil {
 		return err
 	}
 
-	if _, err = pdu.ms.GetByte(); err != nil {
-		return err
-	}
-
-	if pdu.pdulength, err = pdu.ms.GetUint32(); err != nil {
-		return err
-	}
-
-	switch ItemType {
+	switch itemType {
 	case pdutype.AssociationAccept:
-		if err := pdu.readPDU(); err != nil {
-			return err
-		}
 		pdu.ms.SetPosition(1)
 		pdu.AssocAC.ReadDynamic(pdu.ms)
+		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		if !pdu.interogateAAssociateAC() {
 			return errors.New("pduservice::Connect - No accepted presentation contexts found")
 		}
 		return nil
 	case pdutype.AssociationReject:
-		if err := pdu.readPDU(); err != nil {
-			return err
-		}
 		pdu.ms.SetPosition(1)
 		pdu.AssocRJ.ReadDynamic(pdu.ms)
+		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		return fmt.Errorf("pduservice::Connect - Association rejected - %s", pdu.AssocRJ.GetReason())
 	case pdutype.AssociationAbortRequest:
-		if err := pdu.readPDU(); err != nil {
-			return err
-		}
 		pdu.ms.SetPosition(1)
 		pdu.AbortRQ.ReadDynamic(pdu.ms)
+		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		return fmt.Errorf("pduservice::Connect - Association aborted - %s", pdu.AbortRQ.GetReason())
 	default:
-		return fmt.Errorf("pduservice::Connect - Corrupt transmision - %b", ItemType)
+		return fmt.Errorf("pduservice::Connect - Corrupt transmision - %b", itemType)
 	}
 }
 
@@ -314,9 +316,13 @@ func (pdu *pduService) Close() {
 		return
 	}
 
-	if err := pdu.ReleaseRQ.Write(pdu.readWriter); err != nil {
+	if err := pdu.writeEncodedPDU(byte(pdutype.AssociationReleaseRequest), func(rw *bufio.ReadWriter) error {
+		return pdu.ReleaseRQ.Write(rw)
+	}); err != nil {
 		slog.Warn("pduservice::Close - failed to send A-RELEASE-RQ, sending A-ABORT", "error", err)
-		_ = pdu.AbortRQ.Write(pdu.readWriter)
+		_ = pdu.writeEncodedPDU(byte(pdutype.AssociationAbortRequest), func(rw *bufio.ReadWriter) error {
+			return pdu.AbortRQ.Write(rw)
+		})
 		pdu.closeConn()
 		return
 	}
@@ -325,12 +331,14 @@ func (pdu *pduService) Close() {
 		_ = pdu.conn.SetDeadline(time.Now().Add(releaseHandshakeTimeout))
 	}
 
-	ms := media.NewEmptyMemoryStream()
-	if err := ms.ReadFully(pdu.readWriter, 10); err != nil {
+	itemType, rawData, err := pdu.readIncomingPDU()
+	if err != nil {
 		slog.Warn("pduservice::Close - timeout waiting for A-RELEASE-RP, sending A-ABORT", "error", err)
-		_ = pdu.AbortRQ.Write(pdu.readWriter)
+		_ = pdu.writeEncodedPDU(byte(pdutype.AssociationAbortRequest), func(rw *bufio.ReadWriter) error {
+			return pdu.AbortRQ.Write(rw)
+		})
 	} else {
-		itemType, _ := ms.GetByte()
+		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		if int(itemType) != pdutype.AssociationReleaseResponse {
 			slog.Warn("pduservice::Close - unexpected PDU waiting for A-RELEASE-RP", "type", itemType)
 		}
@@ -360,34 +368,18 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 	}
 
 	for {
-		pdu.ms = media.NewEmptyMemoryStream()
-
-		if err := pdu.ms.ReadFully(pdu.readWriter, 10); err != nil {
+		itemType, rawData, err := pdu.readIncomingPDU()
+		if err != nil {
 			return nil, err
 		}
 
-		pdu.ms.SetPosition(0)
-
-		if pdu.pdutype, err = pdu.ms.Get(); err != nil {
-			return nil, err
-		}
-
-		if _, err = pdu.ms.Get(); err != nil {
-			return nil, err
-		}
-
-		if pdu.pdulength, err = pdu.ms.GetUint32(); err != nil {
-			return nil, err
-		}
-
-		switch pdu.pdutype {
+		switch int(itemType) {
 		case pdutype.AssociationRequest:
-			if err := pdu.readPDU(); err != nil {
-				return nil, err
-			}
+			pdu.ms.SetPosition(6)
 			if err := pdu.AssocRQ.Read(pdu.ms); err != nil {
 				return nil, err
 			}
+			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 			if err := pdu.interogateAAssociateRQ(pdu.readWriter); err != nil {
 				if errors.Is(err, ErrAssociationRejected) {
 					// After sending A-ASSOCIATE-RJ, rejecting AE must close transport.
@@ -397,14 +389,10 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 			}
 			return nil, nil
 		case pdutype.AssociationAccept:
-			if err := pdu.readPDU(); err != nil {
-				return nil, err
-			}
+			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 			return nil, nil
 		case pdutype.PDUDataTransfer:
-			if err := pdu.readPDU(); err != nil {
-				return nil, err
-			}
+			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 			pdu.ms.SetPosition(1)
 			if err := pdu.Pdata.ReadDynamic(pdu.ms); err != nil {
 				return nil, err
@@ -419,17 +407,27 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 			}
 		case pdutype.AssociationReleaseRequest:
 			slog.Info("ASSOC-R-RQ:", "CallingAE", pdu.AssocRQ.GetCallingAE(), "CalledAE", pdu.AssocRQ.GetCalledAE())
+			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
+			pdu.ms.SetPosition(1)
 			pdu.ReleaseRQ.ReadDynamic(pdu.ms)
-			pdu.ReleaseRP.Write(pdu.readWriter)
+			if err := pdu.writeEncodedPDU(byte(pdutype.AssociationReleaseResponse), func(rw *bufio.ReadWriter) error {
+				return pdu.ReleaseRP.Write(rw)
+			}); err != nil {
+				return nil, err
+			}
 			return nil, ErrAssociationReleased
 		case pdutype.AssociationReleaseResponse:
 			slog.Info("ASSOC-R-RP:", "CallingAE", pdu.AssocRQ.GetCallingAE(), "CalledAE", pdu.AssocRQ.GetCalledAE())
+			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 			return nil, ErrAssociationReleased
 		case pdutype.AssociationAbortRequest:
 			slog.Info("ASSOC-ABORT-RQ:", "CallingAE", pdu.AssocRQ.GetCallingAE(), "CalledAE", pdu.AssocRQ.GetCalledAE())
+			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 			return nil, ErrAssociationAborted
 		default:
-			pdu.AbortRQ.Write(pdu.readWriter)
+			_ = pdu.writeEncodedPDU(byte(pdutype.AssociationAbortRequest), func(rw *bufio.ReadWriter) error {
+				return pdu.AbortRQ.Write(rw)
+			})
 			return nil, errors.New("pduservice::Read - unknown ItemType")
 		}
 	}
@@ -472,6 +470,83 @@ func (pdu *pduService) GetPresentationContextID() byte {
 
 func (pdu *pduService) SetOnAssociationRequest(f func(request AssociationRequest) bool) {
 	pdu.OnAssociationRequest = f
+}
+
+func (pdu *pduService) SetOnRawPDU(f func(event RawPDUEvent)) {
+	pdu.onRawPDU = f
+}
+
+func (pdu *pduService) emitRawPDU(direction RawPDUDirection, pduType byte, data []byte) {
+	if pdu.onRawPDU == nil || len(data) == 0 {
+		return
+	}
+	pdu.onRawPDU(RawPDUEvent{
+		Direction:     direction,
+		PDUType:       pduType,
+		Data:          append([]byte(nil), data...),
+		CallingAE:     pdu.AssocRQ.GetCallingAE(),
+		CalledAE:      pdu.AssocRQ.GetCalledAE(),
+		RemoteAddress: pdu.GetRemoteAddress(),
+	})
+}
+
+func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
+	header := make([]byte, 10)
+	if _, err := io.ReadFull(pdu.readWriter, header); err != nil {
+		return 0, nil, err
+	}
+
+	headerStream := media.NewMemoryStreamFromBytes(header)
+	itemType, err := headerStream.GetByte()
+	if err != nil {
+		return 0, nil, err
+	}
+	if _, err := headerStream.GetByte(); err != nil {
+		return 0, nil, err
+	}
+	pduLength, err := headerStream.GetUint32()
+	if err != nil {
+		return 0, nil, err
+	}
+	if pduLength < 4 {
+		return 0, nil, fmt.Errorf("pdu: malformed PDU length %d (minimum is 4)", pduLength)
+	}
+
+	remaining := int(pduLength) - 4
+	data := make([]byte, len(header)+remaining)
+	copy(data, header)
+	if remaining > 0 {
+		if _, err := io.ReadFull(pdu.readWriter, data[len(header):]); err != nil {
+			return 0, nil, err
+		}
+	}
+
+	pdu.ms = media.NewMemoryStreamFromBytes(data)
+	pdu.pdutype = int(itemType)
+	pdu.pdulength = pduLength
+	return itemType, data, nil
+}
+
+func (pdu *pduService) writeEncodedPDU(pduType byte, writer func(rw *bufio.ReadWriter) error) error {
+	if pdu.readWriter == nil {
+		return errors.New("pduservice::writeEncodedPDU - nil readWriter")
+	}
+
+	var buffer bytes.Buffer
+	tempRW := bufio.NewReadWriter(bufio.NewReader(bytes.NewReader(nil)), bufio.NewWriter(&buffer))
+	if err := writer(tempRW); err != nil {
+		return err
+	}
+
+	data := append([]byte(nil), buffer.Bytes()...)
+	if _, err := pdu.readWriter.Write(data); err != nil {
+		return err
+	}
+	if err := pdu.readWriter.Flush(); err != nil {
+		return err
+	}
+	pdu.emitRawPDU(RawPDUDirectionOutbound, pduType, data)
+	return nil
 }
 
 func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
@@ -521,7 +596,9 @@ func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
 		}
 	}
 
-	return pdu.Pdata.Write(pdu.readWriter)
+	return pdu.writeEncodedPDU(byte(pdutype.PDUDataTransfer), func(rw *bufio.ReadWriter) error {
+		return pdu.Pdata.Write(rw)
+	})
 }
 
 func (pdu *pduService) interogateAAssociateAC() bool {
@@ -542,6 +619,14 @@ func (pdu *pduService) interogateAAssociateAC() bool {
 }
 
 func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
+	previousReadWriter := pdu.readWriter
+	if pdu.readWriter == nil {
+		pdu.readWriter = rw
+		defer func() {
+			pdu.readWriter = previousReadWriter
+		}()
+	}
+
 	if pdu.conn != nil && pdu.conn.RemoteAddr() != nil {
 		pdu.AssocRQ.SetRemoteAddress(pdu.conn.RemoteAddr().String())
 	} else {
@@ -560,7 +645,9 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 		// Result=1 (permanent), Source=1 (UL-service-user), Reason=7 (called AE not recognised)
 		// per DICOM PS3.8 Table 9-21.
 		pdu.AssocRJ.Set(1, 1, 7)
-		if err := pdu.AssocRJ.Write(rw); err != nil {
+		if err := pdu.writeEncodedPDU(byte(pdutype.AssociationReject), func(rw *bufio.ReadWriter) error {
+			return pdu.AssocRJ.Write(rw)
+		}); err != nil {
 			return err
 		}
 		// Per DICOM PS 3.8 §9.3.4 the rejecting AE must close the transport connection.
@@ -637,11 +724,15 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 		UserInfo.SetImplementationVersionName(implementation.GetImplementationVersion())
 		UserInfo.SetMaxSubLength(MaxSubLength)
 		pdu.AssocAC.SetUserInformation(UserInfo)
-		return pdu.AssocAC.Write(rw)
+		return pdu.writeEncodedPDU(byte(pdutype.AssociationAccept), func(rw *bufio.ReadWriter) error {
+			return pdu.AssocAC.Write(rw)
+		})
 	}
 
 	slog.Warn("pdu: rejecting association - no presentation contexts could be negotiated", "CalledAE", pdu.AssocRQ.GetCalledAE(), "CallingAE", pdu.AssocRQ.GetCallingAE())
-	return pdu.AssocRJ.Write(rw)
+	return pdu.writeEncodedPDU(byte(pdutype.AssociationReject), func(rw *bufio.ReadWriter) error {
+		return pdu.AssocRJ.Write(rw)
+	})
 }
 
 func (pdu *pduService) parseDCMIntoRaw(DCO media.DICOMObject) bool {
