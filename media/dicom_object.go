@@ -850,7 +850,13 @@ func decompressSingleFrame(ctx context.Context, tsUID string, compressed []byte,
 			return err
 		}
 		copy(out, inflated)
-	case transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian.UID:
+	case transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian.UID,
+		// Non-conformant files that declare an uncompressed transfer syntax but
+		// store pixel data as encapsulated fragments (length 0xFFFFFFFF). Per the
+		// DICOM standard these should never be encapsulated, but real-world
+		// scanners produce them. Treat the fragment payload as raw pixel bytes.
+		transfersyntax.ExplicitVRLittleEndian.UID,
+		transfersyntax.ImplicitVRLittleEndian.UID:
 		if int(outLen) > len(compressed) {
 			return errors.New("encapsulated uncompressed frame too small")
 		}

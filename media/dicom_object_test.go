@@ -1120,3 +1120,52 @@ func TestGetDecompressedFrame_LargeEncapsulatedTotalSizeOK(t *testing.T) {
 		t.Fatalf("pixel mismatch at index 255: got %d, want %d", out[255], framePayload[255])
 	}
 }
+
+// TestGetDecompressedFrame_NonConformantUncompressedEncapsulated verifies that
+// GetDecompressedFrame tolerates non-conformant DICOM files that declare an
+// uncompressed transfer syntax (Explicit/Implicit VR Little Endian) but store
+// pixel data as encapsulated fragments (tag.Length == 0xFFFFFFFF). Real-world
+// scanners occasionally produce such files.
+func TestGetDecompressedFrame_NonConformantUncompressedEncapsulated(t *testing.T) {
+	const rows, cols, bits = 8, 8, 8
+	framePayload := make([]byte, rows*cols)
+	for i := range framePayload {
+		framePayload[i] = byte(i)
+	}
+
+	for _, ts := range []*transfersyntax.TransferSyntax{
+		transfersyntax.ExplicitVRLittleEndian,
+		transfersyntax.ImplicitVRLittleEndian,
+	} {
+		t.Run(ts.Name, func(t *testing.T) {
+			obj := NewEmptyDCMObj()
+			obj.SetTransferSyntax(ts)
+			obj.SetExplicitVR(ts == transfersyntax.ExplicitVRLittleEndian)
+			obj.SetBigEndian(false)
+
+			obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
+			obj.WriteStringGE(0x0028, 0x0008, "IS", "1")
+			obj.WriteUint16GE(0x0028, 0x0010, "US", rows)
+			obj.WriteUint16GE(0x0028, 0x0011, "US", cols)
+			obj.WriteUint16GE(0x0028, 0x0100, "US", bits)
+
+			obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+			obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT
+			obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(framePayload)), VR: "DL", Data: framePayload, BigEndian: false})
+			obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+
+			out, err := obj.GetDecompressedFrame(context.Background(), 0)
+			if err != nil {
+				t.Fatalf("GetDecompressedFrame failed: %v", err)
+			}
+			if len(out) != rows*cols {
+				t.Fatalf("expected %d bytes, got %d", rows*cols, len(out))
+			}
+			for i, b := range out {
+				if b != framePayload[i] {
+					t.Fatalf("pixel mismatch at index %d: got %d, want %d", i, b, framePayload[i])
+				}
+			}
+		})
+	}
+}
