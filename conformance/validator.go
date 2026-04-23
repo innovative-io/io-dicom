@@ -209,35 +209,71 @@ func (cv *ConformanceValidator) ValidateDICOMMetadata(metadata map[string]interf
 func (cv *ConformanceValidator) ValidatePixelData(pixelData map[string]interface{}) []Finding {
 	findings := []Finding{}
 
-	// Rule P1: Rows and Columns present
+	// Rule P1: Rows present (warning — pixel data exists but attribute is unavailable)
 	if rows, ok := pixelData["Rows"].(float64); !ok || rows == 0 {
 		findings = append(findings, Finding{
 			RuleID:      "DICOM-P001",
-			Severity:    "error",
+			Severity:    "warning",
 			Element:     "Rows (0028,0010)",
 			Expected:    "positive integer",
 			Actual:      "missing or zero",
-			Description: "Rows must be specified for pixel data",
+			Description: "Rows is missing: Pixel Data is present, but the Rows attribute is unavailable.",
 		})
 	}
 
 	if cols, ok := pixelData["Columns"].(float64); !ok || cols == 0 {
 		findings = append(findings, Finding{
 			RuleID:      "DICOM-P002",
-			Severity:    "error",
+			Severity:    "warning",
 			Element:     "Columns (0028,0011)",
 			Expected:    "positive integer",
 			Actual:      "missing or zero",
-			Description: "Columns must be specified for pixel data",
+			Description: "Columns is missing: Pixel Data is present, but the Columns attribute is unavailable.",
 		})
 	}
 
-	// Rule P2: Bits Allocated consistency with Bits Stored
-	if bitsAlloc, allocOK := pixelData["BitsAllocated"].(float64); allocOK {
-		if bitsStored, storedOK := pixelData["BitsStored"].(float64); storedOK {
+	// Rule P3: SamplesPerPixel present
+	if samples, ok := pixelData["SamplesPerPixel"].(float64); !ok || samples == 0 {
+		findings = append(findings, Finding{
+			RuleID:      "DICOM-P003",
+			Severity:    "warning",
+			Element:     "Samples Per Pixel (0028,0002)",
+			Expected:    "1 (grayscale) or 3 (color)",
+			Actual:      "missing or zero",
+			Description: "Samples Per Pixel is missing: Pixel Data is present, but Samples Per Pixel is unavailable.",
+		})
+	}
+
+	// Rule P4: BitsAllocated present
+	if bitsAlloc, ok := pixelData["BitsAllocated"].(float64); !ok || bitsAlloc == 0 {
+		findings = append(findings, Finding{
+			RuleID:      "DICOM-P004",
+			Severity:    "warning",
+			Element:     "Bits Allocated (0028,0100)",
+			Expected:    "8, 16, or 32",
+			Actual:      "missing or zero",
+			Description: "Bits Allocated is missing: Pixel Data is present, but Bits Allocated is unavailable.",
+		})
+	}
+
+	// Rule P5: BitsStored present
+	if bitsStored, ok := pixelData["BitsStored"].(float64); !ok || bitsStored == 0 {
+		findings = append(findings, Finding{
+			RuleID:      "DICOM-P005",
+			Severity:    "warning",
+			Element:     "Bits Stored (0028,0101)",
+			Expected:    "positive integer",
+			Actual:      "missing or zero",
+			Description: "Bits Stored is missing: Pixel Data is present, but Bits Stored is unavailable.",
+		})
+	}
+
+	// Rule P6: BitsAllocated/BitsStored consistency (only checked when both are present)
+	if bitsAlloc, allocOK := pixelData["BitsAllocated"].(float64); allocOK && bitsAlloc > 0 {
+		if bitsStored, storedOK := pixelData["BitsStored"].(float64); storedOK && bitsStored > 0 {
 			if bitsStored > bitsAlloc {
 				findings = append(findings, Finding{
-					RuleID:      "DICOM-P003",
+					RuleID:      "DICOM-P006",
 					Severity:    "error",
 					Element:     "Bits Stored (0028,0101)",
 					Expected:    fmt.Sprintf("<= %.0f bits", bitsAlloc),
@@ -248,7 +284,7 @@ func (cv *ConformanceValidator) ValidatePixelData(pixelData map[string]interface
 		}
 	}
 
-	// Rule P3: Photometric Interpretation valid
+	// Rule P7: Photometric Interpretation valid
 	if photoInterp, ok := pixelData["PhotometricInterpretation"].(string); ok {
 		validInterps := map[string]bool{
 			"MONOCHROME1": true,
@@ -261,7 +297,7 @@ func (cv *ConformanceValidator) ValidatePixelData(pixelData map[string]interface
 		}
 		if !validInterps[photoInterp] {
 			findings = append(findings, Finding{
-				RuleID:      "DICOM-P004",
+				RuleID:      "DICOM-P007",
 				Severity:    "warning",
 				Element:     "Photometric Interpretation (0028,0004)",
 				Expected:    "standard DICOM photometric value",

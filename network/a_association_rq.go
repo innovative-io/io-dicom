@@ -33,6 +33,8 @@ type AssociationRequest interface {
 	SetImplementationVersionName(name string)
 	GetPeerCertificates() []*x509.Certificate
 	SetPeerCertificates(certs []*x509.Certificate)
+	GetCorrelationID() string
+	SetCorrelationID(id string)
 	Size() uint32
 	Write(rw *bufio.ReadWriter) error
 	Read(ms media.MemoryStream) error
@@ -53,6 +55,7 @@ type associationRequest struct {
 	UserInfo         UserInformation
 	PeerCertificates []*x509.Certificate
 	RemoteAddress    string
+	CorrelationID    string
 }
 
 // NewAssociationRequest - NewAssociationRequest
@@ -143,6 +146,14 @@ func (aarq *associationRequest) GetPeerCertificates() []*x509.Certificate {
 
 func (aarq *associationRequest) SetPeerCertificates(certs []*x509.Certificate) {
 	aarq.PeerCertificates = certs
+}
+
+func (aarq *associationRequest) GetCorrelationID() string {
+	return aarq.CorrelationID
+}
+
+func (aarq *associationRequest) SetCorrelationID(id string) {
+	aarq.CorrelationID = id
 }
 
 func (aarq *associationRequest) Size() uint32 {

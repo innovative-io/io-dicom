@@ -82,38 +82,52 @@ func TestValidatePixelData(t *testing.T) {
 	validator := NewConformanceValidator()
 
 	tests := []struct {
-		name         string
-		pixelData    map[string]interface{}
-		expectErrors int
+		name           string
+		pixelData      map[string]interface{}
+		expectErrors   int
+		expectWarnings int
 	}{
 		{
 			name: "Valid pixel data",
 			pixelData: map[string]interface{}{
 				"Rows":                      float64(512),
 				"Columns":                   float64(512),
+				"SamplesPerPixel":           float64(1),
 				"BitsAllocated":             float64(16),
 				"BitsStored":                float64(12),
 				"PhotometricInterpretation": "MONOCHROME2",
 			},
-			expectErrors: 0,
+			expectErrors:   0,
+			expectWarnings: 0,
 		},
 		{
 			name: "Missing Rows",
 			pixelData: map[string]interface{}{
-				"Columns":       float64(512),
-				"BitsAllocated": float64(16),
+				"Columns":         float64(512),
+				"SamplesPerPixel": float64(1),
+				"BitsAllocated":   float64(16),
+				"BitsStored":      float64(12),
 			},
-			expectErrors: 1,
+			expectErrors:   0,
+			expectWarnings: 1,
+		},
+		{
+			name:           "Missing all pixel attributes",
+			pixelData:      map[string]interface{}{},
+			expectErrors:   0,
+			expectWarnings: 5, // Rows, Columns, SamplesPerPixel, BitsAllocated, BitsStored
 		},
 		{
 			name: "BitsStored exceeds BitsAllocated",
 			pixelData: map[string]interface{}{
-				"Rows":          float64(512),
-				"Columns":       float64(512),
-				"BitsAllocated": float64(8),
-				"BitsStored":    float64(16),
+				"Rows":            float64(512),
+				"Columns":         float64(512),
+				"SamplesPerPixel": float64(1),
+				"BitsAllocated":   float64(8),
+				"BitsStored":      float64(16),
 			},
-			expectErrors: 1,
+			expectErrors:   1,
+			expectWarnings: 0,
 		},
 	}
 
@@ -125,6 +139,10 @@ func TestValidatePixelData(t *testing.T) {
 			errorCount := report["error_count"].(int)
 			if errorCount != tt.expectErrors {
 				t.Errorf("Expected %d errors, got %d", tt.expectErrors, errorCount)
+			}
+			warningCount := report["warning_count"].(int)
+			if warningCount != tt.expectWarnings {
+				t.Errorf("Expected %d warnings, got %d", tt.expectWarnings, warningCount)
 			}
 		})
 	}
