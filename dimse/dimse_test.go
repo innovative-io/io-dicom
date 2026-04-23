@@ -73,6 +73,9 @@ func (m *mockPDU) SetNetConn(_ net.Conn)                                        
 func (m *mockPDU) AddPresContexts(_ network.PresentationContext)                   {}
 func (m *mockPDU) SetOnAssociationRequest(_ func(network.AssociationRequest) bool) {}
 func (m *mockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))                         {}
+func (m *mockPDU) GetAcceptedPresentationContexts() []network.PresentationContextAccept {
+	return nil
+}
 
 const ctUID = "1.2.840.10008.5.1.4.1.1.2"
 

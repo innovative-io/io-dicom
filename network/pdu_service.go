@@ -70,6 +70,9 @@ type PDUService interface {
 	NextPDU() (media.DICOMObject, error)
 	AddPresContexts(presentationContext PresentationContext)
 	GetPresentationContextID() byte
+	// GetAcceptedPresentationContexts returns the presentation contexts accepted
+	// by the remote SCP after a successful association negotiation (Connect/ConnectTLS).
+	GetAcceptedPresentationContexts() []PresentationContextAccept
 	SetOnAssociationRequest(f func(request AssociationRequest) bool)
 	SetOnRawPDU(f func(event RawPDUEvent))
 	Write(DCO media.DICOMObject, ItemType byte) error
@@ -127,30 +130,17 @@ func (pdu *pduService) closeConn() {
 	pdu.readWriter = nil
 }
 
+// selectPreferredTransferSyntax accepts the first transfer syntax offered by
+// the SCU that is supported by this implementation. Accepting the SCU's first
+// (preferred) offer avoids requiring the SCU to transcode data it already has
+// in a specific encoding — critical for storage SCPs that must preserve the
+// original transfer syntax.
 func selectPreferredTransferSyntax(offered []UIDItem) (string, bool) {
-	preferred := []string{
-		transfersyntax.ExplicitVRLittleEndian.UID,
-		transfersyntax.ImplicitVRLittleEndian.UID,
-		transfersyntax.ExplicitVRBigEndian.UID,
-	}
-
-	for _, candidate := range preferred {
-		if !transfersyntax.SupportedTransferSyntax(candidate) {
-			continue
-		}
-		for _, item := range offered {
-			if item.GetUID() == candidate {
-				return candidate, true
-			}
-		}
-	}
-
 	for _, item := range offered {
 		if transfersyntax.SupportedTransferSyntax(item.GetUID()) {
 			return item.GetUID(), true
 		}
 	}
-
 	return "", false
 }
 
@@ -466,6 +456,12 @@ func (pdu *pduService) AddPresContexts(presentationContext PresentationContext) 
 
 func (pdu *pduService) GetPresentationContextID() byte {
 	return pdu.Pdata.PresentationContextID
+}
+
+func (pdu *pduService) GetAcceptedPresentationContexts() []PresentationContextAccept {
+	result := make([]PresentationContextAccept, len(pdu.AcceptedPresentationContexts))
+	copy(result, pdu.AcceptedPresentationContexts)
+	return result
 }
 
 func (pdu *pduService) SetOnAssociationRequest(f func(request AssociationRequest) bool) {

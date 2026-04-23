@@ -12,9 +12,31 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 )
 
-func TestSelectPreferredTransferSyntaxPrefersLittleEndian(t *testing.T) {
+// TestSelectPreferredTransferSyntaxAcceptsFirstOffered verifies that the SCP
+// accepts the SCU's first (preferred) transfer syntax, not the SCP's own
+// preference.  This is required for storage SCPs so that the SCU can send data
+// in its native encoding without transcoding.
+func TestSelectPreferredTransferSyntaxAcceptsFirstOffered(t *testing.T) {
 	offered := []UIDItem{
 		NewUIDItem(transfersyntax.JPEG2000Lossless.UID, 0x40),
+		NewUIDItem(transfersyntax.ExplicitVRLittleEndian.UID, 0x40),
+		NewUIDItem(transfersyntax.ImplicitVRLittleEndian.UID, 0x40),
+	}
+
+	got, ok := selectPreferredTransferSyntax(offered)
+	if !ok {
+		t.Fatal("selectPreferredTransferSyntax() returned ok=false")
+	}
+	// Must accept the SCU's first offered transfer syntax (JPEG2000Lossless here).
+	if got != transfersyntax.JPEG2000Lossless.UID {
+		t.Fatalf("selectPreferredTransferSyntax() = %q, want %q", got, transfersyntax.JPEG2000Lossless.UID)
+	}
+}
+
+// TestSelectPreferredTransferSyntaxExplicitVRLittleEndianFirst verifies that
+// ExplicitVRLittleEndian is accepted when it is the SCU's first offered syntax.
+func TestSelectPreferredTransferSyntaxExplicitVRLittleEndianFirst(t *testing.T) {
+	offered := []UIDItem{
 		NewUIDItem(transfersyntax.ExplicitVRLittleEndian.UID, 0x40),
 		NewUIDItem(transfersyntax.ImplicitVRLittleEndian.UID, 0x40),
 	}

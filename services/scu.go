@@ -33,14 +33,19 @@ type SCU interface {
 	// accepted with Success and the data is discarded.
 	SetOnCGetStore(f func(data media.DICOMObject) uint16)
 	SetOnRawPDU(f func(event network.RawPDUEvent))
+	// GetNegotiatedContexts returns the presentation contexts accepted by the
+	// remote SCP after the most recent successful association. Returns nil if no
+	// association has been made yet.
+	GetNegotiatedContexts() []network.PresentationContextAccept
 }
 
 type scu struct {
-	destination   *network.Destination
-	onCFindResult func(result media.DICOMObject)
-	onCMoveResult func(result media.DICOMObject)
-	onCGetStore   func(data media.DICOMObject) uint16
-	onRawPDU      func(event network.RawPDUEvent)
+	destination        *network.Destination
+	onCFindResult      func(result media.DICOMObject)
+	onCMoveResult      func(result media.DICOMObject)
+	onCGetStore        func(data media.DICOMObject) uint16
+	onRawPDU           func(event network.RawPDUEvent)
+	negotiatedContexts []network.PresentationContextAccept
 }
 
 type associationPresentationContext struct {
@@ -250,6 +255,10 @@ func (d *scu) openAssociation(ctx context.Context, pdu network.PDUService, abstr
 	}}, timeout)
 }
 
+func (d *scu) GetNegotiatedContexts() []network.PresentationContextAccept {
+	return d.negotiatedContexts
+}
+
 func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUService, contexts []associationPresentationContext, timeout int) error {
 	pdu.SetCallingAE(d.destination.CallingAE)
 	pdu.SetCalledAE(d.destination.CalledAE)
@@ -267,10 +276,16 @@ func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUSe
 		pdu.AddPresContexts(presContext)
 	}
 
+	var err error
 	if d.destination.IsTLS {
-		return pdu.ConnectTLS(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port), d.destination.TLSConfig)
+		err = pdu.ConnectTLS(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port), d.destination.TLSConfig)
+	} else {
+		err = pdu.Connect(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port))
 	}
-	return pdu.Connect(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port))
+	if err == nil {
+		d.negotiatedContexts = pdu.GetAcceptedPresentationContexts()
+	}
+	return err
 }
 
 func (d *scu) writeStoreRQ(pdu network.PDUService, DDO media.DICOMObject) error {
