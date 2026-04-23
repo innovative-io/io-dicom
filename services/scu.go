@@ -218,7 +218,7 @@ func (d *scu) StoreSCU(ctx context.Context, FileName string, timeout int) error 
 		return err
 	}
 
-	if err := d.writeStoreRQ(pdu, DDO); err != nil {
+	if err := d.writeStoreRQ(ctx, pdu, DDO); err != nil {
 		return err
 	}
 
@@ -269,10 +269,18 @@ func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUSe
 	for _, contextSpec := range contexts {
 		presContext := network.NewPresentationContext()
 		presContext.SetAbstractSyntax(contextSpec.abstractSyntax)
+		hasEVLE := false
 		for _, ts := range contextSpec.transferSyntaxes {
 			presContext.AddTransferSyntax(ts)
+			if ts == transfersyntax.ExplicitVRLittleEndian.UID {
+				hasEVLE = true
+			}
 		}
-		presContext.AddTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+		// Always offer EVLE as a universal fallback so the remote SCP can accept
+		// even if it does not support the native transfer syntax.
+		if !hasEVLE {
+			presContext.AddTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+		}
 		pdu.AddPresContexts(presContext)
 	}
 
@@ -288,7 +296,7 @@ func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUSe
 	return err
 }
 
-func (d *scu) writeStoreRQ(pdu network.PDUService, DDO media.DICOMObject) error {
+func (d *scu) writeStoreRQ(ctx context.Context, pdu network.PDUService, DDO media.DICOMObject) error {
 	PCID := pdu.GetPresentationContextID()
 	if PCID == 0 {
 		return errors.New("scu: writeStoreRQ: no accepted presentation context")
@@ -299,20 +307,12 @@ func (d *scu) writeStoreRQ(pdu network.PDUService, DDO media.DICOMObject) error 
 		return errors.New("scu: writeStoreRQ: no negotiated transfer syntax for presentation context")
 	}
 
-	// Only re-encode if the negotiated syntax differs from the file's syntax.
-	if trnSyntOut.UID != DDO.GetTransferSyntax().UID {
-		DDO.SetTransferSyntax(trnSyntOut)
-		switch trnSyntOut.UID {
-		case transfersyntax.ImplicitVRLittleEndian.UID:
-			DDO.SetExplicitVR(false)
-			DDO.SetBigEndian(false)
-		case transfersyntax.ExplicitVRBigEndian.UID:
-			DDO.SetExplicitVR(true)
-			DDO.SetBigEndian(true)
-		default:
-			DDO.SetExplicitVR(true)
-			DDO.SetBigEndian(false)
-		}
+	// Transcode to the negotiated transfer syntax if it differs from the file's.
+	// ChangeTransferSyntaxContext is a no-op when both UIDs are the same, so this
+	// is always safe to call. For compressed → uncompressed it decodes pixel data;
+	// for VR-only differences (e.g. EVLE → ImplicitVRLE) it re-encodes in place.
+	if err := DDO.ChangeTransferSyntaxContext(ctx, trnSyntOut); err != nil {
+		return fmt.Errorf("scu: writeStoreRQ: transcode to %s: %w", trnSyntOut.Name, err)
 	}
 
 	return dimse.CStoreWriteRQ(pdu, DDO)

@@ -1,7 +1,9 @@
 package services
 
 import (
+	"bufio"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
+	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
@@ -347,3 +350,70 @@ func StartSCP(t testing.TB, port int) (func(t testing.TB), SCP) {
 	t.Cleanup(func() { cleanup(t) })
 	return cleanup, testSCP
 }
+
+// Test_scu_writeStoreRQ_TranscodesOnMismatch verifies that writeStoreRQ
+// transcodes the DICOMObject to the negotiated transfer syntax when it differs
+// from the file's native syntax (e.g. EVLE file sent to a peer that only
+// accepted ImplicitVRLittleEndian).
+func Test_scu_writeStoreRQ_TranscodesOnMismatch(t *testing.T) {
+	if _, err := os.Stat("../samples/test.dcm"); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+	media.InitDict()
+
+	DDO, err := media.NewDCMObjFromFile("../samples/test.dcm")
+	if err != nil {
+		t.Fatalf("load test.dcm: %v", err)
+	}
+	if DDO.GetTransferSyntax().UID != transfersyntax.ExplicitVRLittleEndian.UID {
+		t.Skipf("test.dcm is not EVLE (got %s); skipping transcoding test", DDO.GetTransferSyntax().UID)
+	}
+
+	// Simulate a remote SCP that negotiated ImplicitVRLittleEndian.
+	mock := &storeMockPDU{ts: transfersyntax.ImplicitVRLittleEndian}
+	d := &scu{}
+	if err := d.writeStoreRQ(context.Background(), mock, DDO); err != nil {
+		t.Fatalf("writeStoreRQ() error = %v", err)
+	}
+
+	// The DICOMObject must have been transcoded to the negotiated syntax.
+	if got := DDO.GetTransferSyntax().UID; got != transfersyntax.ImplicitVRLittleEndian.UID {
+		t.Errorf("after writeStoreRQ, DDO.GetTransferSyntax() = %q, want ImplicitVRLittleEndian", got)
+	}
+}
+
+// storeMockPDU is a minimal network.PDUService stub for writeStoreRQ unit tests.
+// Only GetPresentationContextID, GetTransferSyntax, GetAAssociationRQ, and Write
+// are meaningful; all other methods are no-ops.
+type storeMockPDU struct {
+	ts      *transfersyntax.TransferSyntax
+	written []media.DICOMObject
+}
+
+func (m *storeMockPDU) GetTransferSyntax(_ byte) *transfersyntax.TransferSyntax { return m.ts }
+func (m *storeMockPDU) GetPresentationContextID() byte                          { return 1 }
+func (m *storeMockPDU) Write(dco media.DICOMObject, _ byte) error {
+	m.written = append(m.written, dco)
+	return nil
+}
+func (m *storeMockPDU) SetTimeout(_ int)                                               {}
+func (m *storeMockPDU) Connect(_ context.Context, _, _ string) error                   { return nil }
+func (m *storeMockPDU) ConnectTLS(_ context.Context, _, _ string, _ *tls.Config) error { return nil }
+func (m *storeMockPDU) Close()                                                         {}
+func (m *storeMockPDU) GetAAssociationRQ() network.AssociationRequest {
+	return network.NewAssociationRequest()
+}
+func (m *storeMockPDU) GetCalledAE() string                           { return "CALLED" }
+func (m *storeMockPDU) GetCallingAE() string                          { return "CALLING" }
+func (m *storeMockPDU) GetRemoteAddress() string                      { return "127.0.0.1:104" }
+func (m *storeMockPDU) SetCalledAE(_ string)                          {}
+func (m *storeMockPDU) SetCallingAE(_ string)                         {}
+func (m *storeMockPDU) SetConn(_ *bufio.ReadWriter)                   {}
+func (m *storeMockPDU) SetNetConn(_ net.Conn)                         {}
+func (m *storeMockPDU) NextPDU() (media.DICOMObject, error)           { return nil, nil }
+func (m *storeMockPDU) AddPresContexts(_ network.PresentationContext) {}
+func (m *storeMockPDU) GetAcceptedPresentationContexts() []network.PresentationContextAccept {
+	return nil
+}
+func (m *storeMockPDU) SetOnAssociationRequest(_ func(network.AssociationRequest) bool) {}
+func (m *storeMockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))                         {}

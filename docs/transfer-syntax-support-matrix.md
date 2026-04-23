@@ -18,7 +18,7 @@ It distinguishes between:
 | 1.2.840.10008.1.2.1.98 | Encapsulated Uncompressed Explicit VR Little Endian | supported | exact / - | Encapsulation path in media layer |
 | 1.2.840.10008.1.2.1.99 | Deflated Explicit VR Little Endian | supported | - | Dataset deflate/inflate path |
 | 1.2.840.10008.1.2.4.50 | JPEG Baseline (Process 1) | supported | delta-3 / - | JPEG family path |
-| 1.2.840.10008.1.2.4.51 | JPEG Extended (Process 2 and 4) | supported | exact / exact | JPEG family path |
+| 1.2.840.10008.1.2.4.51 | JPEG Extended (Process 2 & 4) | supported | exact / exact | JPEG family path |
 | 1.2.840.10008.1.2.4.57 | JPEG Lossless, Non-Hierarchical (Process 14) | supported | - | JPEG family path |
 | 1.2.840.10008.1.2.4.70 | JPEG Lossless, Non-Hierarchical, First-Order Prediction (Process 14 [Selection Value 1]) | supported | delta-3 / - | JPEG family path |
 | 1.2.840.10008.1.2.4.80 | JPEG-LS Lossless Image Compression | supported | exact / exact | JPEG-LS backend path |
@@ -62,18 +62,18 @@ It distinguishes between:
 | UID | Name | Reason |
 | --- | --- | --- |
 | 1.2.840.10008.1.2.2 | Explicit VR Big Endian | Retired; not in supported transfer syntax set |
-| 1.2.840.10008.1.2.4.52 | JPEG Extended (Process 3 and 5) | Retired JPEG process variant not implemented |
-| 1.2.840.10008.1.2.4.53 | JPEG Spectral Selection, Non-Hierarchical (Process 6 and 8) | Retired JPEG process variant not implemented |
-| 1.2.840.10008.1.2.4.54 | JPEG Spectral Selection, Non-Hierarchical (Process 7 and 9) | Retired JPEG process variant not implemented |
-| 1.2.840.10008.1.2.4.55 | JPEG Full Progression, Non-Hierarchical (Process 10 and 12) | Retired JPEG process variant not implemented |
-| 1.2.840.10008.1.2.4.56 | JPEG Full Progression, Non-Hierarchical (Process 11 and 13) | Retired JPEG process variant not implemented |
+| 1.2.840.10008.1.2.4.52 | JPEG Extended (Process 3 & 5) | Retired JPEG process variant not implemented |
+| 1.2.840.10008.1.2.4.53 | JPEG Spectral Selection, Non-Hierarchical (Process 6 & 8) | Retired JPEG process variant not implemented |
+| 1.2.840.10008.1.2.4.54 | JPEG Spectral Selection, Non-Hierarchical (Process 7 & 9) | Retired JPEG process variant not implemented |
+| 1.2.840.10008.1.2.4.55 | JPEG Full Progression, Non-Hierarchical (Process 10 & 12) | Retired JPEG process variant not implemented |
+| 1.2.840.10008.1.2.4.56 | JPEG Full Progression, Non-Hierarchical (Process 11 & 13) | Retired JPEG process variant not implemented |
 | 1.2.840.10008.1.2.4.58 | JPEG Lossless, Non-Hierarchical (Process 15) | Retired JPEG process variant not implemented |
-| 1.2.840.10008.1.2.4.59 | JPEG Extended, Hierarchical (Process 16 and 18) | Retired hierarchical JPEG variant not implemented |
-| 1.2.840.10008.1.2.4.60 | JPEG Extended, Hierarchical (Process 17 and 19) | Retired hierarchical JPEG variant not implemented |
-| 1.2.840.10008.1.2.4.61 | JPEG Spectral Selection, Hierarchical (Process 20 and 22) | Retired hierarchical JPEG variant not implemented |
-| 1.2.840.10008.1.2.4.62 | JPEG Spectral Selection, Hierarchical (Process 21 and 23) | Retired hierarchical JPEG variant not implemented |
-| 1.2.840.10008.1.2.4.63 | JPEG Full Progression, Hierarchical (Process 24 and 26) | Retired hierarchical JPEG variant not implemented |
-| 1.2.840.10008.1.2.4.64 | JPEG Full Progression, Hierarchical (Process 25 and 27) | Retired hierarchical JPEG variant not implemented |
+| 1.2.840.10008.1.2.4.59 | JPEG Extended, Hierarchical (Process 16 & 18) | Retired hierarchical JPEG variant not implemented |
+| 1.2.840.10008.1.2.4.60 | JPEG Extended, Hierarchical (Process 17 & 19) | Retired hierarchical JPEG variant not implemented |
+| 1.2.840.10008.1.2.4.61 | JPEG Spectral Selection, Hierarchical (Process 20 & 22) | Retired hierarchical JPEG variant not implemented |
+| 1.2.840.10008.1.2.4.62 | JPEG Spectral Selection, Hierarchical (Process 21 & 23) | Retired hierarchical JPEG variant not implemented |
+| 1.2.840.10008.1.2.4.63 | JPEG Full Progression, Hierarchical (Process 24 & 26) | Retired hierarchical JPEG variant not implemented |
+| 1.2.840.10008.1.2.4.64 | JPEG Full Progression, Hierarchical (Process 25 & 27) | Retired hierarchical JPEG variant not implemented |
 | 1.2.840.10008.1.2.4.65 | JPEG Lossless, Hierarchical (Process 28) | Retired hierarchical JPEG variant not implemented |
 | 1.2.840.10008.1.2.4.66 | JPEG Lossless, Hierarchical (Process 29) | Retired hierarchical JPEG variant not implemented |
 | 1.2.840.10008.1.2.4.94 | JPIP Referenced | Retired JPIP syntax excluded by supported set |

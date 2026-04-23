@@ -16,7 +16,7 @@ Behavioral quality labels summarize representative media-layer roundtrip expecta
 | UID | Name | Status | Notes |
 | --- | --- | --- | --- |
 | 1.2.840.10008.1.2.1.98 | Encapsulated Uncompressed Explicit VR Little Endian | supported | Encapsulation path in media layer |
-| 1.2.840.10008.1.2.4.51 | JPEG Extended (Process 2 and 4) | supported | JPEG family path |
+| 1.2.840.10008.1.2.4.51 | JPEG Extended (Process 2 & 4) | supported | JPEG family path |
 | 1.2.840.10008.1.2.4.80 | JPEG-LS Lossless Image Compression | supported | JPEG-LS backend path |
 | 1.2.840.10008.1.2.4.90 | JPEG 2000 Image Compression (Lossless Only) | supported | JPEG 2000 family path |
 | 1.2.840.10008.1.2.4.100 | MPEG2 Main Profile / Main Level | supported-via-shared-family | Routed through FFmpeg-backed MPEG path |
@@ -46,7 +46,7 @@ Behavioral quality labels summarize representative media-layer roundtrip expecta
 
 | UID | Name | Status | Notes |
 | --- | --- | --- | --- |
-| 1.2.840.10008.1.2.4.51 | JPEG Extended (Process 2 and 4) | supported | JPEG family path |
+| 1.2.840.10008.1.2.4.51 | JPEG Extended (Process 2 & 4) | supported | JPEG family path |
 | 1.2.840.10008.1.2.4.80 | JPEG-LS Lossless Image Compression | supported | JPEG-LS backend path |
 | 1.2.840.10008.1.2.4.90 | JPEG 2000 Image Compression (Lossless Only) | supported | JPEG 2000 family path |
 | 1.2.840.10008.1.2.4.110 | JPEG XL Lossless | supported | JPEG XL family path |
