@@ -173,11 +173,11 @@ func (aarq *associationRequest) Size() uint32 {
 func (aarq *associationRequest) Write(rw *bufio.ReadWriter) error {
 	bd := media.NewDICOMBuffer()
 
-	slog.Info("ASSOC-RQ:", "CallingAE", aarq.GetCallingAE(), "CalledAE", aarq.GetCalledAE())
-	slog.Info("ASSOC-RQ:", "ImpClass", aarq.GetUserInformation().GetImplementationClass().GetUID())
-	slog.Info("ASSOC-RQ:", "ImpVersion", aarq.GetUserInformation().GetImplementationVersion().GetUID())
-	slog.Info("ASSOC-RQ:", "MaxPDULength", aarq.GetUserInformation().GetMaxSubLength().GetMaximumLength())
-	slog.Info("ASSOC-RQ:", "MaxOpsInvoked", aarq.GetUserInformation().GetAsyncOperationWindow().GetMaxNumberOperationsInvoked(), "MaxOpsPerformed", aarq.GetUserInformation().GetAsyncOperationWindow().GetMaxNumberOperationsPerformed())
+	slog.Debug("====================== BEGIN A-ASSOCIATE-RQ ======================")
+	slog.Debug("ASSOC-RQ:", "CallingAE", aarq.GetCallingAE(), "CalledAE", aarq.GetCalledAE())
+	slog.Debug("ASSOC-RQ: OurImpClass", "UID", aarq.GetUserInformation().GetImplementationClass().GetUID())
+	slog.Debug("ASSOC-RQ: OurImpVersion", "name", aarq.GetUserInformation().GetImplementationVersion().GetUID())
+	slog.Debug("ASSOC-RQ:", "MaxPDULength", aarq.GetUserInformation().GetMaxSubLength().GetMaximumLength())
 
 	bd.SetBigEndian(true)
 	aarq.Size()
@@ -194,20 +194,21 @@ func (aarq *associationRequest) Write(rw *bufio.ReadWriter) error {
 		return err
 	}
 
-	slog.Info("ASSOC-RQ: ApplicationContext", "UID", aarq.AppContext.GetUID(), "Description", sopclass.GetSOPClassFromUID(aarq.AppContext.GetUID()).Description)
+	slog.Debug("ASSOC-RQ: AppContext", "UID", aarq.AppContext.GetUID(), "Description", sopclass.GetSOPClassFromUID(aarq.AppContext.GetUID()).Description)
 	if err := aarq.AppContext.Write(rw); err != nil {
 		return err
 	}
 	for presIndex, presContext := range aarq.PresContexts {
-		slog.Info("ASSOC-RQ: PresentationContext", "Index", presIndex+1)
-		slog.Info("ASSOC-RQ: \tAbstractSyntax:", "UID", presContext.GetAbstractSyntax().GetUID(), "Description", sopclass.GetSOPClassFromUID(presContext.GetAbstractSyntax().GetUID()).Description)
+		slog.Debug("ASSOC-RQ: PresentationContext", "Index", presIndex+1, "ID", presContext.GetPresentationContextID(), "status", "Proposed")
+		slog.Debug("ASSOC-RQ:   AbstractSyntax:", "UID", presContext.GetAbstractSyntax().GetUID(), "Description", sopclass.GetSOPClassFromUID(presContext.GetAbstractSyntax().GetUID()).Description)
 		for _, transSyntax := range presContext.GetTransferSyntaxes() {
-			slog.Info("ASSOC-RQ: \tTransferSyntax:", "UID", transSyntax.GetUID(), "Description", transfersyntax.GetTransferSyntaxFromUID(transSyntax.GetUID()).Description)
+			slog.Debug("ASSOC-RQ:   TransferSyntax:", "UID", transSyntax.GetUID(), "Description", transfersyntax.GetTransferSyntaxFromUID(transSyntax.GetUID()).Description)
 		}
 		if err := presContext.Write(rw); err != nil {
 			return err
 		}
 	}
+	slog.Debug("======================= END A-ASSOCIATE-RQ =======================")
 	return aarq.UserInfo.Write(rw)
 }
 

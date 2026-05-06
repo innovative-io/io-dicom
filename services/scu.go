@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
@@ -77,10 +78,15 @@ func (d *scu) EchoSCU(ctx context.Context, timeout int) error {
 	if err := d.openAssociation(ctx, pdu, sopclass.Verification.UID, []string{}, timeout); err != nil {
 		return err
 	}
+	slog.Info("Sending Echo Request")
 	if err := dimse.CEchoWriteRQ(pdu); err != nil {
 		return err
 	}
-	return dimse.CEchoReadRSP(pdu)
+	if err := dimse.CEchoReadRSP(pdu); err != nil {
+		return err
+	}
+	slog.Info("Received Echo Response", "status", "Success")
+	return nil
 }
 
 func (d *scu) FindSCU(ctx context.Context, Query media.DICOMObject, timeout int) (int, uint16, error) {
@@ -305,8 +311,10 @@ func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUSe
 
 	var err error
 	if d.destination.IsTLS {
+		slog.Info("Requesting Association", "host", d.destination.HostName, "port", d.destination.Port, "calledAE", d.destination.CalledAE, "callingAE", d.destination.CallingAE, "tls", true)
 		err = pdu.ConnectTLS(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port), d.destination.TLSConfig)
 	} else {
+		slog.Info("Requesting Association", "host", d.destination.HostName, "port", d.destination.Port, "calledAE", d.destination.CalledAE, "callingAE", d.destination.CallingAE)
 		err = pdu.Connect(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port))
 	}
 	if err == nil {

@@ -217,10 +217,18 @@ func (pdu *pduService) Connect(ctx context.Context, IP string, Port string) erro
 	pdu.AcceptedPresentationContexts = nil
 	pdu.Pdata.PresentationContextID = 0
 
+	if pdu.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(pdu.Timeout)*time.Second)
+		defer cancel()
+	}
+
+	slog.Debug("pduservice::Connect", "host", IP, "port", Port)
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", IP+":"+Port)
 	if err != nil {
 		return fmt.Errorf("pduservice::Connect: %w", err)
 	}
+	slog.Debug("pduservice::Connect: TCP connected", "host", IP, "port", Port)
 	return pdu.finishConnect(conn)
 }
 
@@ -230,10 +238,18 @@ func (pdu *pduService) ConnectTLS(ctx context.Context, IP string, Port string, c
 	pdu.AcceptedPresentationContexts = nil
 	pdu.Pdata.PresentationContextID = 0
 
+	if pdu.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(pdu.Timeout)*time.Second)
+		defer cancel()
+	}
+
+	slog.Debug("pduservice::ConnectTLS", "host", IP, "port", Port)
 	conn, err := (&tls.Dialer{Config: normalizeClientTLSConfig(cfg)}).DialContext(ctx, "tcp", IP+":"+Port)
 	if err != nil {
 		return fmt.Errorf("pduservice::ConnectTLS - %w", err)
 	}
+	slog.Debug("pduservice::ConnectTLS: TCP connected", "host", IP, "port", Port)
 	return pdu.finishConnect(conn)
 }
 
@@ -266,12 +282,14 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 	pdu.AssocRQ.SetImplementationClassUID(implementation.GetImplementationClassUID())
 	pdu.AssocRQ.SetImplementationVersionName(implementation.GetImplementationVersion())
 
+	slog.Debug("pduservice::finishConnect: sending A-ASSOCIATE-RQ", "callingAE", pdu.AssocRQ.GetCallingAE(), "calledAE", pdu.AssocRQ.GetCalledAE())
 	if err := pdu.writeEncodedPDU(byte(pdutype.AssociationRequest), func(rw *bufio.ReadWriter) error {
 		return pdu.AssocRQ.Write(rw)
 	}); err != nil {
 		return err
 	}
 
+	slog.Debug("pduservice::finishConnect: waiting for A-ASSOCIATE response")
 	itemType, rawData, err := pdu.readIncomingPDU()
 	if err != nil {
 		return err
@@ -284,6 +302,37 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		if !pdu.interogateAAssociateAC() {
 			return errors.New("pduservice::Connect - No accepted presentation contexts found")
+		}
+		maxSendPDV := pdu.AssocAC.GetMaxSubLength()
+		if maxSendPDV == 0 || maxSendPDV > maxPduLength {
+			maxSendPDV = maxPduLength
+		}
+		theirMaxPDU := pdu.AssocAC.GetMaxSubLength()
+		theirMaxStr := fmt.Sprintf("%d", theirMaxPDU)
+		if theirMaxPDU == 0 {
+			theirMaxStr = "unlimited"
+		}
+		slog.Info("Association Accepted", "maxSendPDV", maxSendPDV-6, "theirMaxPDU", theirMaxStr)
+		for _, pc := range pdu.AcceptedPresentationContexts {
+			pcID := pc.GetPresentationContextID()
+			sopDesc := ""
+			for _, rqPC := range pdu.AssocRQ.GetPresContexts() {
+				if rqPC.GetPresentationContextID() == pcID {
+					if sop := sopclass.GetSOPClassFromUID(rqPC.GetAbstractSyntax().GetUID()); sop != nil {
+						sopDesc = sop.Description
+					} else {
+						sopDesc = rqPC.GetAbstractSyntax().GetUID()
+					}
+					break
+				}
+			}
+			tsDesc := ""
+			if ts := transfersyntax.GetTransferSyntaxFromUID(pc.GetTrnSyntax().GetUID()); ts != nil {
+				tsDesc = ts.Description
+			} else {
+				tsDesc = pc.GetTrnSyntax().GetUID()
+			}
+			slog.Info("Accepted Context", "id", pcID, "sopClass", sopDesc, "transferSyntax", tsDesc)
 		}
 		return nil
 	case pdutype.AssociationReject:
@@ -306,6 +355,7 @@ func (pdu *pduService) Close() {
 		return
 	}
 
+	slog.Info("Releasing Association")
 	if err := pdu.writeEncodedPDU(byte(pdutype.AssociationReleaseRequest), func(rw *bufio.ReadWriter) error {
 		return pdu.ReleaseRQ.Write(rw)
 	}); err != nil {

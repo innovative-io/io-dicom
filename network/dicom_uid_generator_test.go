@@ -22,6 +22,9 @@ func TestUniq8odd_NonZero(t *testing.T) {
 		if v == 0 {
 			t.Errorf("Uniq8odd() returned zero at iteration %d", i)
 		}
+		if v%2 == 0 {
+			t.Errorf("Uniq8odd() returned even value %d at iteration %d", v, i)
+		}
 	}
 }
 
@@ -31,6 +34,9 @@ func TestUniq16odd_NonZero(t *testing.T) {
 		v := Uniq16odd()
 		if v == 0 {
 			t.Errorf("Uniq16odd() returned zero at iteration %d", i)
+		}
+		if v%2 == 0 {
+			t.Errorf("Uniq16odd() returned even value %d at iteration %d", v, i)
 		}
 	}
 }
@@ -60,10 +66,13 @@ func TestUniq8odd_Concurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// All values should be non-zero
+	// All values should be non-zero and odd
 	for _, v := range results {
 		if v == 0 {
 			t.Errorf("Uniq8odd concurrent: got zero value")
+		}
+		if v%2 == 0 {
+			t.Errorf("Uniq8odd concurrent: got even value %d", v)
 		}
 	}
 }
@@ -82,10 +91,13 @@ func TestUniq16odd_Concurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// All values should be non-zero
+	// All values should be non-zero and odd
 	for _, v := range results {
 		if v == 0 {
 			t.Errorf("Uniq16odd concurrent: got zero value")
+		}
+		if v%2 == 0 {
+			t.Errorf("Uniq16odd concurrent: got even value %d", v)
 		}
 	}
 }

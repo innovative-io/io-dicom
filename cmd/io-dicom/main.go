@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -60,8 +61,13 @@ func main() {
 	tlsKey := flag.String("tlskey", "", "Path to TLS private key file (PEM) — required for -scp -tls")
 	tlsCA := flag.String("tlsca", "", "Path to CA certificate file (PEM) used to verify the remote peer")
 	tlsInsecure := flag.Bool("tlsinsecure", false, "Skip TLS certificate verification (SCU only — do not use in production)")
+	verbose := flag.Bool("verbose", false, "Enable verbose debug logging")
 
 	flag.Parse()
+
+	if *verbose {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	}
 
 	if *startSCP {
 		if *datastore == "" {
@@ -185,7 +191,7 @@ func main() {
 		if err != nil {
 			log.Fatalln(err)
 		}
-		log.Println("CEcho was successful")
+		slog.Info("CEcho was successful")
 	}
 	if *cfind {
 		request := utils.DefaultCFindRequest()

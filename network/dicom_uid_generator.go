@@ -16,15 +16,18 @@ func uniq8() byte {
 	return byte(v & 0xff)
 }
 
-// Uniq8odd returns a new unique 8-bit value using the same increment pattern
-// as the original implementation, but with atomic read-modify-write semantics.
+// Uniq8odd returns a new unique 8-bit odd value using atomic read-modify-write
+// semantics. Presentation Context IDs in A-ASSOCIATE-RQ must be odd integers
+// in the range 1-255 (DICOM PS3.8 §9.3.2.2).
 func Uniq8odd() byte {
 	for {
 		old := atomic.LoadInt64(&uniqid)
 		var next int64
-		if old&0x01 == 1 {
+		if old&0x01 == 0 {
+			// old is even → next odd = old+1
 			next = old + 1
 		} else {
+			// old is odd → next odd = old+2
 			next = old + 2
 		}
 		if atomic.CompareAndSwapInt64(&uniqid, old, next) {
@@ -33,15 +36,17 @@ func Uniq8odd() byte {
 	}
 }
 
-// Uniq16odd returns a new unique 16-bit value using the same increment pattern
-// as the original implementation, but with atomic read-modify-write semantics.
+// Uniq16odd returns a new unique 16-bit odd value using atomic read-modify-write
+// semantics.
 func Uniq16odd() uint16 {
 	for {
 		old := atomic.LoadInt64(&uniqid)
 		var next int64
-		if old&0x01 == 1 {
+		if old&0x01 == 0 {
+			// old is even → next odd = old+1
 			next = old + 1
 		} else {
+			// old is odd → next odd = old+2
 			next = old + 2
 		}
 		if atomic.CompareAndSwapInt64(&uniqid, old, next) {

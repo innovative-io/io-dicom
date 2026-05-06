@@ -8,6 +8,7 @@ import (
 
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
+	"github.com/innovative-io/io-dicom/implementation"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
@@ -207,17 +208,19 @@ func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 		}
 	}
 
-	slog.Info("ASSOC-AC:", "CallingAE", aaac.GetCallingAE(), "CalledAE", aaac.GetCalledAE())
-	slog.Info("ASSOC-AC:", "ImpClass", aaac.UserInfo.GetImplementationClass().GetUID())
-	slog.Info("ASSOC-AC:", "ImpVersion", aaac.UserInfo.GetImplementationVersion().GetUID())
-	slog.Info("ASSOC-AC:", "MaxPDULength", aaac.GetMaxSubLength())
-	slog.Info("ASSOC-AC:", "MaxOpsInvoked", aaac.UserInfo.AsyncOpWindow.GetMaxNumberOperationsInvoked(), "MaxOpsPerformed", aaac.UserInfo.AsyncOpWindow.GetMaxNumberOperationsPerformed())
-	slog.Info("ASSOC-AC: ApplicationContext", "UID", aaac.AppContext.GetUID(), "Description", sopclass.GetSOPClassFromUID(aaac.AppContext.GetUID()).Description)
+	slog.Debug("====================== BEGIN A-ASSOCIATE-AC ======================")
+	slog.Debug("ASSOC-AC:", "CallingAE", aaac.GetCallingAE(), "CalledAE", aaac.GetCalledAE())
+	slog.Debug("ASSOC-AC: OurImpClass", "UID", implementation.GetImplementationClassUID())
+	slog.Debug("ASSOC-AC: OurImpVersion", "name", implementation.GetImplementationVersion())
+	slog.Debug("ASSOC-AC: TheirImpClass", "UID", aaac.UserInfo.GetImplementationClass().GetUID())
+	slog.Debug("ASSOC-AC: TheirImpVersion", "name", aaac.UserInfo.GetImplementationVersion().GetUID())
+	slog.Debug("ASSOC-AC: AppContext", "UID", aaac.AppContext.GetUID(), "Description", sopclass.GetSOPClassFromUID(aaac.AppContext.GetUID()).Description)
+	slog.Debug("ASSOC-AC:", "OurMaxPDULength", maxPduLength, "TheirMaxPDULength", aaac.GetMaxSubLength())
 	for presIndex, presContextAccept := range aaac.PresContextAccepts {
-		slog.Info("ASSOC-AC: AcceptedPresentationContext", "Index", presIndex+1)
-		//slog.Info("ASSOC-AC: \tAccepted AbstractSyntax", "UID", presContextAccept.GetAbstractSyntax().GetUID(), "Description", sopclass.GetSOPClassFromUID(presContextAccept.GetAbstractSyntax().GetUID()).Description)
-		slog.Info("ASSOC-AC: \tAccepted TransferSyntax", "UID", presContextAccept.GetTrnSyntax().GetUID(), "Description", transfersyntax.GetTransferSyntaxFromUID(presContextAccept.GetTrnSyntax().GetUID()).Description)
+		slog.Debug("ASSOC-AC: AcceptedContext", "Index", presIndex+1, "ID", presContextAccept.GetPresentationContextID(), "status", "Accepted")
+		slog.Debug("ASSOC-AC:   TransferSyntax:", "UID", presContextAccept.GetTrnSyntax().GetUID(), "Description", transfersyntax.GetTransferSyntaxFromUID(presContextAccept.GetTrnSyntax().GetUID()).Description)
 	}
+	slog.Debug("======================= END A-ASSOCIATE-AC =======================")
 	if Count == 0 {
 		return nil
 	}
