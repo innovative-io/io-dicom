@@ -24,8 +24,6 @@ type AssociationRequest interface {
 	GetRemoteAddress() string
 	SetRemoteAddress(address string)
 	GetPresContexts() []PresentationContext
-	GetUserInformation() UserInformation
-	SetUserInformation(userInfo UserInformation)
 	GetMaxSubLength() uint32
 	SetMaxSubLength(length uint32)
 	GetImplementationClass() UIDItem
@@ -52,14 +50,18 @@ type associationRequest struct {
 	Reserved3        [32]byte
 	AppContext       UIDItem
 	PresContexts     []PresentationContext
-	UserInfo         UserInformation
+	UserInfo         *userInformation
 	PeerCertificates []*x509.Certificate
 	RemoteAddress    string
 	CorrelationID    string
 }
 
-// NewAssociationRequest - NewAssociationRequest
+// NewAssociationRequest returns a new AssociationRequest with default settings.
 func NewAssociationRequest() AssociationRequest {
+	return newAssociationRequest()
+}
+
+func newAssociationRequest() *associationRequest {
 	return &associationRequest{
 		ItemType:        pdutype.AssociationRequest,
 		Reserved1:       0x00,
@@ -72,7 +74,7 @@ func NewAssociationRequest() AssociationRequest {
 			length:    uint16(len(sopclass.DICOMApplicationContext.UID)),
 		},
 		PresContexts: make([]PresentationContext, 0),
-		UserInfo:     NewUserInformation(),
+		UserInfo:     newUserInformation(),
 	}
 }
 
@@ -112,11 +114,11 @@ func (aarq *associationRequest) GetPresContexts() []PresentationContext {
 	return aarq.PresContexts
 }
 
-func (aarq *associationRequest) GetUserInformation() UserInformation {
+func (aarq *associationRequest) GetUserInformation() *userInformation {
 	return aarq.UserInfo
 }
 
-func (aarq *associationRequest) SetUserInformation(userInfo UserInformation) {
+func (aarq *associationRequest) SetUserInformation(userInfo *userInformation) {
 	aarq.UserInfo = userInfo
 }
 

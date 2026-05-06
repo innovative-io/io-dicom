@@ -5,15 +5,6 @@ import (
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
-// AsyncOperationWindow - AsyncOperationWindow
-type AsyncOperationWindow interface {
-	GetMaxNumberOperationsInvoked() uint16
-	GetMaxNumberOperationsPerformed() uint16
-	Size() uint16
-	Read(buf *media.DICOMBuffer) (err error)
-	ReadDynamic(buf *media.DICOMBuffer) (err error)
-}
-
 type asyncOperationWindow struct {
 	ItemType                     byte //0x53
 	Reserved1                    byte
@@ -22,8 +13,7 @@ type asyncOperationWindow struct {
 	MaxNumberOperationsPerformed uint16
 }
 
-// NewAsyncOperationWindow - NewAsyncOperationWindow
-func NewAsyncOperationWindow() AsyncOperationWindow {
+func newAsyncOperationWindow() *asyncOperationWindow {
 	return &asyncOperationWindow{
 		ItemType: pdutype.AsyncOperationsWindowItem,
 	}

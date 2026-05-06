@@ -27,6 +27,7 @@ var codes []*tags.Tag
 var codeByKey map[uint32]*tags.Tag
 var codeVRByKey map[uint32]string
 var initOnce sync.Once
+var mu sync.Mutex
 
 // unknownTag is a package-level sentinel returned by GetDictionaryTag for
 // unrecognised group/element pairs. Using a single shared instance avoids
@@ -91,9 +92,8 @@ func GetDictionaryVR(group uint16, element uint16) string {
 	return "UN"
 }
 
-func loadPrivateDictionary() {
-	privateDictionaryFile := "./private.xml"
-	data, err := os.ReadFile(privateDictionaryFile)
+func loadPrivateDictionaryFromPath(path string) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
@@ -125,11 +125,24 @@ func loadPrivateDictionary() {
 	}
 }
 
-// InitDict Initialize Dictionary
+// LoadPrivateDictionary parses the private-tag XML file at path and merges its
+// entries into the dictionary. InitDict must be called first. Calling this
+// multiple times with different files is supported; duplicate group/element
+// pairs are silently skipped.
+func LoadPrivateDictionary(path string) {
+	InitDict()
+	loadPrivateDictionaryFromPath(path)
+	mu.Lock()
+	buildDictionaryIndex()
+	mu.Unlock()
+}
+
+// InitDict initializes the DICOM dictionary from the standard tag set. It is
+// safe to call from multiple goroutines; initialization happens at most once.
+// To load private tags call LoadPrivateDictionary after InitDict.
 func InitDict() {
 	initOnce.Do(func() {
 		codes = tags.GetTags()
-		loadPrivateDictionary()
 		buildDictionaryIndex()
 	})
 }

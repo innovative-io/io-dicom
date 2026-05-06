@@ -212,8 +212,8 @@ func TestSelectPresentationContextIDForAbstractSyntax(t *testing.T) {
 func TestWriteSelectsPresentationContextByAbstractSyntax(t *testing.T) {
 	pdu := NewPDUService().(*pduService)
 	pdu.Pdata.Buffer = nil
-	pdu.AssocAC = NewAssociationAccept()
-	pdu.AssocAC.GetUserInformation().GetMaxSubLength().SetMaximumLength(maxPduLength)
+	pdu.AssocAC = newAssociationAccept()
+	pdu.AssocAC.UserInfo.MaxSubLength.SetMaximumLength(maxPduLength)
 	pdu.readWriter = bufio.NewReadWriter(bufio.NewReader(bytes.NewReader(nil)), bufio.NewWriter(&bytes.Buffer{}))
 
 	studyRoot := NewPresentationContextAccept()

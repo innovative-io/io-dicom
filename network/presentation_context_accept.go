@@ -42,7 +42,7 @@ type presentationContextAccept struct {
 func NewPresentationContextAccept() PresentationContextAccept {
 	return &presentationContextAccept{
 		ItemType:              pdutype.PresentationContextAcceptItem,
-		PresentationContextID: Uniq8(),
+		PresentationContextID: uniq8(),
 		Result:                2,
 	}
 }

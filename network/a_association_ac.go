@@ -22,8 +22,6 @@ type AssociationAccept interface {
 	SetCalledAE(aeTitle string)
 	AddPresContextAccept(context PresentationContextAccept)
 	GetPresContextAccepts() []PresentationContextAccept
-	GetUserInformation() UserInformation
-	SetUserInformation(UserInfo UserInformation)
 	GetMaxSubLength() uint32
 	SetMaxSubLength(length uint32)
 	Size() uint32
@@ -43,11 +41,10 @@ type associationAccept struct {
 	Reserved3          [32]byte
 	AppContext         UIDItem
 	PresContextAccepts []PresentationContextAccept
-	UserInfo           UserInformation
+	UserInfo           *userInformation
 }
 
-// NewAssociationAccept NewAssociationAccept
-func NewAssociationAccept() AssociationAccept {
+func newAssociationAccept() *associationAccept {
 	return &associationAccept{
 		ItemType:        pdutype.AssociationAccept,
 		Reserved1:       0x00,
@@ -60,7 +57,7 @@ func NewAssociationAccept() AssociationAccept {
 			length:    uint16(len(sopclass.DICOMApplicationContext.UID)),
 		},
 		PresContextAccepts: make([]PresentationContextAccept, 0),
-		UserInfo:           NewUserInformation(),
+		UserInfo:           newUserInformation(),
 	}
 }
 
@@ -96,20 +93,20 @@ func (aaac *associationAccept) GetPresContextAccepts() []PresentationContextAcce
 	return aaac.PresContextAccepts
 }
 
-func (aaac *associationAccept) GetUserInformation() UserInformation {
+func (aaac *associationAccept) getUserInfo() *userInformation {
 	return aaac.UserInfo
 }
 
-func (aaac *associationAccept) SetUserInformation(UserInfo UserInformation) {
-	aaac.UserInfo = UserInfo
+func (aaac *associationAccept) setUserInfo(userInfo *userInformation) {
+	aaac.UserInfo = userInfo
 }
 
 func (aaac *associationAccept) GetMaxSubLength() uint32 {
-	return aaac.UserInfo.GetMaxSubLength().GetMaximumLength()
+	return aaac.UserInfo.MaxSubLength.GetMaximumLength()
 }
 
 func (aaac *associationAccept) SetMaxSubLength(length uint32) {
-	aaac.UserInfo.GetMaxSubLength().SetMaximumLength(length)
+	aaac.UserInfo.MaxSubLength.SetMaximumLength(length)
 }
 
 func (aaac *associationAccept) Size() uint32 {
@@ -130,8 +127,8 @@ func (aaac *associationAccept) Write(rw *bufio.ReadWriter) error {
 	slog.Info("ASSOC-AC:", "CallingAE", aaac.GetCallingAE(), "CalledAE", aaac.GetCalledAE())
 	slog.Info("ASSOC-AC:", "ImpClass", aaac.UserInfo.GetImplementationClass().GetUID())
 	slog.Info("ASSOC-AC:", "ImpVersion", aaac.UserInfo.GetImplementationVersion().GetUID())
-	slog.Info("ASSOC-AC:", "MaxPDULength", aaac.GetUserInformation().GetMaxSubLength().GetMaximumLength())
-	slog.Info("ASSOC-AC:", "MaxOpsInvoked", aaac.GetUserInformation().GetAsyncOperationWindow().GetMaxNumberOperationsInvoked(), "MaxOpsPerformed", aaac.GetUserInformation().GetAsyncOperationWindow().GetMaxNumberOperationsPerformed())
+	slog.Info("ASSOC-AC:", "MaxPDULength", aaac.GetMaxSubLength())
+	slog.Info("ASSOC-AC:", "MaxOpsInvoked", aaac.UserInfo.AsyncOpWindow.GetMaxNumberOperationsInvoked(), "MaxOpsPerformed", aaac.UserInfo.AsyncOpWindow.GetMaxNumberOperationsPerformed())
 
 	bd.SetBigEndian(true)
 	aaac.Size()
@@ -211,10 +208,10 @@ func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 	}
 
 	slog.Info("ASSOC-AC:", "CallingAE", aaac.GetCallingAE(), "CalledAE", aaac.GetCalledAE())
-	slog.Info("ASSOC-AC:", "ImpClass", aaac.GetUserInformation().GetImplementationClass().GetUID())
-	slog.Info("ASSOC-AC:", "ImpVersion", aaac.GetUserInformation().GetImplementationVersion().GetUID())
-	slog.Info("ASSOC-AC:", "MaxPDULength", aaac.GetUserInformation().GetMaxSubLength().GetMaximumLength())
-	slog.Info("ASSOC-AC:", "MaxOpsInvoked", aaac.GetUserInformation().GetAsyncOperationWindow().GetMaxNumberOperationsInvoked(), "MaxOpsPerformed", aaac.GetUserInformation().GetAsyncOperationWindow().GetMaxNumberOperationsPerformed())
+	slog.Info("ASSOC-AC:", "ImpClass", aaac.UserInfo.GetImplementationClass().GetUID())
+	slog.Info("ASSOC-AC:", "ImpVersion", aaac.UserInfo.GetImplementationVersion().GetUID())
+	slog.Info("ASSOC-AC:", "MaxPDULength", aaac.GetMaxSubLength())
+	slog.Info("ASSOC-AC:", "MaxOpsInvoked", aaac.UserInfo.AsyncOpWindow.GetMaxNumberOperationsInvoked(), "MaxOpsPerformed", aaac.UserInfo.AsyncOpWindow.GetMaxNumberOperationsPerformed())
 	slog.Info("ASSOC-AC: ApplicationContext", "UID", aaac.AppContext.GetUID(), "Description", sopclass.GetSOPClassFromUID(aaac.AppContext.GetUID()).Description)
 	for presIndex, presContextAccept := range aaac.PresContextAccepts {
 		slog.Info("ASSOC-AC: AcceptedPresentationContext", "Index", presIndex+1)

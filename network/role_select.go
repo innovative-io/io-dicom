@@ -7,14 +7,6 @@ import (
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
-// RoleSelect - RoleSelect
-type RoleSelect interface {
-	Size() uint16
-	Write(rw *bufio.ReadWriter) bool
-	Read(buf *media.DICOMBuffer) (err error)
-	ReadDynamic(buf *media.DICOMBuffer) (err error)
-}
-
 type roleSelect struct {
 	ItemType  byte //0x54
 	Reserved1 byte
@@ -24,8 +16,7 @@ type roleSelect struct {
 	uid       string
 }
 
-// NewRoleSelect - NewRoleSelect
-func NewRoleSelect() RoleSelect {
+func newRoleSelect() *roleSelect {
 	return &roleSelect{
 		ItemType: pdutype.SCPSCURoleSelectionItem,
 	}

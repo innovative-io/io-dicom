@@ -49,9 +49,6 @@ func Test_scu_EchoSCU(t *testing.T) {
 					CallingAE: "TEST_SCU",
 					HostName:  "localhost",
 					Port:      1040,
-					IsCFind:   false,
-					IsCMove:   false,
-					IsCStore:  false,
 					IsTLS:     false,
 				},
 			},
@@ -69,9 +66,6 @@ func Test_scu_EchoSCU(t *testing.T) {
 					CallingAE: "TEST_SCU",
 					HostName:  "localhost",
 					Port:      1040,
-					IsCFind:   false,
-					IsCMove:   false,
-					IsCStore:  false,
 					IsTLS:     false,
 				},
 			},
@@ -127,9 +121,6 @@ func Test_scu_FindSCU(t *testing.T) {
 					CallingAE: "TEST_SCU",
 					HostName:  "localhost",
 					Port:      1041,
-					IsCFind:   true,
-					IsCMove:   true,
-					IsCStore:  true,
 					IsTLS:     false,
 				},
 			},
@@ -200,9 +191,6 @@ func Test_scu_StoreSCU(t *testing.T) {
 					CallingAE: "TEST_SCU",
 					HostName:  "localhost",
 					Port:      1042,
-					IsCFind:   true,
-					IsCMove:   true,
-					IsCStore:  true,
 					IsTLS:     false,
 				},
 			},
@@ -220,6 +208,44 @@ func Test_scu_StoreSCU(t *testing.T) {
 				t.Errorf("scu.StoreSCU() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func Test_scu_StoreObjectSCU(t *testing.T) {
+	if _, err := os.Stat("../samples/test.dcm"); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+
+	_, testSCP := StartSCP(t, 1043)
+
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
+		return request.GetCalledAE() == "TEST_SCP"
+	})
+
+	var received media.DICOMObject
+	testSCP.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
+		received = data
+		return dicomstatus.Success
+	})
+
+	obj, err := media.NewDCMObjFromFile("../samples/test.dcm")
+	if err != nil {
+		t.Fatalf("NewDCMObjFromFile: %v", err)
+	}
+
+	dest := &network.Destination{
+		Name:      "StoreObject Test",
+		CalledAE:  "TEST_SCP",
+		CallingAE: "TEST_SCU",
+		HostName:  "localhost",
+		Port:      1043,
+	}
+	d := NewSCU(dest)
+	if err := d.StoreObjectSCU(context.Background(), obj, 0); err != nil {
+		t.Fatalf("StoreObjectSCU: %v", err)
+	}
+	if received == nil {
+		t.Fatal("SCP did not receive the C-STORE request")
 	}
 }
 

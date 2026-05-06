@@ -154,9 +154,6 @@ func main() {
 		CalledAE:  *calledAE,
 		CallingAE: *callingAE,
 		Port:      *port,
-		IsCFind:   true,
-		IsCStore:  true,
-		IsMWL:     true,
 		IsTLS:     *tlsEnabled,
 	}
 	if *tlsEnabled {

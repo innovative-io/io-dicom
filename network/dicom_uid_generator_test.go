@@ -37,21 +37,12 @@ func TestUniq16odd_NonZero(t *testing.T) {
 
 func TestUniq8_Increments(t *testing.T) {
 	Resetuniq()
-	v1 := Uniq8()
-	v2 := Uniq8()
+	v1 := uniq8()
+	v2 := uniq8()
 	if v2 <= v1 && v2 != 0 { // allow wrap-around to 0 on overflow
 		if v2 != 0 {
-			t.Errorf("Uniq8: v2 (%d) should be > v1 (%d)", v2, v1)
+			t.Errorf("uniq8: v2 (%d) should be > v1 (%d)", v2, v1)
 		}
-	}
-}
-
-func TestUniq16_Increments(t *testing.T) {
-	Resetuniq()
-	v1 := Uniq16()
-	v2 := Uniq16()
-	if v2 <= v1 && v2 != 0 {
-		t.Errorf("Uniq16: v2 (%d) should be > v1 (%d)", v2, v1)
 	}
 }
 

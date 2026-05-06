@@ -10,16 +10,10 @@ func Resetuniq() {
 	atomic.StoreInt64(&uniqid, 1)
 }
 
-// Uniq8 returns a new unique 8-bit value.
-func Uniq8() byte {
+// uniq8 returns a new unique 8-bit value.
+func uniq8() byte {
 	v := atomic.AddInt64(&uniqid, 1)
 	return byte(v & 0xff)
-}
-
-// Uniq16 returns a new unique 16-bit value.
-func Uniq16() uint16 {
-	v := atomic.AddInt64(&uniqid, 1)
-	return uint16(v & 0xffff)
 }
 
 // Uniq8odd returns a new unique 8-bit value using the same increment pattern

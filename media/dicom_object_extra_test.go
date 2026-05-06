@@ -55,9 +55,9 @@ func TestDICOMObject_GetTag_PatientID(t *testing.T) {
 }
 
 func TestDICOMObject_FindTag_Missing(t *testing.T) {
-	obj := makeSimpleObj().(*dicomObject)
-	if obj.FindTag(0x0020, 0x0010) != nil {
-		t.Fatal("FindTag() should return nil for absent group/element")
+	obj := makeSimpleObj()
+	if obj.GetTag(&tags.Tag{Group: 0x0020, Element: 0x0010}) != nil {
+		t.Fatal("GetTag() should return nil for absent group/element")
 	}
 }
 

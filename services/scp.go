@@ -248,8 +248,6 @@ func WithCancelGraceWindow(d time.Duration) SCPOption {
 
 // NewSCP creates a plain-TCP DICOM SCP listening on port.
 func NewSCP(port int, opts ...SCPOption) SCP {
-	media.InitDict()
-
 	s := &scp{
 		Port:               port,
 		canceledMessageIDs: make(map[uint16]struct{}),
@@ -266,8 +264,6 @@ func NewSCP(port int, opts ...SCPOption) SCP {
 // NewSCPWithTLS creates a TLS-enabled DICOM SCP listening on port.
 // cfg must contain at least one certificate (e.g. loaded with tls.LoadX509KeyPair).
 func NewSCPWithTLS(port int, cfg *tls.Config, opts ...SCPOption) SCP {
-	media.InitDict()
-
 	s := &scp{
 		Port:               port,
 		tlsConfig:          normalizeServerTLSConfig(cfg),

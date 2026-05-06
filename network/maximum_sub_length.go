@@ -7,16 +7,6 @@ import (
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
-// MaximumPDULength - MaximumPDULength
-type MaximumPDULength interface {
-	GetMaximumLength() uint32
-	SetMaximumLength(length uint32)
-	Size() uint16
-	Write(rw *bufio.ReadWriter) bool
-	Read(buf *media.DICOMBuffer) (err error)
-	ReadDynamic(buf *media.DICOMBuffer) (err error)
-}
-
 type maximumPDULength struct {
 	ItemType      byte //0x51
 	Reserved1     byte
@@ -24,8 +14,7 @@ type maximumPDULength struct {
 	MaximumLength uint32
 }
 
-// NewMaximumPDULength - NewMaximumPDULength
-func NewMaximumPDULength() MaximumPDULength {
+func newMaximumPDULength() *maximumPDULength {
 	return &maximumPDULength{
 		ItemType: pdutype.MaximumSubLengthItem,
 		Length:   4,

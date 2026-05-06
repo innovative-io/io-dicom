@@ -82,11 +82,11 @@ type pduService struct {
 	AcceptedPresentationContexts []PresentationContextAccept
 	conn                         net.Conn
 	readWriter                   *bufio.ReadWriter
-	buf                           *media.DICOMBuffer
+	buf                          *media.DICOMBuffer
 	pdutype                      int
 	pdulength                    uint32
-	AssocRQ                      AssociationRequest
-	AssocAC                      AssociationAccept
+	AssocRQ                      *associationRequest
+	AssocAC                      *associationAccept
 	AssocRJ                      AssociationReject
 	ReleaseRQ                    ReleaseRequest
 	ReleaseRP                    ReleaseResponse
@@ -100,9 +100,9 @@ type pduService struct {
 // NewPDUService - creates a pointer to PDUService
 func NewPDUService() PDUService {
 	return &pduService{
-		buf:        media.NewDICOMBuffer(),
-		AssocRQ:   NewAssociationRequest(),
-		AssocAC:   NewAssociationAccept(),
+		buf:       media.NewDICOMBuffer(),
+		AssocRQ:   newAssociationRequest(),
+		AssocAC:   newAssociationAccept(),
 		AssocRJ:   NewAssociationReject(),
 		ReleaseRQ: NewReleaseRequest(),
 		ReleaseRP: NewReleaseResponse(),
@@ -578,7 +578,7 @@ func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
 	}
 
 	pdu.Pdata.MsgHeader = ItemType
-	if pdu.AssocAC.GetUserInformation().GetMaxSubLength().GetMaximumLength() > maxPduLength {
+	if pdu.AssocAC.GetMaxSubLength() > maxPduLength {
 		pdu.AssocAC.SetMaxSubLength(maxPduLength)
 	}
 
@@ -654,17 +654,14 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 	}
 
 	pdu.AcceptedPresentationContexts = nil
-	pdu.AssocAC = NewAssociationAccept()
+	pdu.AssocAC = newAssociationAccept()
 	pdu.AssocAC.SetCalledAE(pdu.AssocRQ.GetCalledAE())
 	pdu.AssocAC.SetCallingAE(pdu.AssocRQ.GetCallingAE())
 	pdu.AssocAC.SetAppContext(pdu.AssocRQ.GetAppContext())
-	pdu.AssocAC.SetUserInformation(pdu.AssocRQ.GetUserInformation())
 
 	slog.Info("ASSOC-RQ:", "CallingAE", pdu.AssocRQ.GetCallingAE(), "CalledAE", pdu.AssocRQ.GetCalledAE())
-	slog.Debug("ASSOC-RQ:", "ImpClass", pdu.AssocRQ.GetUserInformation().GetImplementationClass().GetUID())
-	slog.Debug("ASSOC-RQ:", "ImpVersion", pdu.AssocRQ.GetUserInformation().GetImplementationVersion().GetUID())
-	slog.Debug("ASSOC-RQ:", "MaxPDULength", pdu.AssocRQ.GetUserInformation().GetMaxSubLength().GetMaximumLength())
-	slog.Debug("ASSOC-RQ:", "MaxOpsInvoked", pdu.AssocRQ.GetUserInformation().GetAsyncOperationWindow().GetMaxNumberOperationsInvoked(), "MaxOpsPerformed", pdu.AssocRQ.GetUserInformation().GetAsyncOperationWindow().GetMaxNumberOperationsPerformed())
+	slog.Debug("ASSOC-RQ:", "ImpClass", pdu.AssocRQ.GetImplementationClass().GetUID())
+	slog.Debug("ASSOC-RQ:", "MaxPDULength", pdu.AssocRQ.GetMaxSubLength())
 
 	for presIndex, PresContext := range pdu.AssocRQ.GetPresContexts() {
 		slog.Debug("ASSOC-RQ: PresentationContext", "Index", presIndex)
@@ -715,14 +712,11 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 	}
 
 	if len(pdu.AcceptedPresentationContexts) > 0 {
-		MaxSubLength := NewMaximumPDULength()
-		UserInfo := NewUserInformation()
-
-		MaxSubLength.SetMaximumLength(maxPduLength)
-		UserInfo.SetImplementationClassUID(implementation.GetImplementationClassUID())
-		UserInfo.SetImplementationVersionName(implementation.GetImplementationVersion())
-		UserInfo.SetMaxSubLength(MaxSubLength)
-		pdu.AssocAC.SetUserInformation(UserInfo)
+		userInfo := newUserInformation()
+		userInfo.MaxSubLength.SetMaximumLength(maxPduLength)
+		userInfo.SetImplementationClassUID(implementation.GetImplementationClassUID())
+		userInfo.SetImplementationVersionName(implementation.GetImplementationVersion())
+		pdu.AssocAC.setUserInfo(userInfo)
 		return pdu.writeEncodedPDU(byte(pdutype.AssociationAccept), func(rw *bufio.ReadWriter) error {
 			return pdu.AssocAC.Write(rw)
 		})

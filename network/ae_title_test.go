@@ -17,7 +17,7 @@ func TestAssociationRequestAETitlePreservesInternalSpaces(t *testing.T) {
 }
 
 func TestAssociationAcceptAETitlePreservesInternalSpaces(t *testing.T) {
-	aaac := NewAssociationAccept().(*associationAccept)
+	aaac := newAssociationAccept()
 
 	aaac.SetCallingAE("NODE A")
 	aaac.SetCalledAE("PACS B")

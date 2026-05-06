@@ -98,7 +98,6 @@ func TestSCP_OnCMoveRequest(t *testing.T) {
 		CallingAE: "SCU",
 		HostName:  "localhost",
 		Port:      1046,
-		IsCMove:   true,
 	}
 	scu := NewSCU(dest)
 
@@ -147,7 +146,6 @@ func TestSCP_CFindRejectsInvalidQueryRetrieveLevel(t *testing.T) {
 		CallingAE: "SCU",
 		HostName:  "localhost",
 		Port:      1047,
-		IsCFind:   true,
 	}
 
 	query := media.NewEmptyDCMObj()
@@ -188,7 +186,6 @@ func TestSCP_CFindAllowsEmptyQueryRetrieveLevelForWorklist(t *testing.T) {
 		CallingAE: "SCU",
 		HostName:  "localhost",
 		Port:      1048,
-		IsCFind:   true,
 	}
 
 	query := media.NewEmptyDCMObj()

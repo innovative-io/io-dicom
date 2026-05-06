@@ -255,7 +255,7 @@ func TestReleaseResponse_ReadDynamic_Roundtrip(t *testing.T) {
 // ── MaximumPDULength ──────────────────────────────────────────────────────────
 
 func TestMaximumPDULength_GetSetMaximumLength(t *testing.T) {
-	m := NewMaximumPDULength()
+	m := newMaximumPDULength()
 	m.SetMaximumLength(65536)
 	if got := m.GetMaximumLength(); got != 65536 {
 		t.Errorf("MaximumPDULength.GetMaximumLength() = %d, want 65536", got)
@@ -263,14 +263,14 @@ func TestMaximumPDULength_GetSetMaximumLength(t *testing.T) {
 }
 
 func TestMaximumPDULength_Size(t *testing.T) {
-	m := NewMaximumPDULength()
+	m := newMaximumPDULength()
 	if got := m.Size(); got != 8 {
 		t.Errorf("MaximumPDULength.Size() = %d, want 8", got)
 	}
 }
 
 func TestMaximumPDULength_WriteRead_Roundtrip(t *testing.T) {
-	m := NewMaximumPDULength()
+	m := newMaximumPDULength()
 	m.SetMaximumLength(32768)
 
 	var out bytes.Buffer
@@ -281,7 +281,7 @@ func TestMaximumPDULength_WriteRead_Roundtrip(t *testing.T) {
 	rw.Flush()
 
 	buf := media.NewDICOMBufferFromBytes(out.Bytes())
-	m2 := NewMaximumPDULength()
+	m2 := newMaximumPDULength()
 	if err := m2.Read(buf); err != nil {
 		t.Fatalf("MaximumPDULength.Read: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestMaximumPDULength_WriteRead_Roundtrip(t *testing.T) {
 }
 
 func TestMaximumPDULength_ReadDynamic_Roundtrip(t *testing.T) {
-	m := NewMaximumPDULength()
+	m := newMaximumPDULength()
 	m.SetMaximumLength(1024)
 
 	var out bytes.Buffer
@@ -301,7 +301,7 @@ func TestMaximumPDULength_ReadDynamic_Roundtrip(t *testing.T) {
 
 	// ReadDynamic skips ItemType byte
 	buf := media.NewDICOMBufferFromBytes(out.Bytes()[1:])
-	m2 := NewMaximumPDULength()
+	m2 := newMaximumPDULength()
 	if err := m2.ReadDynamic(buf); err != nil {
 		t.Fatalf("MaximumPDULength.ReadDynamic: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestMaximumPDULength_ReadDynamic_Roundtrip(t *testing.T) {
 // ── AsyncOperationWindow ──────────────────────────────────────────────────────
 
 func TestAsyncOperationWindow_Getters_ZeroDefault(t *testing.T) {
-	a := NewAsyncOperationWindow()
+	a := newAsyncOperationWindow()
 	if a.GetMaxNumberOperationsInvoked() != 0 {
 		t.Error("AsyncOperationWindow: default MaxNumberOperationsInvoked should be 0")
 	}
@@ -323,7 +323,7 @@ func TestAsyncOperationWindow_Getters_ZeroDefault(t *testing.T) {
 }
 
 func TestAsyncOperationWindow_Size(t *testing.T) {
-	a := NewAsyncOperationWindow()
+	a := newAsyncOperationWindow()
 	// Length=0 so Size()=4
 	if got := a.Size(); got != 4 {
 		t.Errorf("AsyncOperationWindow.Size() = %d, want 4", got)
@@ -339,7 +339,7 @@ func TestAsyncOperationWindow_ReadDynamic(t *testing.T) {
 		0x00, 0x03, // MaxNumberOperationsPerformed = 3
 	}
 	buf := media.NewDICOMBufferFromBytes(data)
-	a := NewAsyncOperationWindow()
+	a := newAsyncOperationWindow()
 	if err := a.ReadDynamic(buf); err != nil {
 		t.Fatalf("AsyncOperationWindow.ReadDynamic: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestAsyncOperationWindow_Read(t *testing.T) {
 		0x00, 0x01, // performed = 1
 	}
 	buf := media.NewDICOMBufferFromBytes(data)
-	a := NewAsyncOperationWindow()
+	a := newAsyncOperationWindow()
 	if err := a.Read(buf); err != nil {
 		t.Fatalf("AsyncOperationWindow.Read: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestAsyncOperationWindow_Read(t *testing.T) {
 // ── RoleSelect ────────────────────────────────────────────────────────────────
 
 func TestRoleSelect_Size_Zero(t *testing.T) {
-	r := NewRoleSelect()
+	r := newRoleSelect()
 	// Length=0, so Size()=4
 	if got := r.Size(); got != 4 {
 		t.Errorf("RoleSelect.Size() = %d, want 4", got)
@@ -381,7 +381,7 @@ func TestRoleSelect_Size_Zero(t *testing.T) {
 }
 
 func TestRoleSelect_WriteRead_Roundtrip(t *testing.T) {
-	r := NewRoleSelect()
+	r := newRoleSelect()
 	data, ok := captureWriteBool(r.Write)
 	if !ok {
 		t.Fatal("RoleSelect.Write returned false")
@@ -391,7 +391,7 @@ func TestRoleSelect_WriteRead_Roundtrip(t *testing.T) {
 	}
 
 	buf := media.NewDICOMBufferFromBytes(data)
-	r2 := NewRoleSelect()
+	r2 := newRoleSelect()
 	if err := r2.Read(buf); err != nil {
 		t.Fatalf("RoleSelect.Read: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestRoleSelect_ReadDynamic(t *testing.T) {
 	out.WriteByte(0x01) // SCPRole
 
 	buf := media.NewDICOMBufferFromBytes(out.Bytes())
-	r := NewRoleSelect()
+	r := newRoleSelect()
 	if err := r.ReadDynamic(buf); err != nil {
 		t.Fatalf("RoleSelect.ReadDynamic: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestUIDItem_ReadDynamic_Roundtrip(t *testing.T) {
 // ── UserInformation extended ──────────────────────────────────────────────────
 
 func TestUserInformation_SetImplementationClassUID(t *testing.T) {
-	ui := NewUserInformation()
+	ui := newUserInformation()
 	ui.SetImplementationClassUID("1.2.840.10008.5.1.4.34.5")
 	if uid := ui.GetImplementationClass().GetUID(); uid != "1.2.840.10008.5.1.4.34.5" {
 		t.Errorf("UserInformation.GetImplementationClass.GetUID() = %q", uid)
@@ -491,7 +491,7 @@ func TestUserInformation_SetImplementationClassUID(t *testing.T) {
 }
 
 func TestUserInformation_SetImplementationVersionName(t *testing.T) {
-	ui := NewUserInformation()
+	ui := newUserInformation()
 	ui.SetImplementationVersionName("IO-DICOM-2.0.0")
 	if ver := ui.GetImplementationVersion().GetUID(); ver != "IO-DICOM-2.0.0" {
 		t.Errorf("UserInformation.GetImplementationVersion.GetUID() = %q", ver)
@@ -499,7 +499,7 @@ func TestUserInformation_SetImplementationVersionName(t *testing.T) {
 }
 
 func TestUserInformation_GetSetItemType(t *testing.T) {
-	ui := NewUserInformation()
+	ui := newUserInformation()
 	ui.SetItemType(0x51)
 	if got := ui.GetItemType(); got != 0x51 {
 		t.Errorf("UserInformation.GetItemType() = 0x%X, want 0x51", got)
@@ -507,8 +507,8 @@ func TestUserInformation_GetSetItemType(t *testing.T) {
 }
 
 func TestUserInformation_SetMaxSubLength(t *testing.T) {
-	ui := NewUserInformation()
-	m := NewMaximumPDULength()
+	ui := newUserInformation()
+	m := newMaximumPDULength()
 	m.SetMaximumLength(16384)
 	ui.SetMaxSubLength(m)
 	if ui.GetMaxSubLength().GetMaximumLength() != 16384 {
@@ -517,14 +517,14 @@ func TestUserInformation_SetMaxSubLength(t *testing.T) {
 }
 
 func TestUserInformation_GetAsyncOperationWindow(t *testing.T) {
-	ui := NewUserInformation()
+	ui := newUserInformation()
 	if ui.GetAsyncOperationWindow() == nil {
 		t.Error("UserInformation.GetAsyncOperationWindow() should not be nil")
 	}
 }
 
 func TestUserInformation_Size(t *testing.T) {
-	ui := NewUserInformation()
+	ui := newUserInformation()
 	ui.SetImplementationClassUID("1.2.3")
 	ui.SetImplementationVersionName("v1")
 	sz := ui.Size()

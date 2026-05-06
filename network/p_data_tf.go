@@ -17,7 +17,7 @@ type PresentationDataTransfer struct {
 	BlockSize             uint32
 	MsgStatus             uint32
 	Endian                uint32
-	pdv                   PresentationDataValue
+	pdv                   presentationDataValue
 	PresentationContextID byte
 	MsgHeader             byte
 }

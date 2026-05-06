@@ -25,6 +25,10 @@ type SCU interface {
 	MoveSCU(ctx context.Context, destAET string, Query media.DICOMObject, timeout int) (uint16, error)
 	GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) (uint16, error)
 	StoreSCU(ctx context.Context, FileName string, timeout int) error
+	// StoreObjectSCU sends a DICOM object over a C-STORE association without
+	// requiring the object to be written to disk first. The object must contain
+	// a SOPClassUID tag.
+	StoreObjectSCU(ctx context.Context, obj media.DICOMObject, timeout int) error
 	SetOnCFindResult(f func(result media.DICOMObject))
 	SetOnCMoveResult(f func(result media.DICOMObject))
 	// SetOnCGetStore registers a callback invoked for each C-STORE sub-operation
@@ -213,19 +217,23 @@ func (d *scu) StoreSCU(ctx context.Context, FileName string, timeout int) error 
 	if err != nil {
 		return err
 	}
+	return d.StoreObjectSCU(ctx, DDO, timeout)
+}
 
-	SOPClassUID := DDO.GetString(tags.SOPClassUID)
+// StoreObjectSCU sends obj over a C-STORE association.
+func (d *scu) StoreObjectSCU(ctx context.Context, obj media.DICOMObject, timeout int) error {
+	SOPClassUID := obj.GetString(tags.SOPClassUID)
 	if SOPClassUID == "" {
-		return errors.New("scu: StoreSCU: missing SOPClassUID in DICOM file")
+		return errors.New("scu: StoreObjectSCU: missing SOPClassUID in DICOM object")
 	}
 
 	pdu := network.NewPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(ctx, pdu, SOPClassUID, []string{DDO.GetTransferSyntax().UID}, timeout); err != nil {
+	if err := d.openAssociation(ctx, pdu, SOPClassUID, []string{obj.GetTransferSyntax().UID}, timeout); err != nil {
 		return err
 	}
 
-	if err := d.writeStoreRQ(ctx, pdu, DDO); err != nil {
+	if err := d.writeStoreRQ(ctx, pdu, obj); err != nil {
 		return err
 	}
 
@@ -234,7 +242,7 @@ func (d *scu) StoreSCU(ctx context.Context, FileName string, timeout int) error 
 		return err
 	}
 	if status != dicomstatus.Success {
-		return fmt.Errorf("scu: StoreSCU: C-Store failed with status 0x%04X (%s)", status, dicomstatus.Description(status))
+		return fmt.Errorf("scu: StoreObjectSCU: C-Store failed with status 0x%04X (%s)", status, dicomstatus.Description(status))
 	}
 	return nil
 }

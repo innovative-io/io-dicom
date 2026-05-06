@@ -9,42 +9,24 @@ import (
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
-// UserInformation - UserInformation
-type UserInformation interface {
-	GetItemType() byte
-	SetItemType(t byte)
-	GetAsyncOperationWindow() AsyncOperationWindow
-	GetMaxSubLength() MaximumPDULength
-	SetMaxSubLength(length MaximumPDULength)
-	Size() uint16
-	GetImplementationClass() UIDItem
-	SetImplementationClassUID(name string)
-	GetImplementationVersion() UIDItem
-	SetImplementationVersionName(name string)
-	Write(rw *bufio.ReadWriter) (err error)
-	Read(buf *media.DICOMBuffer) (err error)
-	ReadDynamic(buf *media.DICOMBuffer) (err error)
-}
-
 type userInformation struct {
 	ItemType        byte //0x50
 	Reserved1       byte
 	Length          uint16
 	UserInfoBaggage uint32
-	MaxSubLength    MaximumPDULength
-	AsyncOpWindow   AsyncOperationWindow
-	SCPSCURole      RoleSelect
+	MaxSubLength    *maximumPDULength
+	AsyncOpWindow   *asyncOperationWindow
+	SCPSCURole      *roleSelect
 	ImpClass        uidItem
 	ImpVersion      uidItem
 }
 
-// NewUserInformation - NewUserInformation
-func NewUserInformation() UserInformation {
+func newUserInformation() *userInformation {
 	return &userInformation{
 		ItemType:      pdutype.UserInformationItem,
-		MaxSubLength:  NewMaximumPDULength(),
-		AsyncOpWindow: NewAsyncOperationWindow(),
-		SCPSCURole:    NewRoleSelect(),
+		MaxSubLength:  newMaximumPDULength(),
+		AsyncOpWindow: newAsyncOperationWindow(),
+		SCPSCURole:    newRoleSelect(),
 		ImpClass: uidItem{
 			itemType: pdutype.ImplementationClassUIDItem,
 		},
@@ -62,15 +44,15 @@ func (ui *userInformation) SetItemType(t byte) {
 	ui.ItemType = t
 }
 
-func (ui *userInformation) GetMaxSubLength() MaximumPDULength {
+func (ui *userInformation) GetMaxSubLength() *maximumPDULength {
 	return ui.MaxSubLength
 }
 
-func (ui *userInformation) GetAsyncOperationWindow() AsyncOperationWindow {
+func (ui *userInformation) GetAsyncOperationWindow() *asyncOperationWindow {
 	return ui.AsyncOpWindow
 }
 
-func (ui *userInformation) SetMaxSubLength(length MaximumPDULength) {
+func (ui *userInformation) SetMaxSubLength(length *maximumPDULength) {
 	ui.MaxSubLength = length
 }
 

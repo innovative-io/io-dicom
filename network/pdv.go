@@ -19,7 +19,7 @@ const PDVLastFragment byte = 0x02
 // PDVTypeMask is used to clear the last-fragment bit while preserving the command/dataset bit.
 const PDVTypeMask byte = 0x01
 
-type PresentationDataValue struct {
+type presentationDataValue struct {
 	Length                uint32
 	PresentationContextID byte
 	MsgHeader             byte
