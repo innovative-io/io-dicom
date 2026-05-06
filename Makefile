@@ -25,7 +25,7 @@ build-native:
 	. "$$PWD/.local/codec-deps/env.sh" && go build -tags '$(NATIVE_CODEC_TAGS)' ./... && make contract-check
 
 transfer-syntax-matrix:
-	go run ./tools/generate_transfer_syntax_support_matrix.go
+	go run ./cmd/generate-transfer-syntax-support-matrix/
 
 contract-check:
 	make transfer-syntax-matrix
