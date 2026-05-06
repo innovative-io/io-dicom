@@ -51,14 +51,14 @@ func NWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, resp
 		commandLength += 8 + uint32(sopInstanceUIDLength)
 	}
 
-	responseCommandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	responseCommandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	responseCommandObj.WriteUint16(tags.CommandField, responseCommandField)
-	responseCommandObj.WriteUint16(tags.MessageIDBeingRespondedTo, requestCommandObj.GetUShort(tags.MessageID))
-	responseCommandObj.WriteUint16(tags.CommandDataSetType, leDSType)
-	responseCommandObj.WriteUint16(tags.Status, status)
+	responseCommandObj.Write(tags.CommandGroupLength, commandLength)
+	responseCommandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	responseCommandObj.Write(tags.CommandField, responseCommandField)
+	responseCommandObj.Write(tags.MessageIDBeingRespondedTo, requestCommandObj.GetUint16(tags.MessageID))
+	responseCommandObj.Write(tags.CommandDataSetType, leDSType)
+	responseCommandObj.Write(tags.Status, status)
 	if sopInstanceUID != "" {
-		responseCommandObj.WriteString(tags.AffectedSOPInstanceUID, sopInstanceUID)
+		responseCommandObj.Write(tags.AffectedSOPInstanceUID, sopInstanceUID)
 	}
 
 	if err := pdu.Write(responseCommandObj, network.PDVCommand); err != nil {

@@ -88,36 +88,36 @@ func generateCTImage(outDir string) error {
 	ds.SetTransferSyntax(ts)
 
 	// Patient Information
-	ds.WriteString(tags.PatientName, "Test^CT")
-	ds.WriteString(tags.PatientID, "CT001")
+	ds.Write(tags.PatientName, "Test^CT")
+	ds.Write(tags.PatientID, "CT001")
 
 	// Study Information
-	ds.WriteString(tags.StudyInstanceUID, "1.2.3.4.5")
-	ds.WriteString(tags.SeriesInstanceUID, "1.2.3.4.5.1")
-	ds.WriteString(tags.SOPInstanceUID, "1.2.3.4.5.1.1")
-	ds.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.2") // CT Image Storage
+	ds.Write(tags.StudyInstanceUID, "1.2.3.4.5")
+	ds.Write(tags.SeriesInstanceUID, "1.2.3.4.5.1")
+	ds.Write(tags.SOPInstanceUID, "1.2.3.4.5.1.1")
+	ds.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.2") // CT Image Storage
 
 	// Dates and times
 	now := time.Now()
-	ds.WriteDate(tags.StudyDate, now)
-	ds.WriteTime(tags.StudyTime, now)
-	ds.WriteDate(tags.ContentDate, now)
-	ds.WriteTime(tags.ContentTime, now)
+	ds.Write(tags.StudyDate, now)
+	ds.Write(tags.StudyTime, now)
+	ds.Write(tags.ContentDate, now)
+	ds.Write(tags.ContentTime, now)
 
 	// Modality
-	ds.WriteString(tags.Modality, "CT")
+	ds.Write(tags.Modality, "CT")
 
 	// Image dimensions
-	ds.WriteUint16(tags.Rows, 512)
-	ds.WriteUint16(tags.Columns, 512)
+	ds.Write(tags.Rows, 512)
+	ds.Write(tags.Columns, 512)
 
 	// Pixel representation
-	ds.WriteUint16(tags.SamplesPerPixel, 1)
-	ds.WriteString(tags.PhotometricInterpretation, "MONOCHROME2")
-	ds.WriteUint16(tags.BitsAllocated, 16)
-	ds.WriteUint16(tags.BitsStored, 12)
-	ds.WriteUint16(tags.HighBit, 11)
-	ds.WriteUint16(tags.PixelRepresentation, 0)
+	ds.Write(tags.SamplesPerPixel, 1)
+	ds.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	ds.Write(tags.BitsAllocated, 16)
+	ds.Write(tags.BitsStored, 12)
+	ds.Write(tags.HighBit, 11)
+	ds.Write(tags.PixelRepresentation, 0)
 
 	// Create synthetic pixel data (gradient pattern)
 	pixelData := make([]byte, 512*512*2)
@@ -129,7 +129,7 @@ func generateCTImage(outDir string) error {
 		}
 	}
 
-	ds.WriteStringGE(tags.PixelData.Group, tags.PixelData.Element, "OW", string(pixelData))
+	ds.Add(media.NewStringTag(tags.PixelData.Group, tags.PixelData.Element, "OW", string(pixelData)))
 
 	filename := fmt.Sprintf("%s/synthetic-ct.dcm", outDir)
 	return ds.WriteToFile(filename)
@@ -144,41 +144,41 @@ func generateMRImage(outDir string) error {
 	ds.SetTransferSyntax(ts)
 
 	// Patient Information
-	ds.WriteString(tags.PatientName, "Test^MR")
-	ds.WriteString(tags.PatientID, "MR001")
+	ds.Write(tags.PatientName, "Test^MR")
+	ds.Write(tags.PatientID, "MR001")
 
 	// Study Information
-	ds.WriteString(tags.StudyInstanceUID, "1.2.3.4.5")
-	ds.WriteString(tags.SeriesInstanceUID, "1.2.3.4.5.2")
-	ds.WriteString(tags.SOPInstanceUID, "1.2.3.4.5.2.1")
-	ds.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.4") // MR Image Storage
+	ds.Write(tags.StudyInstanceUID, "1.2.3.4.5")
+	ds.Write(tags.SeriesInstanceUID, "1.2.3.4.5.2")
+	ds.Write(tags.SOPInstanceUID, "1.2.3.4.5.2.1")
+	ds.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.4") // MR Image Storage
 
 	// Dates and times
 	now := time.Now()
-	ds.WriteDate(tags.StudyDate, now)
-	ds.WriteTime(tags.StudyTime, now)
-	ds.WriteDate(tags.ContentDate, now)
-	ds.WriteTime(tags.ContentTime, now)
+	ds.Write(tags.StudyDate, now)
+	ds.Write(tags.StudyTime, now)
+	ds.Write(tags.ContentDate, now)
+	ds.Write(tags.ContentTime, now)
 
 	// Modality
-	ds.WriteString(tags.Modality, "MR")
+	ds.Write(tags.Modality, "MR")
 
 	// MR-specific parameters
-	ds.WriteString(tags.EchoTime, "0.1")
-	ds.WriteString(tags.RepetitionTime, "0.5")
-	ds.WriteString(tags.FlipAngle, "90")
+	ds.Write(tags.EchoTime, "0.1")
+	ds.Write(tags.RepetitionTime, "0.5")
+	ds.Write(tags.FlipAngle, "90")
 
 	// Image dimensions
-	ds.WriteUint16(tags.Rows, 256)
-	ds.WriteUint16(tags.Columns, 256)
+	ds.Write(tags.Rows, 256)
+	ds.Write(tags.Columns, 256)
 
 	// Pixel representation
-	ds.WriteUint16(tags.SamplesPerPixel, 1)
-	ds.WriteString(tags.PhotometricInterpretation, "MONOCHROME2")
-	ds.WriteUint16(tags.BitsAllocated, 16)
-	ds.WriteUint16(tags.BitsStored, 12)
-	ds.WriteUint16(tags.HighBit, 11)
-	ds.WriteUint16(tags.PixelRepresentation, 0)
+	ds.Write(tags.SamplesPerPixel, 1)
+	ds.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	ds.Write(tags.BitsAllocated, 16)
+	ds.Write(tags.BitsStored, 12)
+	ds.Write(tags.HighBit, 11)
+	ds.Write(tags.PixelRepresentation, 0)
 
 	// Create synthetic pixel data (concentric circles pattern)
 	pixelData := make([]byte, 256*256*2)
@@ -196,7 +196,7 @@ func generateMRImage(outDir string) error {
 		}
 	}
 
-	ds.WriteStringGE(tags.PixelData.Group, tags.PixelData.Element, "OW", string(pixelData))
+	ds.Add(media.NewStringTag(tags.PixelData.Group, tags.PixelData.Element, "OW", string(pixelData)))
 
 	filename := fmt.Sprintf("%s/synthetic-mr.dcm", outDir)
 	return ds.WriteToFile(filename)
@@ -211,36 +211,36 @@ func generateUltrasoundImage(outDir string) error {
 	ds.SetTransferSyntax(ts)
 
 	// Patient Information
-	ds.WriteString(tags.PatientName, "Test^US")
-	ds.WriteString(tags.PatientID, "US001")
+	ds.Write(tags.PatientName, "Test^US")
+	ds.Write(tags.PatientID, "US001")
 
 	// Study Information
-	ds.WriteString(tags.StudyInstanceUID, "1.2.3.4.5")
-	ds.WriteString(tags.SeriesInstanceUID, "1.2.3.4.5.3")
-	ds.WriteString(tags.SOPInstanceUID, "1.2.3.4.5.3.1")
-	ds.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.6.4") // Ultrasound Image Storage
+	ds.Write(tags.StudyInstanceUID, "1.2.3.4.5")
+	ds.Write(tags.SeriesInstanceUID, "1.2.3.4.5.3")
+	ds.Write(tags.SOPInstanceUID, "1.2.3.4.5.3.1")
+	ds.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.6.4") // Ultrasound Image Storage
 
 	// Dates and times
 	now := time.Now()
-	ds.WriteDate(tags.StudyDate, now)
-	ds.WriteTime(tags.StudyTime, now)
-	ds.WriteDate(tags.ContentDate, now)
-	ds.WriteTime(tags.ContentTime, now)
+	ds.Write(tags.StudyDate, now)
+	ds.Write(tags.StudyTime, now)
+	ds.Write(tags.ContentDate, now)
+	ds.Write(tags.ContentTime, now)
 
 	// Modality
-	ds.WriteString(tags.Modality, "US")
+	ds.Write(tags.Modality, "US")
 
 	// Image dimensions
-	ds.WriteUint16(tags.Rows, 512)
-	ds.WriteUint16(tags.Columns, 512)
+	ds.Write(tags.Rows, 512)
+	ds.Write(tags.Columns, 512)
 
 	// Pixel representation (8-bit for US)
-	ds.WriteUint16(tags.SamplesPerPixel, 1)
-	ds.WriteString(tags.PhotometricInterpretation, "MONOCHROME2")
-	ds.WriteUint16(tags.BitsAllocated, 8)
-	ds.WriteUint16(tags.BitsStored, 8)
-	ds.WriteUint16(tags.HighBit, 7)
-	ds.WriteUint16(tags.PixelRepresentation, 0)
+	ds.Write(tags.SamplesPerPixel, 1)
+	ds.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	ds.Write(tags.BitsAllocated, 8)
+	ds.Write(tags.BitsStored, 8)
+	ds.Write(tags.HighBit, 7)
+	ds.Write(tags.PixelRepresentation, 0)
 
 	// Create synthetic pixel data (speckle pattern)
 	pixelData := make([]byte, 512*512)
@@ -261,7 +261,7 @@ func generateUltrasoundImage(outDir string) error {
 		}
 	}
 
-	ds.WriteStringGE(tags.PixelData.Group, tags.PixelData.Element, "OB", string(pixelData))
+	ds.Add(media.NewStringTag(tags.PixelData.Group, tags.PixelData.Element, "OB", string(pixelData)))
 
 	filename := fmt.Sprintf("%s/synthetic-us.dcm", outDir)
 	return ds.WriteToFile(filename)
@@ -276,37 +276,37 @@ func generateCRColorImage(outDir string) error {
 	ds.SetTransferSyntax(ts)
 
 	// Patient Information
-	ds.WriteString(tags.PatientName, "Test^CR")
-	ds.WriteString(tags.PatientID, "CR001")
+	ds.Write(tags.PatientName, "Test^CR")
+	ds.Write(tags.PatientID, "CR001")
 
 	// Study Information
-	ds.WriteString(tags.StudyInstanceUID, "1.2.3.4.5")
-	ds.WriteString(tags.SeriesInstanceUID, "1.2.3.4.5.4")
-	ds.WriteString(tags.SOPInstanceUID, "1.2.3.4.5.4.1")
-	ds.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.1.1") // CR Image Storage
+	ds.Write(tags.StudyInstanceUID, "1.2.3.4.5")
+	ds.Write(tags.SeriesInstanceUID, "1.2.3.4.5.4")
+	ds.Write(tags.SOPInstanceUID, "1.2.3.4.5.4.1")
+	ds.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.1.1") // CR Image Storage
 
 	// Dates and times
 	now := time.Now()
-	ds.WriteDate(tags.StudyDate, now)
-	ds.WriteTime(tags.StudyTime, now)
-	ds.WriteDate(tags.ContentDate, now)
-	ds.WriteTime(tags.ContentTime, now)
+	ds.Write(tags.StudyDate, now)
+	ds.Write(tags.StudyTime, now)
+	ds.Write(tags.ContentDate, now)
+	ds.Write(tags.ContentTime, now)
 
 	// Modality
-	ds.WriteString(tags.Modality, "CR")
+	ds.Write(tags.Modality, "CR")
 
 	// Image dimensions
-	ds.WriteUint16(tags.Rows, 256)
-	ds.WriteUint16(tags.Columns, 256)
+	ds.Write(tags.Rows, 256)
+	ds.Write(tags.Columns, 256)
 
 	// RGB Pixel representation
-	ds.WriteUint16(tags.SamplesPerPixel, 3)
-	ds.WriteString(tags.PhotometricInterpretation, "RGB")
-	ds.WriteUint16(tags.BitsAllocated, 8)
-	ds.WriteUint16(tags.BitsStored, 8)
-	ds.WriteUint16(tags.HighBit, 7)
-	ds.WriteUint16(tags.PixelRepresentation, 0)
-	ds.WriteUint16(tags.PlanarConfiguration, 0) // Interleaved
+	ds.Write(tags.SamplesPerPixel, 3)
+	ds.Write(tags.PhotometricInterpretation, "RGB")
+	ds.Write(tags.BitsAllocated, 8)
+	ds.Write(tags.BitsStored, 8)
+	ds.Write(tags.HighBit, 7)
+	ds.Write(tags.PixelRepresentation, 0)
+	ds.Write(tags.PlanarConfiguration, 0) // Interleaved
 
 	// Create synthetic RGB pixel data (color gradient)
 	// Interleaved format: RGBRGBRGB...
@@ -321,7 +321,7 @@ func generateCRColorImage(outDir string) error {
 		}
 	}
 
-	ds.WriteStringGE(tags.PixelData.Group, tags.PixelData.Element, "OB", string(pixelData))
+	ds.Add(media.NewStringTag(tags.PixelData.Group, tags.PixelData.Element, "OB", string(pixelData)))
 
 	filename := fmt.Sprintf("%s/synthetic-cr-color.dcm", outDir)
 	return ds.WriteToFile(filename)

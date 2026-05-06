@@ -12,7 +12,7 @@ import (
 
 // CEchoReadRQ CEcho request read
 func CEchoReadRQ(commandObj media.DICOMObject) bool {
-	return commandObj.GetUShort(tags.CommandField) == dicomcommand.CEchoRequest
+	return commandObj.GetUint16(tags.CommandField) == dicomcommand.CEchoRequest
 }
 
 // CEchoWriteRQ CEcho request write
@@ -27,11 +27,11 @@ func CEchoWriteRQ(pdu network.PDUService) error {
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
-	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	commandObj.WriteUint16(tags.CommandField, dicomcommand.CEchoRequest)
-	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
-	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
+	commandObj.Write(tags.CommandGroupLength, commandLength)
+	commandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	commandObj.Write(tags.CommandField, dicomcommand.CEchoRequest)
+	commandObj.Write(tags.MessageID, network.Uniq16odd())
+	commandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetNone)
 
 	return pdu.Write(commandObj, network.PDVCommand)
 }
@@ -42,14 +42,14 @@ func CEchoReadRSP(pdu network.PDUService) error {
 	if err != nil {
 		return errors.New("CEchoReadRSP: failed to read response PDU")
 	}
-	if dco.GetUShort(tags.CommandField) == dicomcommand.CEchoResponse {
-		if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
+	if dco.GetUint16(tags.CommandField) == dicomcommand.CEchoResponse {
+		if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 			return errors.New("CEchoReadRSP: CommandDataSetType must be DataSetNone")
 		}
-		if dco.GetUShort(tags.MessageIDBeingRespondedTo) == 0 {
+		if dco.GetUint16(tags.MessageIDBeingRespondedTo) == 0 {
 			return errors.New("CEchoReadRSP: MessageIDBeingRespondedTo is required")
 		}
-		if dco.GetUShort(tags.Status) == dicomstatus.Success {
+		if dco.GetUint16(tags.Status) == dicomstatus.Success {
 			return nil
 		}
 		return errors.New("CEchoReadRSP: received non-success status")
@@ -71,7 +71,7 @@ func CEchoWriteRSP(pdu network.PDUService, commandObj media.DICOMObject) error {
 		return errors.New("CEchoWriteRSP: AffectedSOPClassUID is required")
 	}
 
-	messageID := commandObj.GetUShort(tags.MessageID)
+	messageID := commandObj.GetUint16(tags.MessageID)
 	if messageID == 0 {
 		return errors.New("CEchoWriteRSP: MessageID is required")
 	}
@@ -80,11 +80,11 @@ func CEchoWriteRSP(pdu network.PDUService, commandObj media.DICOMObject) error {
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
-	responseObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	responseObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	responseObj.WriteUint16(tags.CommandField, dicomcommand.CEchoResponse)
-	responseObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
-	responseObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
-	responseObj.WriteUint16(tags.Status, dicomstatus.Success)
+	responseObj.Write(tags.CommandGroupLength, commandLength)
+	responseObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	responseObj.Write(tags.CommandField, dicomcommand.CEchoResponse)
+	responseObj.Write(tags.MessageIDBeingRespondedTo, messageID)
+	responseObj.Write(tags.CommandDataSetType, dicomcommand.DataSetNone)
+	responseObj.Write(tags.Status, dicomstatus.Success)
 	return pdu.Write(responseObj, network.PDVCommand)
 }

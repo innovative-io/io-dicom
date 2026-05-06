@@ -4,15 +4,15 @@ import (
 	"bufio"
 
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // RoleSelect - RoleSelect
 type RoleSelect interface {
 	Size() uint16
 	Write(rw *bufio.ReadWriter) bool
-	Read(ms media.MemoryStream) (err error)
-	ReadDynamic(ms media.MemoryStream) (err error)
+	Read(buf *media.DICOMBuffer) (err error)
+	ReadDynamic(buf *media.DICOMBuffer) (err error)
 }
 
 type roleSelect struct {
@@ -36,7 +36,7 @@ func (scpscu *roleSelect) Size() uint16 {
 }
 
 func (scpscu *roleSelect) Write(rw *bufio.ReadWriter) bool {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	bd.SetBigEndian(true)
 	bd.WriteByte(scpscu.ItemType)
@@ -53,33 +53,33 @@ func (scpscu *roleSelect) Write(rw *bufio.ReadWriter) bool {
 	return true
 }
 
-func (scpscu *roleSelect) Read(ms media.MemoryStream) (err error) {
-	if scpscu.ItemType, err = ms.GetByte(); err != nil {
+func (scpscu *roleSelect) Read(buf *media.DICOMBuffer) (err error) {
+	if scpscu.ItemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return scpscu.ReadDynamic(ms)
+	return scpscu.ReadDynamic(buf)
 }
 
-func (scpscu *roleSelect) ReadDynamic(ms media.MemoryStream) (err error) {
-	if scpscu.Reserved1, err = ms.GetByte(); err != nil {
+func (scpscu *roleSelect) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if scpscu.Reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if scpscu.Length, err = ms.GetUint16(); err != nil {
+	if scpscu.Length, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
-	tl, err := ms.GetUint16()
+	tl, err := buf.ReadUint16(true)
 	if err != nil {
 		return err
 	}
 
 	tuid := make([]byte, tl)
-	ms.ReadData(tuid)
+	buf.ReadData(tuid)
 
 	scpscu.uid = string(tuid)
-	if scpscu.SCURole, err = ms.GetByte(); err != nil {
+	if scpscu.SCURole, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if scpscu.SCPRole, err = ms.GetByte(); err != nil {
+	if scpscu.SCPRole, err = buf.GetByte(); err != nil {
 		return err
 	}
 	return

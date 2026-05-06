@@ -57,7 +57,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // TestAbortRequestReservedByteIsZero verifies DICOM PS3.8 Table 9-26:

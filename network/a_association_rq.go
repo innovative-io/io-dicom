@@ -10,7 +10,7 @@ import (
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // AssociationRequest - AssociationRequest
@@ -37,7 +37,7 @@ type AssociationRequest interface {
 	SetCorrelationID(id string)
 	Size() uint32
 	Write(rw *bufio.ReadWriter) error
-	Read(ms media.MemoryStream) error
+	Read(buf *media.DICOMBuffer) error
 	AddPresContexts(presentationContext PresentationContext)
 }
 
@@ -169,7 +169,7 @@ func (aarq *associationRequest) Size() uint32 {
 }
 
 func (aarq *associationRequest) Write(rw *bufio.ReadWriter) error {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	slog.Info("ASSOC-RQ:", "CallingAE", aarq.GetCallingAE(), "CalledAE", aarq.GetCalledAE())
 	slog.Info("ASSOC-RQ:", "ImpClass", aarq.GetUserInformation().GetImplementationClass().GetUID())
@@ -209,21 +209,21 @@ func (aarq *associationRequest) Write(rw *bufio.ReadWriter) error {
 	return aarq.UserInfo.Write(rw)
 }
 
-func (aarq *associationRequest) Read(ms media.MemoryStream) (err error) {
-	if aarq.ProtocolVersion, err = ms.GetUint16(); err != nil {
+func (aarq *associationRequest) Read(buf *media.DICOMBuffer) (err error) {
+	if aarq.ProtocolVersion, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
-	if aarq.Reserved2, err = ms.GetUint16(); err != nil {
+	if aarq.Reserved2, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
 
-	ms.ReadData(aarq.CalledAE[:])
-	ms.ReadData(aarq.CallingAE[:])
-	ms.ReadData(aarq.Reserved3[:])
+	buf.ReadData(aarq.CalledAE[:])
+	buf.ReadData(aarq.CallingAE[:])
+	buf.ReadData(aarq.Reserved3[:])
 
-	Count := int(ms.GetSize() - 4 - 16 - 16 - 32)
+	Count := int(buf.GetSize() - 4 - 16 - 16 - 32)
 	for Count > 0 {
-		TempByte, err := ms.GetByte()
+		TempByte, err := buf.GetByte()
 		if err != nil {
 			return err
 		}
@@ -231,15 +231,15 @@ func (aarq *associationRequest) Read(ms media.MemoryStream) (err error) {
 		switch TempByte {
 		case pdutype.ApplicationContextItem:
 			aarq.AppContext.SetType(TempByte)
-			aarq.AppContext.ReadDynamic(ms)
+			aarq.AppContext.ReadDynamic(buf)
 			Count = Count - int(aarq.AppContext.GetSize())
 		case pdutype.PresentationContextItem:
 			PresContext := NewPresentationContext()
-			PresContext.ReadDynamic(ms)
+			PresContext.ReadDynamic(buf)
 			Count = Count - int(PresContext.Size())
 			aarq.PresContexts = append(aarq.PresContexts, PresContext)
 		case pdutype.UserInformationItem: // User Information
-			aarq.UserInfo.ReadDynamic(ms)
+			aarq.UserInfo.ReadDynamic(buf)
 			return nil
 		default:
 			slog.Error("aarq::ReadDynamic, unknown Item " + strconv.Itoa(int(TempByte)))

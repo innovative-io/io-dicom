@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/innovative-io/io-dicom/clients/httpclient"
 )
 
 const dictionaryURL string = "https://raw.githubusercontent.com/fo-dicom/fo-dicom/development/FO-DICOM.Core/Dictionaries/DICOM%20Dictionary.xml"
@@ -64,11 +64,12 @@ func findModuleRoot() string {
 }
 
 func downloadDictionary() ([]xmlDictionaryTag, []xmlDictionaryUID) {
-	params := httpclient.HTTPClientParams{
-		URL: dictionaryURL,
+	resp, err := http.Get(dictionaryURL) //nolint:noctx
+	if err != nil {
+		log.Fatal(err)
 	}
-	client := httpclient.NewHTTPClient(params)
-	response, err := client.Get()
+	defer resp.Body.Close()
+	response, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatal(err)
 	}

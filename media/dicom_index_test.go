@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"testing"
+
+	"github.com/innovative-io/io-dicom/dictionary/tags"
 )
 
 // sampleFilesForIndex are relative paths to sample files used for index tests.
@@ -88,9 +90,9 @@ func TestParseIndexMatchesFullParse(t *testing.T) {
 				t.Fatalf("NewDCMObjFromFile: %v", err)
 			}
 
-			assertField := func(fieldName, got, group, elem string) {
+			assertField := func(fieldName, got string, tag *tags.Tag) {
 				t.Helper()
-				want := obj.GetStringGE(parseHex(t, group), parseHex(t, elem))
+				want := obj.GetString(tag)
 				if got != want {
 					t.Errorf("%s: ParseIndex=%q, FullParse=%q", fieldName, got, want)
 				}
@@ -101,23 +103,23 @@ func TestParseIndexMatchesFullParse(t *testing.T) {
 				t.Errorf("TransferSyntaxUID: ParseIndex=%q, FullParse=%q", rec.TransferSyntaxUID, want.UID)
 			}
 
-			assertField("SOPClassUID", rec.SOPClassUID, "0008", "0016")
-			assertField("SOPInstanceUID", rec.SOPInstanceUID, "0008", "0018")
-			assertField("StudyDate", rec.StudyDate, "0008", "0020")
-			assertField("SeriesDate", rec.SeriesDate, "0008", "0021")
-			assertField("StudyTime", rec.StudyTime, "0008", "0030")
-			assertField("AccessionNumber", rec.AccessionNumber, "0008", "0050")
-			assertField("Modality", rec.Modality, "0008", "0060")
-			assertField("StudyDescription", rec.StudyDescription, "0008", "1030")
-			assertField("SeriesDescription", rec.SeriesDescription, "0008", "103E")
-			assertField("PatientName", rec.PatientName, "0010", "0010")
-			assertField("PatientID", rec.PatientID, "0010", "0020")
-			assertField("PatientBirthDate", rec.PatientBirthDate, "0010", "0030")
-			assertField("PatientSex", rec.PatientSex, "0010", "0040")
-			assertField("StudyInstanceUID", rec.StudyInstanceUID, "0020", "000D")
-			assertField("SeriesInstanceUID", rec.SeriesInstanceUID, "0020", "000E")
-			assertField("SeriesNumber", rec.SeriesNumber, "0020", "0011")
-			assertField("InstanceNumber", rec.InstanceNumber, "0020", "0013")
+			assertField("SOPClassUID", rec.SOPClassUID, tags.SOPClassUID)
+			assertField("SOPInstanceUID", rec.SOPInstanceUID, tags.SOPInstanceUID)
+			assertField("StudyDate", rec.StudyDate, tags.StudyDate)
+			assertField("SeriesDate", rec.SeriesDate, tags.SeriesDate)
+			assertField("StudyTime", rec.StudyTime, tags.StudyTime)
+			assertField("AccessionNumber", rec.AccessionNumber, tags.AccessionNumber)
+			assertField("Modality", rec.Modality, tags.Modality)
+			assertField("StudyDescription", rec.StudyDescription, tags.StudyDescription)
+			assertField("SeriesDescription", rec.SeriesDescription, tags.SeriesDescription)
+			assertField("PatientName", rec.PatientName, tags.PatientName)
+			assertField("PatientID", rec.PatientID, tags.PatientID)
+			assertField("PatientBirthDate", rec.PatientBirthDate, tags.PatientBirthDate)
+			assertField("PatientSex", rec.PatientSex, tags.PatientSex)
+			assertField("StudyInstanceUID", rec.StudyInstanceUID, tags.StudyInstanceUID)
+			assertField("SeriesInstanceUID", rec.SeriesInstanceUID, tags.SeriesInstanceUID)
+			assertField("SeriesNumber", rec.SeriesNumber, tags.SeriesNumber)
+			assertField("InstanceNumber", rec.InstanceNumber, tags.InstanceNumber)
 		})
 	}
 }
@@ -175,24 +177,4 @@ func TestParseIndexFromBytes_FileBytesMatchFile(t *testing.T) {
 	if *recFile != *recBytes {
 		t.Errorf("mismatch:\n  file:  %+v\n  bytes: %+v", recFile, recBytes)
 	}
-}
-
-// parseHex converts a 4-character hex string to uint16 for tag lookups in tests.
-func parseHex(t *testing.T, s string) uint16 {
-	t.Helper()
-	var v uint16
-	for _, c := range s {
-		v <<= 4
-		switch {
-		case c >= '0' && c <= '9':
-			v |= uint16(c - '0')
-		case c >= 'a' && c <= 'f':
-			v |= uint16(c-'a') + 10
-		case c >= 'A' && c <= 'F':
-			v |= uint16(c-'A') + 10
-		default:
-			t.Fatalf("invalid hex char %q in %q", c, s)
-		}
-	}
-	return v
 }

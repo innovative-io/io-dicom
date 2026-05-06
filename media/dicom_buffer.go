@@ -4,171 +4,110 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"errors"
+	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/implementation"
 )
 
-// DICOMBuffer - is an interface to buffer manipulation class
-type DICOMBuffer interface {
-	ClearMemoryStream()
-	IsBigEndian() bool
-	SetBigEndian(isBigEndian bool)
-	GetPosition() int
-	SetPosition(position int)
-	GetSize() int
-	Read(count int) ([]byte, error)
-	ReadByte() (byte, error)
-	ReadUint16() (uint16, error)
-	ReadUint32() (uint32, error)
-	Write(data []byte, count int) (int, error)
-	WriteAETitle(aeTitle string)
-	WriteByte(value byte) error
-	WriteUint16(value uint16)
-	WriteUint32(value uint32)
-	WriteString(value string)
-	ReadTag(explicitVR bool) (*DICOMTag, error)
-	WriteTag(tag *DICOMTag, explicitVR bool)
-	WriteStringTag(group uint16, element uint16, vr string, content string, explicitVR bool)
-	ReadMeta() (*transfersyntax.TransferSyntax, error)
-	WriteMeta(SOPClassUID string, SOPInstanceUID string, TransferSyntax string)
-	ReadObj(obj DICOMObject) error
-	WriteObj(obj DICOMObject)
-	Send(rw *bufio.ReadWriter) error
-	GetAllBytes() []byte
+// DICOMBuffer is a DICOM-aware byte buffer that combines raw stream operations
+// (sequential byte/integer reads and writes) with DICOM-specific operations
+// (reading and writing DICOM tags, meta-information, and objects).
+//
+// Stream-level methods (GetByte, Write, ReadSlice, etc.) are in
+// dicom_buffer_stream.go; DICOM-level methods are in this file.
+type DICOMBuffer struct {
+	bigEndian bool
+	data      []byte
+	position  int
+	size      int
 }
 
-type dicomBuffer struct {
-	BigEndian bool
-	// MS is stored as the concrete *memoryStream (not the MemoryStream interface)
-	// so that calls like WriteUint16/WriteUint32 can pass stack-allocated arrays
-	// without the compiler forcing them onto the heap via interface-call escape.
-	MS *memoryStream
+// NewDICOMBuffer creates an empty DICOMBuffer with a 4096-byte pre-allocated buffer.
+func NewDICOMBuffer() *DICOMBuffer {
+	return &DICOMBuffer{data: make([]byte, 0, 4096)}
 }
 
-// NewEmptyBufData -
-func NewEmptyBufData() DICOMBuffer {
-	return &dicomBuffer{
-		BigEndian: false,
-		MS:        newEmptyMemoryStream(),
+// NewDICOMBufferWithCapacity creates an empty DICOMBuffer with the given pre-allocated
+// capacity, avoiding early growth reallocations when the expected output size
+// is known in advance.
+func NewDICOMBufferWithCapacity(capacity int) *DICOMBuffer {
+	if capacity < 4096 {
+		capacity = 4096
 	}
+	return &DICOMBuffer{data: make([]byte, 0, capacity)}
 }
 
-// NewEmptyBufDataWithCapacity creates an empty DICOMBuffer with a pre-allocated
-// backing buffer of the given byte capacity, avoiding early growth reallocations.
-func NewEmptyBufDataWithCapacity(capacity int) DICOMBuffer {
-	return &dicomBuffer{
-		BigEndian: false,
-		MS:        newMemoryStreamWithCapacity(capacity),
-	}
+// NewDICOMBufferFromBytes wraps existing byte data for reading.
+func NewDICOMBufferFromBytes(data []byte) *DICOMBuffer {
+	return &DICOMBuffer{data: data, size: len(data)}
 }
 
-// NewBufDataFromBytes -
-func NewBufDataFromBytes(data []byte) DICOMBuffer {
-	return &dicomBuffer{
-		BigEndian: false,
-		MS:        NewMemoryStreamFromBytes(data).(*memoryStream),
-	}
-}
-
-// NewBufDataFromFile -
-func NewBufDataFromFile(fileName string) (DICOMBuffer, error) {
-	ms, err := NewMemoryStreamFromFile(fileName)
+// NewDICOMBufferFromFile reads an entire file into a DICOMBuffer for reading.
+func NewDICOMBufferFromFile(fileName string) (*DICOMBuffer, error) {
+	data, err := os.ReadFile(fileName)
 	if err != nil {
 		return nil, err
 	}
-	return &dicomBuffer{
-		BigEndian: false,
-		MS:        ms.(*memoryStream),
-	}, nil
+	return &DICOMBuffer{data: data, size: len(data)}, nil
 }
 
-func (bd *dicomBuffer) ClearMemoryStream() {
-	bd.MS.Clear()
+func (buf *DICOMBuffer) IsBigEndian() bool {
+	return buf.bigEndian
 }
 
-func (bd *dicomBuffer) IsBigEndian() bool {
-	return bd.BigEndian
+func (buf *DICOMBuffer) SetBigEndian(isBigEndian bool) {
+	buf.bigEndian = isBigEndian
 }
 
-func (bd *dicomBuffer) SetBigEndian(isBigEndian bool) {
-	bd.BigEndian = isBigEndian
-}
-
-func (bd *dicomBuffer) GetPosition() int {
-	return bd.MS.GetPosition()
-}
-
-func (bd *dicomBuffer) SetPosition(position int) {
-	bd.MS.SetPosition(position)
-}
-
-func (bd *dicomBuffer) GetSize() int {
-	return bd.MS.GetSize()
-}
-
-func (bd *dicomBuffer) Read(count int) ([]byte, error) {
-	return bd.MS.Read(count)
-}
-
-func (bd *dicomBuffer) ReadByte() (byte, error) {
-	return bd.MS.GetByte()
-}
-
-func (bd *dicomBuffer) ReadUint16() (uint16, error) {
-	return bd.MS.ReadUint16Endian(bd.BigEndian)
-}
-
-func (bd *dicomBuffer) ReadUint32() (uint32, error) {
-	return bd.MS.ReadUint32Endian(bd.BigEndian)
-}
-
-func (bd *dicomBuffer) Write(data []byte, count int) (int, error) {
-	return bd.MS.Write(data, count)
-}
-
-func (bd *dicomBuffer) WriteAETitle(aeTitle string) {
-	endPos := bd.GetPosition() + 16
-	bd.WriteString(aeTitle)
+func (buf *DICOMBuffer) WriteAETitle(aeTitle string) {
+	// DICOM PS3.8 §9.3.2: AE titles are fixed 16-byte fields, space-padded on
+	// the right. Truncate silently to prevent writing malformed PDUs.
+	const aeLen = 16
+	if len(aeTitle) > aeLen {
+		aeTitle = aeTitle[:aeLen]
+	}
+	endPos := buf.GetPosition() + aeLen
+	buf.WriteString(aeTitle)
 	pad := [1]byte{0x20}
-	for bd.GetPosition() < endPos {
-		bd.Write(pad[:], 1)
+	for buf.GetPosition() < endPos {
+		buf.Write(pad[:], 1)
 	}
 }
 
 // WriteByte writes a byte
-func (bd *dicomBuffer) WriteByte(value byte) error {
+func (buf *DICOMBuffer) WriteByte(value byte) error {
 	b := [1]byte{value}
-	_, err := bd.MS.Write(b[:], 1)
+	_, err := buf.Write(b[:], 1)
 	return err
 }
 
 // WriteUint16 writes an unsigned int
-func (bd *dicomBuffer) WriteUint16(value uint16) {
+func (buf *DICOMBuffer) WriteUint16(value uint16) {
 	var c [2]byte
-	if bd.BigEndian {
+	if buf.bigEndian {
 		binary.BigEndian.PutUint16(c[:], value)
 	} else {
 		binary.LittleEndian.PutUint16(c[:], value)
 	}
-	bd.MS.Write(c[:], 2)
+	buf.Write(c[:], 2)
 }
 
 // WriteUint32 writes an unsigned int
-func (bd *dicomBuffer) WriteUint32(value uint32) {
+func (buf *DICOMBuffer) WriteUint32(value uint32) {
 	var c [4]byte
-	if bd.BigEndian {
+	if buf.bigEndian {
 		binary.BigEndian.PutUint32(c[:], value)
 	} else {
 		binary.LittleEndian.PutUint32(c[:], value)
 	}
-	bd.MS.Write(c[:], 4)
+	buf.Write(c[:], 4)
 }
 
-func (bd *dicomBuffer) WriteString(value string) {
-	bd.MS.Write([]byte(value), len(value))
+func (buf *DICOMBuffer) WriteString(value string) {
+	buf.Write([]byte(value), len(value))
 }
 
 func normalizeExplicitVR(tag *DICOMTag, ts *transfersyntax.TransferSyntax) string {
@@ -194,19 +133,18 @@ func isLongExplicitVR(vr string) bool {
 }
 
 // ReadTag - read a single tag from the Stream
-func (bd *dicomBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
-	group, err := bd.ReadUint16()
+func (buf *DICOMBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
+	group, err := buf.ReadUint16(buf.bigEndian)
 	if err != nil {
 		return nil, err
 	}
-	element, err := bd.ReadUint16()
+	element, err := buf.ReadUint16(buf.bigEndian)
 	if err != nil {
 		return nil, err
 	}
-	tag := &DICOMTag{
-		Group:   group,
-		Element: element,
-	}
+	tag := newTag()
+	tag.Group = group
+	tag.Element = element
 
 	internalVR := explicitVR
 
@@ -215,22 +153,25 @@ func (bd *dicomBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 	}
 
 	if (tag.Group != 0x0000) && (tag.Group != 0xfffe) && (internalVR) {
-		tag.VR = bd.readVR()
+		tag.VR = buf.readVR()
 		if isLongExplicitVR(tag.VR) {
-			_, err := bd.ReadUint16()
+			_, err := buf.ReadUint16(buf.bigEndian)
 			if err != nil {
+				releaseTag(tag)
 				return nil, err
 			}
 
-			length, err := bd.ReadUint32()
+			length, err := buf.ReadUint32(buf.bigEndian)
 			if err != nil {
+				releaseTag(tag)
 				return nil, err
 			}
 
 			tag.Length = length
 		} else {
-			length, err := bd.ReadUint16()
+			length, err := buf.ReadUint16(buf.bigEndian)
 			if err != nil {
+				releaseTag(tag)
 				return nil, err
 			}
 			tag.Length = uint32(length)
@@ -239,16 +180,23 @@ func (bd *dicomBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 		if !internalVR {
 			tag.VR = GetDictionaryVR(tag.Group, tag.Element)
 		}
-		length, err := bd.ReadUint32()
+		length, err := buf.ReadUint32(buf.bigEndian)
 		if err != nil {
+			releaseTag(tag)
 			return nil, err
 		}
 		tag.Length = length
 	}
 
 	if (tag.Length != 0) && (tag.Length != 0xFFFFFFFF) {
-		data, err := bd.MS.Read(int(tag.Length))
+		// ReadSlice returns a zero-copy view into the stream's backing array.
+		// This is safe as long as the backing array is not reused while
+		// tag.Data is live.  In the network path, NextPDU() calls
+		// Reset() (not Clear) before each new message, ensuring a
+		// fresh backing array is allocated rather than the old one being reused.
+		data, err := buf.ReadSlice(int(tag.Length))
 		if err != nil {
+			releaseTag(tag)
 			return nil, err
 		}
 		tag.Data = data
@@ -258,11 +206,11 @@ func (bd *dicomBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 }
 
 // WriteTag - Write a single tag to stream
-func (bd *dicomBuffer) WriteTag(tag *DICOMTag, explicitVR bool) {
-	bd.writeTag(tag, explicitVR, nil)
+func (buf *DICOMBuffer) WriteTag(tag *DICOMTag, explicitVR bool) {
+	buf.writeTag(tag, explicitVR, nil)
 }
 
-func (bd *dicomBuffer) writeTag(tag *DICOMTag, explicitVR bool, ts *transfersyntax.TransferSyntax) {
+func (buf *DICOMBuffer) writeTag(tag *DICOMTag, explicitVR bool, ts *transfersyntax.TransferSyntax) {
 	writeVR := normalizeExplicitVR(tag, ts)
 
 	// Derive the length to serialize from the actual data length to guarantee the
@@ -280,8 +228,8 @@ func (bd *dicomBuffer) writeTag(tag *DICOMTag, explicitVR bool, ts *transfersynt
 		}
 	}
 
-	bd.WriteUint16(tag.Group)
-	bd.WriteUint16(tag.Element)
+	buf.WriteUint16(tag.Group)
+	buf.WriteUint16(tag.Element)
 	if (tag.Group != 0x0000) && (tag.Group != 0xfffe) && (explicitVR) {
 		var vrBuf [2]byte
 		switch len(writeVR) {
@@ -294,23 +242,23 @@ func (bd *dicomBuffer) writeTag(tag *DICOMTag, explicitVR bool, ts *transfersynt
 			vrBuf[0] = writeVR[0]
 			vrBuf[1] = writeVR[1]
 		}
-		bd.MS.Write(vrBuf[:], 2)
+		buf.Write(vrBuf[:], 2)
 		if isLongExplicitVR(writeVR) {
-			bd.WriteUint16(0)
-			bd.WriteUint32(writeLen)
+			buf.WriteUint16(0)
+			buf.WriteUint32(writeLen)
 		} else {
-			bd.WriteUint16(uint16(writeLen))
+			buf.WriteUint16(uint16(writeLen))
 		}
 	} else {
-		bd.WriteUint32(writeLen)
+		buf.WriteUint32(writeLen)
 	}
 	if (writeLen != 0) && (writeLen != 0xFFFFFFFF) {
-		bd.MS.Write(tag.Data, int(writeLen))
+		buf.Write(tag.Data, int(writeLen))
 	}
 }
 
 // WriteStringTag - Writes a String to a DICOM tag
-func (bd *dicomBuffer) WriteStringTag(group uint16, element uint16, vr string, content string, explicitVR bool) {
+func (buf *DICOMBuffer) WriteStringTag(group uint16, element uint16, vr string, content string, explicitVR bool) {
 	data := []byte(content)
 	length := uint32(len(data))
 	if length%2 == 1 {
@@ -329,24 +277,24 @@ func (bd *dicomBuffer) WriteStringTag(group uint16, element uint16, vr string, c
 		Data:      data,
 		BigEndian: false,
 	}
-	bd.WriteTag(tag, explicitVR)
+	buf.WriteTag(tag, explicitVR)
 }
 
 // ReadMeta - Read Meta Header
-func (bd *dicomBuffer) ReadMeta() (*transfersyntax.TransferSyntax, error) {
+func (buf *DICOMBuffer) ReadMeta() (*transfersyntax.TransferSyntax, error) {
 	var TransferSyntax *transfersyntax.TransferSyntax
 	pos := 0
 
-	bd.SetPosition(128)
-	bs, err := bd.MS.Read(4)
+	buf.SetPosition(128)
+	bs, err := buf.Read(4)
 	if err != nil {
 		return nil, err
 	}
 	if bytes.Equal(bs, []byte("DICM")) {
 		fin := false
-		for (pos < bd.GetSize()) && (!fin) {
-			pos = bd.GetPosition()
-			tag, err := bd.ReadTag(true)
+		for (pos < buf.GetSize()) && (!fin) {
+			pos = buf.GetPosition()
+			tag, err := buf.ReadTag(true)
 			if err != nil || tag == nil {
 				break
 			}
@@ -359,20 +307,20 @@ func (bd *dicomBuffer) ReadMeta() (*transfersyntax.TransferSyntax, error) {
 			}
 		}
 	}
-	bd.SetPosition(pos)
+	buf.SetPosition(pos)
 	return TransferSyntax, nil
 }
 
 // WriteMeta - Write Meta Header
-func (bd *dicomBuffer) WriteMeta(SOPClassUID string, SOPInstanceUID string, TransferSyntax string) {
+func (buf *DICOMBuffer) WriteMeta(SOPClassUID string, SOPInstanceUID string, TransferSyntax string) {
 	explicitVR := true
 	var largo uint32
 	var tag *DICOMTag
 	var preamble [128]byte
 	var groupLength [4]byte
 
-	bd.MS.Write(preamble[:], 128)
-	bd.MS.Write([]byte("DICM"), 4)
+	buf.Write(preamble[:], 128)
+	buf.Write([]byte("DICM"), 4)
 	tag = &DICOMTag{
 		Group:     0x02,
 		Element:   0x00,
@@ -380,7 +328,7 @@ func (bd *dicomBuffer) WriteMeta(SOPClassUID string, SOPInstanceUID string, Tran
 		VR:        "UL",
 		Data:      []byte{0, 0, 0, 0},
 		BigEndian: false}
-	bd.WriteTag(tag, explicitVR)
+	buf.WriteTag(tag, explicitVR)
 	tag = &DICOMTag{
 		Group:     0x02,
 		Element:   0x01,
@@ -389,33 +337,33 @@ func (bd *dicomBuffer) WriteMeta(SOPClassUID string, SOPInstanceUID string, Tran
 		Data:      []byte{0x00, 0x01},
 		BigEndian: false,
 	}
-	bd.WriteTag(tag, explicitVR)
+	buf.WriteTag(tag, explicitVR)
 
-	bd.WriteStringTag(0x02, 0x02, "UI", SOPClassUID, explicitVR)
-	bd.WriteStringTag(0x02, 0x03, "UI", SOPInstanceUID, explicitVR)
-	bd.WriteStringTag(0x02, 0x10, "UI", TransferSyntax, explicitVR)
+	buf.WriteStringTag(0x02, 0x02, "UI", SOPClassUID, explicitVR)
+	buf.WriteStringTag(0x02, 0x03, "UI", SOPInstanceUID, explicitVR)
+	buf.WriteStringTag(0x02, 0x10, "UI", TransferSyntax, explicitVR)
 
 	// Implementation Class UID
-	bd.WriteStringTag(0x02, 0x12, "UI", implementation.GetImplementationClassUID(), explicitVR)
+	buf.WriteStringTag(0x02, 0x12, "UI", implementation.GetImplementationClassUID(), explicitVR)
 	// Implementation Version Name
-	bd.WriteStringTag(0x02, 0x13, "SH", implementation.GetImplementationVersion(), explicitVR)
+	buf.WriteStringTag(0x02, 0x13, "SH", implementation.GetImplementationVersion(), explicitVR)
 
 	// Calculate group length and seek back to overwrite the placeholder.
 	// The File Meta Information is always encoded as explicit VR little endian
 	// per DICOM PS 3.10, so we use LittleEndian explicitly regardless of
 	// the dataset transfer syntax.
-	ptr := bd.GetPosition()
-	largo = uint32(bd.GetSize() - 12 - 128 - 4)
+	ptr := buf.GetPosition()
+	largo = uint32(buf.GetSize() - 12 - 128 - 4)
 	binary.LittleEndian.PutUint32(groupLength[:], largo)
-	bd.SetPosition(128 + 4 + 8)
-	bd.MS.Write(groupLength[:], 4)
-	bd.SetPosition(ptr)
+	buf.SetPosition(128 + 4 + 8)
+	buf.Write(groupLength[:], 4)
+	buf.SetPosition(ptr)
 }
 
 // ReadObj - Read a DICOM Object from a DICOMBuffer
-func (bd *dicomBuffer) ReadObj(obj DICOMObject) error {
-	for bd.GetPosition() < bd.GetSize() {
-		tag, err := bd.ReadTag(obj.IsExplicitVR())
+func (buf *DICOMBuffer) ReadObj(obj DICOMObject) error {
+	for buf.GetPosition() < buf.GetSize() {
+		tag, err := buf.ReadTag(obj.IsExplicitVR())
 		if err != nil {
 			return err
 		}
@@ -430,35 +378,32 @@ func (bd *dicomBuffer) ReadObj(obj DICOMObject) error {
 }
 
 // WriteObj - Write a DICOM Object to a DICOMBuffer
-func (bd *dicomBuffer) WriteObj(obj DICOMObject) {
-	//	bd.BigEndian = BigEndian
-	// Si lo limpio elimino el meta!!
-	//	bd.MS.Clear()
+func (buf *DICOMBuffer) WriteObj(obj DICOMObject) {
 	for i := 0; i < obj.TagCount(); i++ {
 		tag := obj.GetTagAt(i)
-		bd.writeTag(tag, obj.IsExplicitVR(), obj.GetTransferSyntax())
+		buf.writeTag(tag, obj.IsExplicitVR(), obj.GetTransferSyntax())
 	}
 }
 
-func (bd *dicomBuffer) Send(rw *bufio.ReadWriter) error {
-	bd.SetPosition(0)
-	buffer := bd.MS.GetData()
-	bd.MS.Clear()
+func (buf *DICOMBuffer) Send(rw *bufio.ReadWriter) error {
+	buf.SetPosition(0)
+	buffer := buf.GetData()
+	buf.Clear()
 
 	_, err := rw.Write(buffer)
 	if err != nil {
-		return errors.New("ERROR, bufdata::Send, " + err.Error())
+		return fmt.Errorf("DICOMBuffer.Send: %w", err)
 	}
 	rw.Flush()
 	return nil
 }
 
-func (bd *dicomBuffer) GetAllBytes() []byte {
-	return bd.MS.GetData()
+func (buf *DICOMBuffer) GetAllBytes() []byte {
+	return buf.GetData()
 }
 
-func (bd *dicomBuffer) readString(length int) string {
-	temp, err := bd.MS.Read(length)
+func (buf *DICOMBuffer) readString(length int) string {
+	temp, err := buf.Read(length)
 	if err != nil {
 		return ""
 	}
@@ -468,13 +413,13 @@ func (bd *dicomBuffer) readString(length int) string {
 // readVR reads the 2-byte VR field from the stream and returns an interned
 // string constant, avoiding the heap allocation that string() conversion
 // would otherwise cause on every explicit-VR tag.
-func (bd *dicomBuffer) readVR() string {
-	if bd.MS.Position+2 > bd.MS.Size {
+func (buf *DICOMBuffer) readVR() string {
+	if buf.position+2 > buf.size {
 		return ""
 	}
-	b0 := bd.MS.Data[bd.MS.Position]
-	b1 := bd.MS.Data[bd.MS.Position+1]
-	bd.MS.Position += 2
+	b0 := buf.data[buf.position]
+	b1 := buf.data[buf.position+1]
+	buf.position += 2
 	return internVR(b0, b1)
 }
 

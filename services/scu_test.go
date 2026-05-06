@@ -142,7 +142,7 @@ func Test_scu_FindSCU(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.args.Query.WriteString(tags.StudyDate, "20150617")
+			tt.args.Query.Write(tags.StudyDate, "20150617")
 			d := NewSCU(tt.fields.destination)
 			d.SetOnCFindResult(func(result media.DICOMObject) {
 				result.DumpTags(io.Discard)
@@ -252,8 +252,8 @@ func Test_scu_GetSCU(t *testing.T) {
 	})
 
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	query.WriteString(tags.StudyInstanceUID, "1.2.3.4")
+	query.Write(tags.QueryRetrieveLevel, "STUDY")
+	query.Write(tags.StudyInstanceUID, "1.2.3.4")
 
 	status, err := d.GetSCU(context.Background(), query, 0)
 	if err != nil {
@@ -304,8 +304,8 @@ func Test_scu_GetSCUReceivesStoreSuboperations(t *testing.T) {
 	})
 
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	query.WriteString(tags.StudyInstanceUID, "1.2.3.4")
+	query.Write(tags.QueryRetrieveLevel, "STUDY")
+	query.Write(tags.StudyInstanceUID, "1.2.3.4")
 
 	status, err := d.GetSCU(context.Background(), query, 0)
 	if err != nil {

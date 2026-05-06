@@ -20,6 +20,7 @@ import (
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomcommand"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
+	"github.com/innovative-io/io-dicom/network/priority"
 )
 
 // scpBufSize is the read/write buffer size per connection. A larger value
@@ -203,28 +204,82 @@ type scp struct {
 	onCEchoRequest       func(request network.AssociationRequest) bool
 	onRawPDU             func(event network.RawPDUEvent)
 	canceledMessageIDs   map[uint16]struct{}
+
+	bufSize     int
+	cancelPoll  time.Duration
+	cancelGrace time.Duration
+}
+
+// SCPOption configures an SCP at construction time.
+type SCPOption func(*scp)
+
+// WithReadBufferSize sets the per-connection read/write buffer size in bytes.
+// Larger values reduce syscall overhead for high-throughput connections.
+// The default is 256 KiB.
+func WithReadBufferSize(n int) SCPOption {
+	return func(s *scp) {
+		if n > 0 {
+			s.bufSize = n
+		}
+	}
+}
+
+// WithCancelPollWindow sets how long the SCP waits when polling for
+// interleaved commands (e.g. C-CANCEL) during an active operation.
+// The default is 5 ms.
+func WithCancelPollWindow(d time.Duration) SCPOption {
+	return func(s *scp) {
+		if d > 0 {
+			s.cancelPoll = d
+		}
+	}
+}
+
+// WithCancelGraceWindow sets how long the SCP waits for a handler to exit
+// after receiving a matching C-CANCEL before aborting the association.
+// The default is 250 ms.
+func WithCancelGraceWindow(d time.Duration) SCPOption {
+	return func(s *scp) {
+		if d > 0 {
+			s.cancelGrace = d
+		}
+	}
 }
 
 // NewSCP creates a plain-TCP DICOM SCP listening on port.
-func NewSCP(port int) SCP {
+func NewSCP(port int, opts ...SCPOption) SCP {
 	media.InitDict()
 
-	return &scp{
+	s := &scp{
 		Port:               port,
 		canceledMessageIDs: make(map[uint16]struct{}),
+		bufSize:            scpBufSize,
+		cancelPoll:         cancelPollWindow,
+		cancelGrace:        cancelGraceWindow,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // NewSCPWithTLS creates a TLS-enabled DICOM SCP listening on port.
 // cfg must contain at least one certificate (e.g. loaded with tls.LoadX509KeyPair).
-func NewSCPWithTLS(port int, cfg *tls.Config) SCP {
+func NewSCPWithTLS(port int, cfg *tls.Config, opts ...SCPOption) SCP {
 	media.InitDict()
 
-	return &scp{
+	s := &scp{
 		Port:               port,
 		tlsConfig:          normalizeServerTLSConfig(cfg),
 		canceledMessageIDs: make(map[uint16]struct{}),
+		bufSize:            scpBufSize,
+		cancelPoll:         cancelPollWindow,
+		cancelGrace:        cancelGraceWindow,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func normalizeServerTLSConfig(cfg *tls.Config) *tls.Config {
@@ -285,7 +340,7 @@ func isReadTimeout(err error) bool {
 }
 
 func (s *scp) handleCancelCommand(assocRQ network.AssociationRequest, dco media.DICOMObject) uint16 {
-	messageID := dco.GetUShort(tags.MessageIDBeingRespondedTo)
+	messageID := dco.GetUint16(tags.MessageIDBeingRespondedTo)
 	s.markCanceled(messageID)
 
 	s.mu.RLock()
@@ -304,7 +359,7 @@ func (s *scp) pollCommand(conn net.Conn, pdu network.PDUService) (media.DICOMObj
 		return nil, nil
 	}
 
-	if err := conn.SetReadDeadline(time.Now().Add(cancelPollWindow)); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(s.cancelPoll)); err != nil {
 		return nil, err
 	}
 	dco, err := pdu.NextPDU()
@@ -357,7 +412,7 @@ func (s *scp) runSubopLoop(
 	cancel context.CancelFunc,
 	writeRSP writeSubopRSP,
 ) error {
-	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	messageID := requestCommandObj.GetUint16(tags.MessageID)
 	state := operationCounterState{}
 	canceled := false
 	var cancelDeadline time.Time
@@ -422,12 +477,12 @@ func (s *scp) runSubopLoop(
 				continue
 			}
 
-			if dco.GetUShort(tags.CommandField) == dicomcommand.CCancelRequest {
+			if dco.GetUint16(tags.CommandField) == dicomcommand.CCancelRequest {
 				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
 				if cancelMessageID == messageID {
 					canceled = true
 					if cancelDeadline.IsZero() {
-						cancelDeadline = time.Now().Add(cancelGraceWindow)
+						cancelDeadline = time.Now().Add(s.cancelGrace)
 					}
 					cancel()
 				}
@@ -462,7 +517,7 @@ func (s *scp) runCFindOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network
 		resultCh <- findResponse{result: result, err: err}
 	}()
 
-	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	messageID := requestCommandObj.GetUint16(tags.MessageID)
 	canceled := false
 	var cancelDeadline time.Time
 
@@ -522,12 +577,12 @@ func (s *scp) runCFindOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network
 				continue
 			}
 
-			if dco.GetUShort(tags.CommandField) == dicomcommand.CCancelRequest {
+			if dco.GetUint16(tags.CommandField) == dicomcommand.CCancelRequest {
 				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
 				if cancelMessageID == messageID {
 					canceled = true
 					if cancelDeadline.IsZero() {
-						cancelDeadline = time.Now().Add(cancelGraceWindow)
+						cancelDeadline = time.Now().Add(s.cancelGrace)
 					}
 					cancel()
 				}
@@ -553,7 +608,7 @@ func (s *scp) cgetStoreSubop(pdu network.PDUService, path string) error {
 	if err != nil {
 		return fmt.Errorf("scp: C-GET: load %q: %w", path, err)
 	}
-	if err := dimse.CStoreWriteRQ(pdu, dco); err != nil {
+	if err := dimse.CStoreWriteRQ(pdu, dco, priority.Medium); err != nil {
 		return fmt.Errorf("scp: C-GET: C-STORE-RQ: %w", err)
 	}
 	status, err := dimse.CStoreReadRSP(pdu)
@@ -608,7 +663,7 @@ func (s *scp) runCGetOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.
 		}
 	}()
 
-	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	messageID := requestCommandObj.GetUint16(tags.MessageID)
 	state := operationCounterState{}
 	canceled := false
 	var cancelDeadline time.Time
@@ -678,12 +733,12 @@ func (s *scp) runCGetOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.
 			if dco == nil {
 				continue
 			}
-			if dco.GetUShort(tags.CommandField) == dicomcommand.CCancelRequest {
+			if dco.GetUint16(tags.CommandField) == dicomcommand.CCancelRequest {
 				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
 				if cancelMessageID == messageID {
 					canceled = true
 					if cancelDeadline.IsZero() {
-						cancelDeadline = time.Now().Add(cancelGraceWindow)
+						cancelDeadline = time.Now().Add(s.cancelGrace)
 					}
 					cancel()
 				}
@@ -768,8 +823,8 @@ func (s *scp) Stop() error {
 
 func (s *scp) handleConnection(conn net.Conn) {
 	rw := bufio.NewReadWriter(
-		bufio.NewReaderSize(conn, scpBufSize),
-		bufio.NewWriterSize(conn, scpBufSize),
+		bufio.NewReaderSize(conn, s.bufSize),
+		bufio.NewWriterSize(conn, s.bufSize),
 	)
 
 	pdu := network.NewPDUService()
@@ -813,7 +868,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 		if dco == nil {
 			continue
 		}
-		command := dco.GetUShort(tags.CommandField)
+		command := dco.GetUint16(tags.CommandField)
 		switch command {
 		case dicomcommand.CStoreRequest:
 			ddo, err := pdu.NextPDU()
@@ -854,7 +909,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 				}
 				continue
 			}
-			if s.consumeCanceled(dco.GetUShort(tags.MessageID)) {
+			if s.consumeCanceled(dco.GetUint16(tags.MessageID)) {
 				if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), dicomstatus.Cancel); err != nil {
 					slog.Error("scp: C-Find failed to write cancel response", "ERROR", err.Error())
 					return
@@ -894,7 +949,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 				}
 				continue
 			}
-			if s.consumeCanceled(dco.GetUShort(tags.MessageID)) {
+			if s.consumeCanceled(dco.GetUint16(tags.MessageID)) {
 				if err := dimse.CGetWriteRSP(pdu, dco, dicomstatus.Cancel, 0, 0, 0, 0); err != nil {
 					slog.Error("scp: C-Get failed to write cancel response", "ERROR", err.Error())
 					return
@@ -934,7 +989,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 				}
 				continue
 			}
-			if s.consumeCanceled(dco.GetUShort(tags.MessageID)) {
+			if s.consumeCanceled(dco.GetUint16(tags.MessageID)) {
 				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.Cancel, 0, 0, 0, 0); err != nil {
 					slog.Error("scp: C-Move failed to write cancel response", "ERROR", err.Error())
 					return
@@ -964,7 +1019,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NEventReportRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
+			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Event-Report failed to read request dataset", "ERROR", err.Error())
@@ -986,7 +1041,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NGetRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
+			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Get failed to read request dataset", "ERROR", err.Error())
@@ -1008,7 +1063,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NSetRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
+			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Set failed to read request dataset", "ERROR", err.Error())
@@ -1030,7 +1085,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NActionRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
+			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Action failed to read request dataset", "ERROR", err.Error())
@@ -1052,7 +1107,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NCreateRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
+			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Create failed to read request dataset", "ERROR", err.Error())
@@ -1074,7 +1129,7 @@ func (s *scp) handleConnection(conn net.Conn) {
 
 		case dicomcommand.NDeleteRequest:
 			var nData media.DICOMObject
-			if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
+			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
 					slog.Error("scp: N-Delete failed to read request dataset", "ERROR", err.Error())

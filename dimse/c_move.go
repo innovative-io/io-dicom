@@ -46,16 +46,16 @@ func CMoveReadRQ(pdu network.PDUService) (*CMoveRequest, error) {
 		return nil, fmt.Errorf("CMoveReadRQ: failed to read command PDU: %w", err)
 	}
 
-	if commandObj.GetUShort(tags.CommandField) != dicomcommand.CMoveRequest {
+	if commandObj.GetUint16(tags.CommandField) != dicomcommand.CMoveRequest {
 		return nil, errors.New("CMoveReadRQ: CommandField is not C-MOVE Request")
 	}
 
 	req := &CMoveRequest{
 		AffectedSOPClassUID: commandObj.GetString(tags.AffectedSOPClassUID),
-		MessageID:           commandObj.GetUShort(tags.MessageID),
-		Priority:            commandObj.GetUShort(tags.Priority),
+		MessageID:           commandObj.GetUint16(tags.MessageID),
+		Priority:            commandObj.GetUint16(tags.Priority),
 		MoveDestination:     commandObj.GetString(tags.MoveDestination),
-		CommandDataSetType:  commandObj.GetUShort(tags.CommandDataSetType),
+		CommandDataSetType:  commandObj.GetUint16(tags.CommandDataSetType),
 		requestCommandObj:   commandObj,
 	}
 
@@ -146,13 +146,13 @@ func CMoveWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, destination
 	// - Command Data Set Type (8 + 2)
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + destinationAETitleLength + 8 + 2 + 8 + 2)
 
-	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	commandObj.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
-	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
-	commandObj.WriteString(tags.MoveDestination, destinationAETitle)
-	commandObj.WriteUint16(tags.Priority, pri)
-	commandObj.WriteUint16(tags.CommandDataSetType, commandDataSetType)
+	commandObj.Write(tags.CommandGroupLength, commandLength)
+	commandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	commandObj.Write(tags.CommandField, dicomcommand.CMoveRequest)
+	commandObj.Write(tags.MessageID, network.Uniq16odd())
+	commandObj.Write(tags.MoveDestination, destinationAETitle)
+	commandObj.Write(tags.Priority, pri)
+	commandObj.Write(tags.CommandDataSetType, commandDataSetType)
 
 	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
@@ -181,28 +181,28 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 		return nil, dicomstatus.FailureProcessingFailure, fmt.Errorf("CMoveReadRSP: failed to read response PDU: %w", err)
 	}
 
-	if got := responseCommandObj.GetUShort(tags.CommandField); got != dicomcommand.CMoveResponse {
+	if got := responseCommandObj.GetUint16(tags.CommandField); got != dicomcommand.CMoveResponse {
 		return nil, dicomstatus.FailureProcessingFailure,
 			fmt.Errorf("CMoveReadRSP: expected %s (0x%04X), got %s (0x%04X)",
 				dicomcommand.Description(dicomcommand.CMoveResponse), dicomcommand.CMoveResponse,
 				dicomcommand.Description(got), got)
 	}
 
-	status := responseCommandObj.GetUShort(tags.Status)
+	status := responseCommandObj.GetUint16(tags.Status)
 	if err := validateQROperationStatus(status, "CMoveReadRSP"); err != nil {
 		return nil, dicomstatus.FailureProcessingFailure, err
 	}
-	commandDataSetType := responseCommandObj.GetUShort(tags.CommandDataSetType)
+	commandDataSetType := responseCommandObj.GetUint16(tags.CommandDataSetType)
 	if commandDataSetType != dicomcommand.DataSetNone && commandDataSetType != dicomcommand.DataSetPresent {
 		return nil, dicomstatus.FailureProcessingFailure,
 			fmt.Errorf("CMoveReadRSP: invalid CommandDataSetType 0x%04X (must be DataSetNone or DataSetPresent)", commandDataSetType)
 	}
 
 	// Extract sub-operation counts per PS3.7 §C.4.2.1.9
-	remaining := int(responseCommandObj.GetUShort(tags.NumberOfRemainingSuboperations))
-	completed := int(responseCommandObj.GetUShort(tags.NumberOfCompletedSuboperations))
-	failed := int(responseCommandObj.GetUShort(tags.NumberOfFailedSuboperations))
-	warnings := int(responseCommandObj.GetUShort(tags.NumberOfWarningSuboperations))
+	remaining := responseCommandObj.GetUint16(tags.NumberOfRemainingSuboperations)
+	completed := responseCommandObj.GetUint16(tags.NumberOfCompletedSuboperations)
+	failed := responseCommandObj.GetUint16(tags.NumberOfFailedSuboperations)
+	warnings := responseCommandObj.GetUint16(tags.NumberOfWarningSuboperations)
 
 	// Update pending count
 	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings); err != nil {
@@ -211,7 +211,7 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 
 	if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
 		if pending != nil {
-			*pending = remaining
+			*pending = int(remaining)
 		}
 	} else {
 		if pending != nil {
@@ -250,10 +250,10 @@ type CMoveResponseStats struct {
 // This helper function is useful when you need detailed progress tracking.
 func GetCMoveResponseStats(responseCommandObj media.DICOMObject) CMoveResponseStats {
 	return CMoveResponseStats{
-		Remaining: int(responseCommandObj.GetUShort(tags.NumberOfRemainingSuboperations)),
-		Completed: int(responseCommandObj.GetUShort(tags.NumberOfCompletedSuboperations)),
-		Failed:    int(responseCommandObj.GetUShort(tags.NumberOfFailedSuboperations)),
-		Warnings:  int(responseCommandObj.GetUShort(tags.NumberOfWarningSuboperations)),
+		Remaining: int(responseCommandObj.GetUint16(tags.NumberOfRemainingSuboperations)),
+		Completed: int(responseCommandObj.GetUint16(tags.NumberOfCompletedSuboperations)),
+		Failed:    int(responseCommandObj.GetUint16(tags.NumberOfFailedSuboperations)),
+		Warnings:  int(responseCommandObj.GetUint16(tags.NumberOfWarningSuboperations)),
 	}
 }
 
@@ -285,7 +285,7 @@ func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 
 	sopClassUIDLength := paddedLen(sopClassUID)
 
-	if err := validateSuboperationCounters(status, int(remaining), int(completed), int(failed), int(warnings)); err != nil {
+	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings); err != nil {
 		return fmt.Errorf("CMoveWriteRSP: %w", err)
 	}
 	if err := validateQROperationStatus(status, "CMoveWriteRSP"); err != nil {
@@ -304,17 +304,17 @@ func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 	// - Number of Warning Suboperations (8 + 2)
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2)
 
-	responseCommandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	responseCommandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	responseCommandObj.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
-	messageID := requestCommandObj.GetUShort(tags.MessageID)
-	responseCommandObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
-	responseCommandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone) // No dataset in response
-	responseCommandObj.WriteUint16(tags.Status, status)
-	responseCommandObj.WriteUint16(tags.NumberOfRemainingSuboperations, remaining)
-	responseCommandObj.WriteUint16(tags.NumberOfCompletedSuboperations, completed)
-	responseCommandObj.WriteUint16(tags.NumberOfFailedSuboperations, failed)
-	responseCommandObj.WriteUint16(tags.NumberOfWarningSuboperations, warnings)
+	responseCommandObj.Write(tags.CommandGroupLength, commandLength)
+	responseCommandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	responseCommandObj.Write(tags.CommandField, dicomcommand.CMoveResponse)
+	messageID := requestCommandObj.GetUint16(tags.MessageID)
+	responseCommandObj.Write(tags.MessageIDBeingRespondedTo, messageID)
+	responseCommandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetNone) // No dataset in response
+	responseCommandObj.Write(tags.Status, status)
+	responseCommandObj.Write(tags.NumberOfRemainingSuboperations, remaining)
+	responseCommandObj.Write(tags.NumberOfCompletedSuboperations, completed)
+	responseCommandObj.Write(tags.NumberOfFailedSuboperations, failed)
+	responseCommandObj.Write(tags.NumberOfWarningSuboperations, warnings)
 
 	return pdu.Write(responseCommandObj, network.PDVCommand)
 }

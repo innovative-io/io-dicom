@@ -15,6 +15,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -246,26 +247,9 @@ func isNotDICOM(err error) bool {
 	if err == nil {
 		return false
 	}
-	// media.ErrNotDICOM may be wrapped with path context via fmt.Errorf %w.
-	return containsString(err.Error(), "DICM preamble missing") ||
-		containsString(err.Error(), "file too small") ||
-		containsString(err.Error(), "unable to read transfer syntax")
-}
-
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && findSubstring(s, substr)
-}
-
-func findSubstring(s, sub string) bool {
-	if len(sub) == 0 {
-		return true
-	}
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
+	return errors.Is(err, media.ErrNotDICOM) ||
+		errors.Is(err, media.ErrFileTooSmall) ||
+		errors.Is(err, media.ErrNoTransferSyntax)
 }
 
 func rate(n int64, d time.Duration) float64 {

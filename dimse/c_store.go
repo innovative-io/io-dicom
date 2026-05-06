@@ -9,7 +9,6 @@ import (
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomcommand"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
-	"github.com/innovative-io/io-dicom/network/priority"
 )
 
 func isValidCStoreStatus(status uint16) bool {
@@ -38,7 +37,7 @@ func validateCStoreStatus(status uint16, op string) error {
 }
 
 // CStoreWriteRQ CStore request write
-func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
+func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, pri uint16) error {
 	commandObj := media.NewEmptyDCMObj()
 
 	// Prefer the data object's own SOP class UID so that C-STORE sub-operations
@@ -63,13 +62,13 @@ func CStoreWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 	sopInstanceUIDLength := uint32(paddedLen(sopInstanceUID))
 	commandLength = commandLength + 8 + sopInstanceUIDLength
 
-	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	commandObj.WriteString(tags.AffectedSOPClassUID, scUID)
-	commandObj.WriteUint16(tags.CommandField, dicomcommand.CStoreRequest)
-	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
-	commandObj.WriteUint16(tags.Priority, priority.Medium)
-	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetPresent)
-	commandObj.WriteString(tags.AffectedSOPInstanceUID, sopInstanceUID)
+	commandObj.Write(tags.CommandGroupLength, commandLength)
+	commandObj.Write(tags.AffectedSOPClassUID, scUID)
+	commandObj.Write(tags.CommandField, dicomcommand.CStoreRequest)
+	commandObj.Write(tags.MessageID, network.Uniq16odd())
+	commandObj.Write(tags.Priority, pri)
+	commandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetPresent)
+	commandObj.Write(tags.AffectedSOPInstanceUID, sopInstanceUID)
 
 	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
@@ -84,14 +83,14 @@ func CStoreReadRSP(pdu network.PDUService) (uint16, error) {
 		return dicomstatus.FailureProcessingFailure, err
 	}
 	// Is this a C-Store RSP?
-	if dco.GetUShort(tags.CommandField) == dicomcommand.CStoreResponse {
-		if dco.GetUShort(tags.CommandDataSetType) != dicomcommand.DataSetNone {
+	if dco.GetUint16(tags.CommandField) == dicomcommand.CStoreResponse {
+		if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 			return dicomstatus.FailureProcessingFailure, errors.New("CStoreReadRSP: CommandDataSetType must be DataSetNone")
 		}
-		if dco.GetUShort(tags.MessageIDBeingRespondedTo) == 0 {
+		if dco.GetUint16(tags.MessageIDBeingRespondedTo) == 0 {
 			return dicomstatus.FailureProcessingFailure, errors.New("CStoreReadRSP: MessageIDBeingRespondedTo is required")
 		}
-		status := dco.GetUShort(tags.Status)
+		status := dco.GetUint16(tags.Status)
 		if err := validateCStoreStatus(status, "CStoreReadRSP"); err != nil {
 			return dicomstatus.FailureProcessingFailure, err
 		}
@@ -119,7 +118,7 @@ func CStoreWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject,
 		return errors.New("CStoreWriteRSP: AffectedSOPInstanceUID is required")
 	}
 
-	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	messageID := requestCommandObj.GetUint16(tags.MessageID)
 	if messageID == 0 {
 		return errors.New("CStoreWriteRSP: MessageID is required")
 	}
@@ -135,12 +134,12 @@ func CStoreWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject,
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2 + 8 + sopInstanceUIDLength)
 
-	responseCommandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	responseCommandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	responseCommandObj.WriteUint16(tags.CommandField, dicomcommand.CStoreResponse)
-	responseCommandObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
-	responseCommandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
-	responseCommandObj.WriteUint16(tags.Status, status)
-	responseCommandObj.WriteString(tags.AffectedSOPInstanceUID, sopInstanceUID)
+	responseCommandObj.Write(tags.CommandGroupLength, commandLength)
+	responseCommandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	responseCommandObj.Write(tags.CommandField, dicomcommand.CStoreResponse)
+	responseCommandObj.Write(tags.MessageIDBeingRespondedTo, messageID)
+	responseCommandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetNone)
+	responseCommandObj.Write(tags.Status, status)
+	responseCommandObj.Write(tags.AffectedSOPInstanceUID, sopInstanceUID)
 	return pdu.Write(responseCommandObj, network.PDVCommand)
 }

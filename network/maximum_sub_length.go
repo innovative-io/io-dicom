@@ -4,7 +4,7 @@ import (
 	"bufio"
 
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // MaximumPDULength - MaximumPDULength
@@ -13,8 +13,8 @@ type MaximumPDULength interface {
 	SetMaximumLength(length uint32)
 	Size() uint16
 	Write(rw *bufio.ReadWriter) bool
-	Read(ms media.MemoryStream) (err error)
-	ReadDynamic(ms media.MemoryStream) (err error)
+	Read(buf *media.DICOMBuffer) (err error)
+	ReadDynamic(buf *media.DICOMBuffer) (err error)
 }
 
 type maximumPDULength struct {
@@ -45,7 +45,7 @@ func (maxim *maximumPDULength) Size() uint16 {
 }
 
 func (maxim *maximumPDULength) Write(rw *bufio.ReadWriter) bool {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	bd.SetBigEndian(true)
 	bd.WriteByte(maxim.ItemType)
@@ -59,21 +59,21 @@ func (maxim *maximumPDULength) Write(rw *bufio.ReadWriter) bool {
 	return true
 }
 
-func (maxim *maximumPDULength) Read(ms media.MemoryStream) (err error) {
-	if maxim.ItemType, err = ms.GetByte(); err != nil {
+func (maxim *maximumPDULength) Read(buf *media.DICOMBuffer) (err error) {
+	if maxim.ItemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return maxim.ReadDynamic(ms)
+	return maxim.ReadDynamic(buf)
 }
 
-func (maxim *maximumPDULength) ReadDynamic(ms media.MemoryStream) (err error) {
-	if maxim.Reserved1, err = ms.GetByte(); err != nil {
+func (maxim *maximumPDULength) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if maxim.Reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if maxim.Length, err = ms.GetUint16(); err != nil {
+	if maxim.Length, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
-	if maxim.MaximumLength, err = ms.GetUint32(); err != nil {
+	if maxim.MaximumLength, err = buf.ReadUint32(true); err != nil {
 		return err
 	}
 	return

@@ -17,11 +17,16 @@ func TestSupportedTransferSyntaxesHaveMediaLayerCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read dicom_object.go: %v", err)
 	}
+	tsSource, err := os.ReadFile("dicom_object_transcoding.go")
+	if err != nil {
+		t.Fatalf("failed to read dicom_object_transcoding.go: %v", err)
+	}
 
 	src := string(source)
-	compressSection := sourceSection(t, src, "func (obj *dicomObject) compress(", "func (obj *dicomObject) uncompress(")
-	uncompressSection := sourceSection(t, src, "func (obj *dicomObject) uncompress(", "")
-	parseSection := sourceSection(t, src, "func parseBufData(", "func (obj *dicomObject) WriteToBytes()")
+	tsSrc := string(tsSource)
+	compressSection := sourceSection(t, tsSrc, "func (obj *dicomObject) compress(", "func (obj *dicomObject) uncompress(")
+	uncompressSection := sourceSection(t, tsSrc, "func (obj *dicomObject) uncompress(", "")
+	parseSection := sourceSection(t, src, "func parseDICOMBuffer(", "func (obj *dicomObject) WriteToBytes()")
 	writeSection := sourceSection(t, src, "func (obj *dicomObject) WriteToBytes()", "func (obj *dicomObject) DumpTags()")
 
 	type nativeDatasetExpectation struct {
@@ -84,7 +89,7 @@ func TestSupportedTransferSyntaxesHaveMediaLayerCoverage(t *testing.T) {
 		covered[ts.UID] = true
 		coveredBySymbol[ts.Name] = true
 		if expectation.requireParseCheck {
-			assertContainsSymbol(t, parseSection, mediaTransferSyntaxSymbol(ts), "parseBufData")
+			assertContainsSymbol(t, parseSection, mediaTransferSyntaxSymbol(ts), "parseDICOMBuffer")
 		}
 	}
 	assertContainsSymbol(t, writeSection, mediaTransferSyntaxSymbol(transfersyntax.DeflatedExplicitVRLittleEndian), "WriteToBytes")

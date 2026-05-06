@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // PresentationContext - PresentationContext
@@ -18,8 +18,8 @@ type PresentationContext interface {
 	GetTransferSyntaxes() []UIDItem
 	Size() uint16
 	Write(rw *bufio.ReadWriter) error
-	Read(ms media.MemoryStream) error
-	ReadDynamic(ms media.MemoryStream) error
+	Read(buf *media.DICOMBuffer) error
+	ReadDynamic(buf *media.DICOMBuffer) error
 }
 
 type presentationContext struct {
@@ -79,7 +79,7 @@ func (pc *presentationContext) Size() uint16 {
 }
 
 func (pc *presentationContext) Write(rw *bufio.ReadWriter) error {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	bd.SetBigEndian(true)
 	pc.Size()
@@ -104,40 +104,40 @@ func (pc *presentationContext) Write(rw *bufio.ReadWriter) error {
 	return nil
 }
 
-func (pc *presentationContext) Read(ms media.MemoryStream) (err error) {
-	if pc.ItemType, err = ms.GetByte(); err != nil {
+func (pc *presentationContext) Read(buf *media.DICOMBuffer) (err error) {
+	if pc.ItemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return pc.ReadDynamic(ms)
+	return pc.ReadDynamic(buf)
 }
 
-func (pc *presentationContext) ReadDynamic(ms media.MemoryStream) (err error) {
-	if pc.Reserved1, err = ms.GetByte(); err != nil {
+func (pc *presentationContext) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if pc.Reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if pc.Length, err = ms.GetUint16(); err != nil {
+	if pc.Length, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
-	if pc.PresentationContextID, err = ms.GetByte(); err != nil {
+	if pc.PresentationContextID, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if pc.Reserved2, err = ms.GetByte(); err != nil {
+	if pc.Reserved2, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if pc.Reserved3, err = ms.GetByte(); err != nil {
+	if pc.Reserved3, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if pc.Reserved4, err = ms.GetByte(); err != nil {
+	if pc.Reserved4, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if err := pc.AbsSyntax.Read(ms); err != nil {
+	if err := pc.AbsSyntax.Read(buf); err != nil {
 		return err
 	}
 
 	remainingBytes := pc.Length - 4 - pc.AbsSyntax.GetSize()
 	for remainingBytes > 0 {
 		var transferSyntax uidItem
-		transferSyntax.Read(ms)
+		transferSyntax.Read(buf)
 		remainingBytes = remainingBytes - transferSyntax.GetSize()
 		if transferSyntax.GetSize() > 0 {
 			pc.TrnSyntaxs = append(pc.TrnSyntaxs, &transferSyntax)

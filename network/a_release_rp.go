@@ -4,15 +4,15 @@ import (
 	"bufio"
 
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // ReleaseResponse - ReleaseResponse
 type ReleaseResponse interface {
 	Size() uint32
 	Write(rw *bufio.ReadWriter) error
-	Read(ms media.MemoryStream) (err error)
-	ReadDynamic(ms media.MemoryStream) (err error)
+	Read(buf *media.DICOMBuffer) (err error)
+	ReadDynamic(buf *media.DICOMBuffer) (err error)
 }
 
 type releaseResponse struct {
@@ -37,7 +37,7 @@ func (arrp *releaseResponse) Size() uint32 {
 }
 
 func (arrp *releaseResponse) Write(rw *bufio.ReadWriter) error {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	bd.SetBigEndian(true)
 	arrp.Size()
@@ -49,21 +49,21 @@ func (arrp *releaseResponse) Write(rw *bufio.ReadWriter) error {
 	return bd.Send(rw)
 }
 
-func (arrp *releaseResponse) Read(ms media.MemoryStream) (err error) {
-	if arrp.ItemType, err = ms.GetByte(); err != nil {
+func (arrp *releaseResponse) Read(buf *media.DICOMBuffer) (err error) {
+	if arrp.ItemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return arrp.ReadDynamic(ms)
+	return arrp.ReadDynamic(buf)
 }
 
-func (arrp *releaseResponse) ReadDynamic(ms media.MemoryStream) (err error) {
-	if arrp.Reserved1, err = ms.GetByte(); err != nil {
+func (arrp *releaseResponse) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if arrp.Reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if arrp.Length, err = ms.GetUint32(); err != nil {
+	if arrp.Length, err = buf.ReadUint32(true); err != nil {
 		return err
 	}
-	if arrp.Reserved2, err = ms.GetUint32(); err != nil {
+	if arrp.Reserved2, err = buf.ReadUint32(true); err != nil {
 		return err
 	}
 	return

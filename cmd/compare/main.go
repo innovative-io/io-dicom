@@ -56,12 +56,9 @@ func compareSeq(indent int, source media.DICOMObject, destination media.DICOMObj
 	hasDiff := false
 	tabs := strings.Repeat("\t", indent)
 
-	// Build O(1) lookup map for destination non-SQ tags.
+	// Build O(1) lookup map for all destination tags (including SQ).
 	destMap := make(map[uint32]*media.DICOMTag)
 	for _, dt := range destination.GetTags() {
-		if dt.VR == "SQ" {
-			continue
-		}
 		key := uint32(dt.Group)<<16 | uint32(dt.Element)
 		destMap[key] = dt
 	}
@@ -69,7 +66,8 @@ func compareSeq(indent int, source media.DICOMObject, destination media.DICOMObj
 	for _, st := range source.GetTags() {
 		if st.VR == "SQ" {
 			sSeq := st.ReadSeq(source.IsExplicitVR())
-			dt := destination.GetTagGE(st.Group, st.Element)
+			key := uint32(st.Group)<<16 | uint32(st.Element)
+			dt := destMap[key]
 			if dt == nil {
 				log.Printf("%sSequence: (%04X,%04X) %s not found in destination", tabs, st.Group, st.Element, st.Name)
 				hasDiff = true

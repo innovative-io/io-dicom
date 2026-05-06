@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // Reject Result values per DICOM PS3.8 Table 9-21.
@@ -69,8 +69,8 @@ type AssociationReject interface {
 	Set(result byte, source byte, reason byte)
 	Size() uint32
 	Write(rw *bufio.ReadWriter) error
-	Read(ms media.MemoryStream) (err error)
-	ReadDynamic(ms media.MemoryStream) (err error)
+	Read(buf *media.DICOMBuffer) (err error)
+	ReadDynamic(buf *media.DICOMBuffer) (err error)
 }
 
 type associationReject struct {
@@ -111,7 +111,7 @@ func (aarj *associationReject) Size() uint32 {
 }
 
 func (aarj *associationReject) Write(rw *bufio.ReadWriter) error {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	slog.Info("ASSOC-RJ:", "Reason", aarj.GetReason())
 
@@ -134,30 +134,30 @@ func (aarj *associationReject) Set(result byte, source byte, reason byte) {
 	aarj.Reason = reason
 }
 
-func (aarj *associationReject) Read(ms media.MemoryStream) (err error) {
-	if aarj.ItemType, err = ms.GetByte(); err != nil {
+func (aarj *associationReject) Read(buf *media.DICOMBuffer) (err error) {
+	if aarj.ItemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return aarj.ReadDynamic(ms)
+	return aarj.ReadDynamic(buf)
 }
 
-func (aarj *associationReject) ReadDynamic(ms media.MemoryStream) (err error) {
-	if aarj.Reserved1, err = ms.GetByte(); err != nil {
+func (aarj *associationReject) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if aarj.Reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if aarj.Length, err = ms.GetUint32(); err != nil {
+	if aarj.Length, err = buf.ReadUint32(true); err != nil {
 		return err
 	}
-	if aarj.Reserved2, err = ms.GetByte(); err != nil {
+	if aarj.Reserved2, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if aarj.Result, err = ms.GetByte(); err != nil {
+	if aarj.Result, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if aarj.Source, err = ms.GetByte(); err != nil {
+	if aarj.Source, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if aarj.Reason, err = ms.GetByte(); err != nil {
+	if aarj.Reason, err = buf.GetByte(); err != nil {
 		return err
 	}
 	return

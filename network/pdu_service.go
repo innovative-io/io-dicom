@@ -17,7 +17,7 @@ import (
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/implementation"
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // ErrAssociationReleased is returned by NextPDU when the peer performs an A-RELEASE handshake.
@@ -82,7 +82,7 @@ type pduService struct {
 	AcceptedPresentationContexts []PresentationContextAccept
 	conn                         net.Conn
 	readWriter                   *bufio.ReadWriter
-	ms                           media.MemoryStream
+	buf                           *media.DICOMBuffer
 	pdutype                      int
 	pdulength                    uint32
 	AssocRQ                      AssociationRequest
@@ -100,7 +100,7 @@ type pduService struct {
 // NewPDUService - creates a pointer to PDUService
 func NewPDUService() PDUService {
 	return &pduService{
-		ms:        media.NewEmptyMemoryStream(),
+		buf:        media.NewDICOMBuffer(),
 		AssocRQ:   NewAssociationRequest(),
 		AssocAC:   NewAssociationAccept(),
 		AssocRJ:   NewAssociationReject(),
@@ -219,7 +219,7 @@ func (pdu *pduService) Connect(ctx context.Context, IP string, Port string) erro
 
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", IP+":"+Port)
 	if err != nil {
-		return errors.New("pduservice::Connect - " + err.Error())
+		return fmt.Errorf("pduservice::Connect: %w", err)
 	}
 	return pdu.finishConnect(conn)
 }
@@ -279,21 +279,21 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 
 	switch itemType {
 	case pdutype.AssociationAccept:
-		pdu.ms.SetPosition(1)
-		pdu.AssocAC.ReadDynamic(pdu.ms)
+		pdu.buf.SetPosition(1)
+		pdu.AssocAC.ReadDynamic(pdu.buf)
 		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		if !pdu.interogateAAssociateAC() {
 			return errors.New("pduservice::Connect - No accepted presentation contexts found")
 		}
 		return nil
 	case pdutype.AssociationReject:
-		pdu.ms.SetPosition(1)
-		pdu.AssocRJ.ReadDynamic(pdu.ms)
+		pdu.buf.SetPosition(1)
+		pdu.AssocRJ.ReadDynamic(pdu.buf)
 		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		return fmt.Errorf("pduservice::Connect - Association rejected - %s", pdu.AssocRJ.GetReason())
 	case pdutype.AssociationAbortRequest:
-		pdu.ms.SetPosition(1)
-		pdu.AbortRQ.ReadDynamic(pdu.ms)
+		pdu.buf.SetPosition(1)
+		pdu.AbortRQ.ReadDynamic(pdu.buf)
 		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		return fmt.Errorf("pduservice::Connect - Association aborted - %s", pdu.AbortRQ.GetReason())
 	default:
@@ -339,15 +339,18 @@ func (pdu *pduService) Close() {
 
 func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 	if pdu.Pdata.Buffer != nil {
-		pdu.Pdata.Buffer.ClearMemoryStream()
+		// Reset (not Clear) so the old backing array is released rather than
+		// reused.  Callers may hold zero-copy tag.Data slices that alias the
+		// previous buffer; reusing the same backing array would corrupt them.
+		pdu.Pdata.Buffer.Reset()
 	} else {
-		pdu.Pdata.Buffer = media.NewEmptyBufData()
+		pdu.Pdata.Buffer = media.NewDICOMBuffer()
 	}
 
 	pdu.Pdata.MsgStatus = 0
 	if pdu.Pdata.Length != 0 {
 		DCO := media.NewEmptyDCMObj()
-		pdu.Pdata.ReadDynamic(pdu.ms)
+		pdu.Pdata.ReadDynamic(pdu.buf)
 		if pdu.Pdata.MsgStatus > 0 {
 			if !pdu.parseRawVRIntoDCM(DCO) {
 				pdu.AbortRQ.Write(pdu.readWriter)
@@ -365,8 +368,8 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 
 		switch int(itemType) {
 		case pdutype.AssociationRequest:
-			pdu.ms.SetPosition(6)
-			if err := pdu.AssocRQ.Read(pdu.ms); err != nil {
+			pdu.buf.SetPosition(6)
+			if err := pdu.AssocRQ.Read(pdu.buf); err != nil {
 				return nil, err
 			}
 			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
@@ -383,8 +386,8 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 			return nil, nil
 		case pdutype.PDUDataTransfer:
 			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
-			pdu.ms.SetPosition(1)
-			if err := pdu.Pdata.ReadDynamic(pdu.ms); err != nil {
+			pdu.buf.SetPosition(1)
+			if err := pdu.Pdata.ReadDynamic(pdu.buf); err != nil {
 				return nil, err
 			}
 			if pdu.Pdata.MsgStatus > 0 {
@@ -398,8 +401,8 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 		case pdutype.AssociationReleaseRequest:
 			slog.Info("ASSOC-R-RQ:", "CallingAE", pdu.AssocRQ.GetCallingAE(), "CalledAE", pdu.AssocRQ.GetCalledAE())
 			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
-			pdu.ms.SetPosition(1)
-			pdu.ReleaseRQ.ReadDynamic(pdu.ms)
+			pdu.buf.SetPosition(1)
+			pdu.ReleaseRQ.ReadDynamic(pdu.buf)
 			if err := pdu.writeEncodedPDU(byte(pdutype.AssociationReleaseResponse), func(rw *bufio.ReadWriter) error {
 				return pdu.ReleaseRP.Write(rw)
 			}); err != nil {
@@ -492,7 +495,7 @@ func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
 		return 0, nil, err
 	}
 
-	headerStream := media.NewMemoryStreamFromBytes(header)
+	headerStream := media.NewDICOMBufferFromBytes(header)
 	itemType, err := headerStream.GetByte()
 	if err != nil {
 		return 0, nil, err
@@ -500,7 +503,7 @@ func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
 	if _, err := headerStream.GetByte(); err != nil {
 		return 0, nil, err
 	}
-	pduLength, err := headerStream.GetUint32()
+	pduLength, err := headerStream.ReadUint32(true)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -517,7 +520,7 @@ func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
 		}
 	}
 
-	pdu.ms = media.NewMemoryStreamFromBytes(data)
+	pdu.buf = media.NewDICOMBufferFromBytes(data)
 	pdu.pdutype = int(itemType)
 	pdu.pdulength = pduLength
 	return itemType, data, nil
@@ -547,9 +550,9 @@ func (pdu *pduService) writeEncodedPDU(pduType byte, writer func(rw *bufio.ReadW
 
 func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
 	if pdu.Pdata.Buffer != nil {
-		pdu.Pdata.Buffer.ClearMemoryStream()
+		pdu.Pdata.Buffer.Clear()
 	} else {
-		pdu.Pdata.Buffer = media.NewEmptyBufData()
+		pdu.Pdata.Buffer = media.NewDICOMBuffer()
 	}
 
 	if pcid, ok := selectPresentationContextIDForAbstractSyntax(pdu.AcceptedPresentationContexts, negotiatedAbstractSyntaxForObject(DCO)); ok {
@@ -755,5 +758,5 @@ func (pdu *pduService) readPDU() error {
 	if pdu.pdulength < 4 {
 		return fmt.Errorf("pdu: malformed PDU length %d (minimum is 4)", pdu.pdulength)
 	}
-	return pdu.ms.ReadFully(pdu.readWriter, int(pdu.pdulength)-4)
+	return pdu.buf.ReadFully(pdu.readWriter, int(pdu.pdulength)-4)
 }

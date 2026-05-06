@@ -9,7 +9,7 @@ import (
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // AssociationAccept AssociationAccept
@@ -28,8 +28,8 @@ type AssociationAccept interface {
 	SetMaxSubLength(length uint32)
 	Size() uint32
 	Write(rw *bufio.ReadWriter) error
-	Read(ms media.MemoryStream) (err error)
-	ReadDynamic(ms media.MemoryStream) (err error)
+	Read(buf *media.DICOMBuffer) (err error)
+	ReadDynamic(buf *media.DICOMBuffer) (err error)
 }
 
 type associationAccept struct {
@@ -125,7 +125,7 @@ func (aaac *associationAccept) Size() uint32 {
 }
 
 func (aaac *associationAccept) Write(rw *bufio.ReadWriter) error {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	slog.Info("ASSOC-AC:", "CallingAE", aaac.GetCallingAE(), "CalledAE", aaac.GetCalledAE())
 	slog.Info("ASSOC-AC:", "ImpClass", aaac.UserInfo.GetImplementationClass().GetUID())
@@ -159,50 +159,50 @@ func (aaac *associationAccept) Write(rw *bufio.ReadWriter) error {
 	return aaac.UserInfo.Write(rw)
 }
 
-func (aaac *associationAccept) Read(ms media.MemoryStream) (err error) {
-	if aaac.ItemType, err = ms.GetByte(); err != nil {
+func (aaac *associationAccept) Read(buf *media.DICOMBuffer) (err error) {
+	if aaac.ItemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return aaac.ReadDynamic(ms)
+	return aaac.ReadDynamic(buf)
 }
 
-func (aaac *associationAccept) ReadDynamic(ms media.MemoryStream) (err error) {
-	if aaac.Reserved1, err = ms.GetByte(); err != nil {
+func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if aaac.Reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if aaac.Length, err = ms.GetUint32(); err != nil {
+	if aaac.Length, err = buf.ReadUint32(true); err != nil {
 		return err
 	}
-	if aaac.ProtocolVersion, err = ms.GetUint16(); err != nil {
+	if aaac.ProtocolVersion, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
-	if aaac.Reserved2, err = ms.GetUint16(); err != nil {
+	if aaac.Reserved2, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
 
-	ms.ReadData(aaac.CalledAE[:])
-	ms.ReadData(aaac.CallingAE[:])
-	ms.ReadData(aaac.Reserved3[:])
+	buf.ReadData(aaac.CalledAE[:])
+	buf.ReadData(aaac.CallingAE[:])
+	buf.ReadData(aaac.Reserved3[:])
 
 	Count := int(aaac.Length - 4 - 16 - 16 - 32)
 
 	for Count > 0 {
-		TempByte, err := ms.GetByte()
+		TempByte, err := buf.GetByte()
 		if err != nil {
 			return err
 		}
 
 		switch TempByte {
 		case pdutype.ApplicationContextItem:
-			aaac.AppContext.ReadDynamic(ms)
+			aaac.AppContext.ReadDynamic(buf)
 			Count = Count - int(aaac.AppContext.GetSize())
 		case pdutype.PresentationContextAcceptItem:
 			PresContextAccept := NewPresentationContextAccept()
-			PresContextAccept.ReadDynamic(ms)
+			PresContextAccept.ReadDynamic(buf)
 			Count = Count - int(PresContextAccept.Size())
 			aaac.PresContextAccepts = append(aaac.PresContextAccepts, PresContextAccept)
 		case pdutype.UserInformationItem: // User Information
-			aaac.UserInfo.ReadDynamic(ms)
+			aaac.UserInfo.ReadDynamic(buf)
 			Count = Count - int(aaac.UserInfo.Size())
 		default:
 			Count = -1

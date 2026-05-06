@@ -13,7 +13,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/media"
 )
 
@@ -43,6 +45,16 @@ type ServerParams struct {
 	Port int
 	// Store is the required storage backend.
 	Store Store
+	// ReadHeaderTimeout caps the time allowed to read request headers.
+	// Defaults to 10 s when zero. Set -1 to disable (not recommended for
+	// internet-facing deployments).
+	ReadHeaderTimeout time.Duration
+	// WriteTimeout caps the time from accepting a connection to writing the
+	// full response. Defaults to 120 s when zero; -1 disables it.
+	WriteTimeout time.Duration
+	// IdleTimeout caps the time an idle keep-alive connection is held open.
+	// Defaults to 60 s when zero; -1 disables it.
+	IdleTimeout time.Duration
 }
 
 // Server is the combined WADO-RS / STOW-RS / QIDO-RS HTTP server.
@@ -62,6 +74,18 @@ type wadoServer struct {
 	srv    *http.Server
 }
 
+// resolveTimeout returns d if d is non-zero, defaultVal if d is zero, or 0 if
+// d is negative (caller opted out).
+func resolveTimeout(d, defaultVal time.Duration) time.Duration {
+	if d == 0 {
+		return defaultVal
+	}
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
 // NewServer creates and configures a new WADO server. It initialises the
 // DICOM dictionary automatically.
 func NewServer(params ServerParams) Server {
@@ -69,8 +93,11 @@ func NewServer(params ServerParams) Server {
 	s := &wadoServer{params: params}
 	s.mux = s.buildMux()
 	s.srv = &http.Server{
-		Addr:    fmt.Sprintf(":%d", params.Port),
-		Handler: s.mux,
+		Addr:              fmt.Sprintf(":%d", params.Port),
+		Handler:           s.mux,
+		ReadHeaderTimeout: resolveTimeout(params.ReadHeaderTimeout, 10*time.Second),
+		WriteTimeout:      resolveTimeout(params.WriteTimeout, 120*time.Second),
+		IdleTimeout:       resolveTimeout(params.IdleTimeout, 60*time.Second),
 	}
 	return s
 }
@@ -366,9 +393,9 @@ func objectToJSONTags(obj media.DICOMObject) map[string]dicomJSONTag {
 		entry := dicomJSONTag{VR: tag.VR}
 		switch tag.VR {
 		case "US":
-			entry.Value = []interface{}{tag.GetUShort()}
+			entry.Value = []interface{}{tag.GetUint16()}
 		case "UL":
-			entry.Value = []interface{}{tag.GetUInt()}
+			entry.Value = []interface{}{tag.GetUint32()}
 		case "FL":
 			entry.Value = []interface{}{tag.GetFloat()}
 		case "FD":
@@ -393,8 +420,8 @@ func buildStowResponse(objects []media.DICOMObject) map[string]interface{} {
 	items := make([]interface{}, 0, len(objects))
 	for _, obj := range objects {
 		items = append(items, map[string]interface{}{
-			"00081150": map[string]interface{}{"vr": "UI", "Value": []string{obj.GetStringGE(0x0008, 0x0016)}},
-			"00081155": map[string]interface{}{"vr": "UI", "Value": []string{obj.GetStringGE(0x0008, 0x0018)}},
+			"00081150": map[string]interface{}{"vr": "UI", "Value": []string{obj.GetString(tags.SOPClassUID)}},
+			"00081155": map[string]interface{}{"vr": "UI", "Value": []string{obj.GetString(tags.SOPInstanceUID)}},
 		})
 	}
 	return map[string]interface{}{

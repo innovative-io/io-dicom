@@ -4,7 +4,7 @@ import (
 	"bufio"
 
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // Abort Source values per DICOM PS3.8 Table 9-26.
@@ -51,8 +51,8 @@ type AbortRequest interface {
 	GetReason() string
 	Size() uint32
 	Write(rw *bufio.ReadWriter) error
-	Read(ms media.MemoryStream) (err error)
-	ReadDynamic(ms media.MemoryStream) (err error)
+	Read(buf *media.DICOMBuffer) (err error)
+	ReadDynamic(buf *media.DICOMBuffer) (err error)
 }
 
 type abortRequest struct {
@@ -92,7 +92,7 @@ func (aarq *abortRequest) Size() uint32 {
 }
 
 func (aarq *abortRequest) Write(rw *bufio.ReadWriter) error {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	bd.SetBigEndian(true)
 	aarq.Size()
@@ -107,30 +107,30 @@ func (aarq *abortRequest) Write(rw *bufio.ReadWriter) error {
 	return bd.Send(rw)
 }
 
-func (aarq *abortRequest) Read(ms media.MemoryStream) (err error) {
-	if aarq.ItemType, err = ms.GetByte(); err != nil {
+func (aarq *abortRequest) Read(buf *media.DICOMBuffer) (err error) {
+	if aarq.ItemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return aarq.ReadDynamic(ms)
+	return aarq.ReadDynamic(buf)
 }
 
-func (aarq *abortRequest) ReadDynamic(ms media.MemoryStream) (err error) {
-	if aarq.Reserved1, err = ms.GetByte(); err != nil {
+func (aarq *abortRequest) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if aarq.Reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if aarq.Length, err = ms.GetUint32(); err != nil {
+	if aarq.Length, err = buf.ReadUint32(true); err != nil {
 		return err
 	}
-	if aarq.Reserved2, err = ms.GetByte(); err != nil {
+	if aarq.Reserved2, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if aarq.Reserved3, err = ms.GetByte(); err != nil {
+	if aarq.Reserved3, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if aarq.Source, err = ms.GetByte(); err != nil {
+	if aarq.Source, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if aarq.Reason, err = ms.GetByte(); err != nil {
+	if aarq.Reason, err = buf.GetByte(); err != nil {
 		return err
 	}
 	return

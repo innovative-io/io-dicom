@@ -7,7 +7,7 @@ import (
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // PresentationContextAccept accepted presentation context
@@ -22,8 +22,8 @@ type PresentationContextAccept interface {
 	SetAbstractSyntax(abstractSyntaxUID string)
 	SetTransferSyntax(transferSyntaxUID string)
 	Write(rw *bufio.ReadWriter) (err error)
-	Read(ms media.MemoryStream) (err error)
-	ReadDynamic(ms media.MemoryStream) (err error)
+	Read(buf *media.DICOMBuffer) (err error)
+	ReadDynamic(buf *media.DICOMBuffer) (err error)
 }
 
 type presentationContextAccept struct {
@@ -93,7 +93,7 @@ func (pc *presentationContextAccept) SetTransferSyntax(transferSyntaxUID string)
 }
 
 func (pc *presentationContextAccept) Write(rw *bufio.ReadWriter) (err error) {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	bd.SetBigEndian(true)
 	pc.Size()
@@ -123,31 +123,31 @@ func (pc *presentationContextAccept) Write(rw *bufio.ReadWriter) (err error) {
 	return
 }
 
-func (pc *presentationContextAccept) Read(ms media.MemoryStream) (err error) {
-	if pc.ItemType, err = ms.GetByte(); err != nil {
+func (pc *presentationContextAccept) Read(buf *media.DICOMBuffer) (err error) {
+	if pc.ItemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return pc.ReadDynamic(ms)
+	return pc.ReadDynamic(buf)
 }
 
-func (pc *presentationContextAccept) ReadDynamic(ms media.MemoryStream) (err error) {
-	if pc.Reserved1, err = ms.GetByte(); err != nil {
+func (pc *presentationContextAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if pc.Reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if pc.Length, err = ms.GetUint16(); err != nil {
+	if pc.Length, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
-	if pc.PresentationContextID, err = ms.GetByte(); err != nil {
+	if pc.PresentationContextID, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if pc.Reserved2, err = ms.GetByte(); err != nil {
+	if pc.Reserved2, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if pc.Result, err = ms.GetByte(); err != nil {
+	if pc.Result, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if pc.Reserved4, err = ms.GetByte(); err != nil {
+	if pc.Reserved4, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return pc.TrnSyntax.Read(ms)
+	return pc.TrnSyntax.Read(buf)
 }

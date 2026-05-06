@@ -6,7 +6,27 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+// tagPool recycles DICOMTag allocations in the read hot path.
+// Get returns a zeroed tag; Put resets and returns it to the pool.
+var tagPool = sync.Pool{
+	New: func() any { return &DICOMTag{} },
+}
+
+// newTag retrieves a zeroed DICOMTag from the pool.
+func newTag() *DICOMTag {
+	t := tagPool.Get().(*DICOMTag)
+	*t = DICOMTag{} // zero all fields
+	return t
+}
+
+// releaseTag returns a tag to the pool. Must not be called if the tag
+// has been added to a DICOMObject (the object owns its lifetime).
+func releaseTag(t *DICOMTag) {
+	tagPool.Put(t)
+}
 
 // DICOMTag DICOM tag structure
 type DICOMTag struct {
@@ -21,8 +41,8 @@ type DICOMTag struct {
 	BigEndian   bool
 }
 
-// GetUShort convert tag.Data to uint16
-func (tag *DICOMTag) GetUShort() uint16 {
+// GetUint16 convert tag.Data to uint16
+func (tag *DICOMTag) GetUint16() uint16 {
 	if tag.Length == 2 && len(tag.Data) >= 2 {
 		if tag.BigEndian {
 			return binary.BigEndian.Uint16(tag.Data)
@@ -32,8 +52,8 @@ func (tag *DICOMTag) GetUShort() uint16 {
 	return 0
 }
 
-// GetUInt convert tag.Data to uint32
-func (tag *DICOMTag) GetUInt() uint32 {
+// GetUint32 convert tag.Data to uint32
+func (tag *DICOMTag) GetUint32() uint32 {
 	var val uint32
 	if tag.Length == 4 && len(tag.Data) >= 4 {
 		if tag.BigEndian {
@@ -102,12 +122,9 @@ func (tag *DICOMTag) GetFloat64() float64 {
 
 // WriteSeq - Create an SQ tag from a DICOM Object
 func (tag *DICOMTag) WriteSeq(group uint16, element uint16, seq DICOMObject) {
-	bufdata := &dicomBuffer{
-		BigEndian: false,
-		MS:        newEmptyMemoryStream(),
-	}
+	buf := NewDICOMBuffer()
 
-	bufdata.BigEndian = seq.IsBigEndian()
+	buf.bigEndian = seq.IsBigEndian()
 	tag.BigEndian = seq.IsBigEndian()
 	tag.Group = group
 	tag.Element = element
@@ -118,16 +135,16 @@ func (tag *DICOMTag) WriteSeq(group uint16, element uint16, seq DICOMObject) {
 	}
 	for i := 0; i < seq.TagCount(); i++ {
 		temptag := seq.GetTagAt(i)
-		bufdata.WriteTag(temptag, seq.IsExplicitVR())
+		buf.WriteTag(temptag, seq.IsExplicitVR())
 	}
-	tag.Length = uint32(bufdata.GetSize())
+	tag.Length = uint32(buf.GetSize())
 	if tag.Length%2 == 1 {
 		tag.Length++
-		bufdata.MS.Write([]byte{0x00}, 1)
+		buf.Write([]byte{0x00}, 1)
 	}
 	if tag.Length > 0 {
-		bufdata.SetPosition(0)
-		data, _ := bufdata.MS.ReadSlice(int(tag.Length))
+		buf.SetPosition(0)
+		data, _ := buf.ReadSlice(int(tag.Length))
 		tag.Data = data
 	}
 }
@@ -135,16 +152,14 @@ func (tag *DICOMTag) WriteSeq(group uint16, element uint16, seq DICOMObject) {
 // ReadSeq - reads a dicom sequence
 func (tag *DICOMTag) ReadSeq(ExplicitVR bool) DICOMObject {
 	seq := NewEmptyDCMObj()
-	bufdata := &dicomBuffer{
-		BigEndian: false,
-		MS:        newEmptyMemoryStream(),
-	}
+	// Wrap tag.Data directly instead of copying it into a fresh stream.
+	// len(tag.Data) == tag.Length for all tags produced by ReadTag.
+	// The backing array stays alive as long as any sub-tag holds a Data
+	// sub-slice, which keeps the whole chain alive transitively.
+	buf := &DICOMBuffer{data: tag.Data, size: len(tag.Data)}
 
-	bufdata.Write(tag.Data, int(tag.Length))
-	bufdata.MS.SetPosition(0)
-
-	for bufdata.MS.GetPosition() < bufdata.MS.GetSize() {
-		temptag, err := bufdata.ReadTag(ExplicitVR)
+	for buf.position < buf.size {
+		temptag, err := buf.ReadTag(ExplicitVR)
 		if err != nil {
 			break // position does not advance on error; continuing would loop forever
 		}

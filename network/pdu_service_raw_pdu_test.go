@@ -7,7 +7,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 func readSingleRawPDU(r io.Reader) ([]byte, error) {

@@ -33,6 +33,11 @@ type SCU interface {
 	// accepted with Success and the data is discarded.
 	SetOnCGetStore(f func(data media.DICOMObject) uint16)
 	SetOnRawPDU(f func(event network.RawPDUEvent))
+	// SetPriority sets the DICOM priority (High/Medium/Low) used for all
+	// outgoing C-FIND, C-GET, C-MOVE, and C-STORE requests.
+	// Use the constants from network/priority: priority.High, priority.Medium, priority.Low.
+	// The default is priority.Medium.
+	SetPriority(pri uint16)
 	// GetNegotiatedContexts returns the presentation contexts accepted by the
 	// remote SCP after the most recent successful association. Returns nil if no
 	// association has been made yet.
@@ -41,6 +46,7 @@ type SCU interface {
 
 type scu struct {
 	destination        *network.Destination
+	priority           uint16
 	onCFindResult      func(result media.DICOMObject)
 	onCMoveResult      func(result media.DICOMObject)
 	onCGetStore        func(data media.DICOMObject) uint16
@@ -57,6 +63,7 @@ type associationPresentationContext struct {
 func NewSCU(destination *network.Destination) SCU {
 	return &scu{
 		destination: destination,
+		priority:    priority.Medium,
 	}
 }
 
@@ -95,7 +102,7 @@ func (d *scu) cfindSCU(ctx context.Context, abstractSyntax string, Query media.D
 		return results, status, err
 	}
 
-	if err := dimse.CFindWriteRQ(pdu, Query); err != nil {
+	if err := dimse.CFindWriteRQ(pdu, Query, d.priority); err != nil {
 		return results, status, err
 	}
 
@@ -128,7 +135,7 @@ func (d *scu) MoveSCU(ctx context.Context, destAET string, Query media.DICOMObje
 		return dicomstatus.FailureProcessingFailure, err
 	}
 
-	if err := dimse.CMoveWriteRQ(pdu, Query, destAET, priority.Medium); err != nil {
+	if err := dimse.CMoveWriteRQ(pdu, Query, destAET, d.priority); err != nil {
 		return dicomstatus.FailureProcessingFailure, err
 	}
 
@@ -164,7 +171,7 @@ func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) 
 		return dicomstatus.FailureProcessingFailure, err
 	}
 
-	if err := dimse.CGetWriteRQ(pdu, Query); err != nil {
+	if err := dimse.CGetWriteRQ(pdu, Query, d.priority); err != nil {
 		return dicomstatus.FailureProcessingFailure, err
 	}
 
@@ -175,7 +182,7 @@ func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) 
 		if err != nil {
 			return dicomstatus.FailureProcessingFailure, err
 		}
-		switch dco.GetUShort(tags.CommandField) {
+		switch dco.GetUint16(tags.CommandField) {
 		case dicomcommand.CStoreRequest:
 			// Read the image data object sent by the SCP.
 			ddo, err := pdu.NextPDU()
@@ -190,13 +197,13 @@ func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) 
 				return dicomstatus.FailureProcessingFailure, fmt.Errorf("GetSCU: write C-STORE-RSP: %w", err)
 			}
 		case dicomcommand.CGetResponse:
-			status := dco.GetUShort(tags.Status)
+			status := dco.GetUint16(tags.Status)
 			if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
 				continue
 			}
 			return status, nil
 		default:
-			return dicomstatus.FailureProcessingFailure, fmt.Errorf("GetSCU: unexpected command 0x%04X", dco.GetUShort(tags.CommandField))
+			return dicomstatus.FailureProcessingFailure, fmt.Errorf("GetSCU: unexpected command 0x%04X", dco.GetUint16(tags.CommandField))
 		}
 	}
 }
@@ -246,6 +253,10 @@ func (d *scu) SetOnCGetStore(f func(data media.DICOMObject) uint16) {
 
 func (d *scu) SetOnRawPDU(f func(event network.RawPDUEvent)) {
 	d.onRawPDU = f
+}
+
+func (d *scu) SetPriority(pri uint16) {
+	d.priority = pri
 }
 
 func (d *scu) openAssociation(ctx context.Context, pdu network.PDUService, abstractSyntax string, transferSyntaxes []string, timeout int) error {
@@ -315,5 +326,5 @@ func (d *scu) writeStoreRQ(ctx context.Context, pdu network.PDUService, DDO medi
 		return fmt.Errorf("scu: writeStoreRQ: transcode to %s: %w", trnSyntOut.Name, err)
 	}
 
-	return dimse.CStoreWriteRQ(pdu, DDO)
+	return dimse.CStoreWriteRQ(pdu, DDO, d.priority)
 }

@@ -3,6 +3,7 @@ package jpegls
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/innovative-io/io-dicom/codecs/internal/backendmgr"
 )
@@ -58,6 +59,9 @@ var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 func init() {
 	registerNativeBackends()
 	mgr.SelectDefault()
+	if mgr.BackendName() == "passthrough" {
+		slog.Warn("jpegls: no native backend available; encode will pass raw bytes unchanged (build with -tags charls)")
+	}
 }
 
 // SetBackend overrides the active JPEG-LS backend. Passing nil resets to passthrough.

@@ -292,7 +292,7 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dicomObject, err := NewDCMObjFromFile(tt.fileName)
 			if err != nil {
-				panic(err)
+				t.Fatal(err)
 			}
 			if err := dicomObject.ChangeTransferSyntax(tt.args.outTS); (err != nil) != tt.wantErr {
 				t.Errorf("dicomObject.ChangeTransferSyntax() error = %v, wantErr %v", err, tt.wantErr)
@@ -309,10 +309,10 @@ func TestDeflatedExplicitVRLittleEndianRoundTrip(t *testing.T) {
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
 
-	obj.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
-	obj.WriteString(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.1")
-	obj.WriteString(tags.PatientName, "DOE^JOHN")
-	obj.WriteString(tags.PatientID, "12345")
+	obj.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
+	obj.Write(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.1")
+	obj.Write(tags.PatientName, "DOE^JOHN")
+	obj.Write(tags.PatientID, "12345")
 
 	data := obj.WriteToBytes()
 	if len(data) == 0 {
@@ -343,16 +343,16 @@ func TestRLELosslessMultiFrameRoundTrip(t *testing.T) {
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
 
-	obj.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
-	obj.WriteString(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.2")
-	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
-	obj.WriteUint16GE(0x0028, 0x0006, "US", 0)
-	obj.WriteStringGE(0x0028, 0x0008, "IS", "2")
-	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
-	obj.WriteUint16GE(0x0028, 0x0011, "US", 2)
-	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
-	obj.WriteUint16GE(0x0028, 0x0101, "US", 8)
-	obj.WriteUint16GE(0x0028, 0x0103, "US", 0)
+	obj.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
+	obj.Write(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.2")
+	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	obj.Write(tags.PlanarConfiguration, 0)
+	obj.Write(tags.NumberOfFrames, "2")
+	obj.Write(tags.Rows, 1)
+	obj.Write(tags.Columns, 2)
+	obj.Write(tags.BitsAllocated, 8)
+	obj.Write(tags.BitsStored, 8)
+	obj.Write(tags.PixelRepresentation, 0)
 
 	pixel := &DICOMTag{
 		Group:     0x7FE0,
@@ -407,17 +407,17 @@ func newRGBRoundTripObject() DICOMObject {
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
 
-	obj.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
-	obj.WriteString(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.3")
-	obj.WriteUint16GE(0x0028, 0x0002, "US", 3)
-	obj.WriteStringGE(0x0028, 0x0004, "CS", "RGB")
-	obj.WriteUint16GE(0x0028, 0x0006, "US", 0)
-	obj.WriteStringGE(0x0028, 0x0008, "IS", "1")
-	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
-	obj.WriteUint16GE(0x0028, 0x0011, "US", 2)
-	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
-	obj.WriteUint16GE(0x0028, 0x0101, "US", 8)
-	obj.WriteUint16GE(0x0028, 0x0103, "US", 0)
+	obj.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
+	obj.Write(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.3")
+	obj.Write(tags.SamplesPerPixel, 3)
+	obj.Write(tags.PhotometricInterpretation, "RGB")
+	obj.Write(tags.PlanarConfiguration, 0)
+	obj.Write(tags.NumberOfFrames, "1")
+	obj.Write(tags.Rows, 1)
+	obj.Write(tags.Columns, 2)
+	obj.Write(tags.BitsAllocated, 8)
+	obj.Write(tags.BitsStored, 8)
+	obj.Write(tags.PixelRepresentation, 0)
 
 	pixel := &DICOMTag{
 		Group:     0x7FE0,
@@ -438,13 +438,13 @@ func TestGetPixelData_UncompressedMultiFrameReturnsRequestedFrame(t *testing.T) 
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
 
-	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
-	obj.WriteStringGE(0x0028, 0x0008, "IS", "2")
-	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
-	obj.WriteUint16GE(0x0028, 0x0011, "US", 2)
-	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
-	obj.WriteUint16GE(0x0028, 0x0101, "US", 8)
-	obj.WriteUint16GE(0x0028, 0x0103, "US", 0)
+	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	obj.Write(tags.NumberOfFrames, "2")
+	obj.Write(tags.Rows, 1)
+	obj.Write(tags.Columns, 2)
+	obj.Write(tags.BitsAllocated, 8)
+	obj.Write(tags.BitsStored, 8)
+	obj.Write(tags.PixelRepresentation, 0)
 
 	pixel := &DICOMTag{
 		Group:     0x7FE0,
@@ -480,11 +480,11 @@ func TestGetPixelData_EncapsulatedSingleFrameWithMultipleFragments(t *testing.T)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
 
-	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
-	obj.WriteStringGE(0x0028, 0x0008, "IS", "1")
-	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
-	obj.WriteUint16GE(0x0028, 0x0011, "US", 4)
-	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
+	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	obj.Write(tags.NumberOfFrames, "1")
+	obj.Write(tags.Rows, 1)
+	obj.Write(tags.Columns, 4)
+	obj.Write(tags.BitsAllocated, 8)
 
 	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
 	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false})
@@ -507,11 +507,11 @@ func TestGetPixelData_EncapsulatedMultiFrameWithFragmentedFrameUsesBOT(t *testin
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
 
-	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
-	obj.WriteStringGE(0x0028, 0x0008, "IS", "2")
-	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
-	obj.WriteUint16GE(0x0028, 0x0011, "US", 4)
-	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
+	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	obj.Write(tags.NumberOfFrames, "2")
+	obj.Write(tags.Rows, 1)
+	obj.Write(tags.Columns, 4)
+	obj.Write(tags.BitsAllocated, 8)
 
 	// BOT offsets are measured from the first fragment item tag after BOT.
 	// Frame 0 starts at offset 0; frame 1 starts after two fragments (2*(8 header + 2 payload) = 20).
@@ -620,18 +620,18 @@ func newMonoRoundTripObject(transferSyntax *transfersyntax.TransferSyntax) DICOM
 	obj.SetExplicitVR(transferSyntax.UID != transfersyntax.ImplicitVRLittleEndian.UID)
 	obj.SetBigEndian(transferSyntax.UID == transfersyntax.ExplicitVRBigEndian.UID)
 
-	obj.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
-	obj.WriteString(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.4")
-	obj.WriteString(tags.PatientName, "ROUNDTRIP^MONO")
-	obj.WriteString(tags.PatientID, "MONO-01")
-	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
-	obj.WriteUint16GE(0x0028, 0x0006, "US", 0)
-	obj.WriteStringGE(0x0028, 0x0008, "IS", "1")
-	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
-	obj.WriteUint16GE(0x0028, 0x0011, "US", 4)
-	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
-	obj.WriteUint16GE(0x0028, 0x0101, "US", 8)
-	obj.WriteUint16GE(0x0028, 0x0103, "US", 0)
+	obj.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
+	obj.Write(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.4")
+	obj.Write(tags.PatientName, "ROUNDTRIP^MONO")
+	obj.Write(tags.PatientID, "MONO-01")
+	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	obj.Write(tags.PlanarConfiguration, 0)
+	obj.Write(tags.NumberOfFrames, "1")
+	obj.Write(tags.Rows, 1)
+	obj.Write(tags.Columns, 4)
+	obj.Write(tags.BitsAllocated, 8)
+	obj.Write(tags.BitsStored, 8)
+	obj.Write(tags.PixelRepresentation, 0)
 
 	pixel := &DICOMTag{
 		Group:     0x7FE0,
@@ -652,16 +652,16 @@ func newMono12BitRoundTripObject() DICOMObject {
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
 
-	obj.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
-	obj.WriteString(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.5")
-	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
-	obj.WriteUint16GE(0x0028, 0x0006, "US", 0)
-	obj.WriteStringGE(0x0028, 0x0008, "IS", "1")
-	obj.WriteUint16GE(0x0028, 0x0010, "US", 1)
-	obj.WriteUint16GE(0x0028, 0x0011, "US", 2)
-	obj.WriteUint16GE(0x0028, 0x0100, "US", 16)
-	obj.WriteUint16GE(0x0028, 0x0101, "US", 12)
-	obj.WriteUint16GE(0x0028, 0x0103, "US", 0)
+	obj.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7")
+	obj.Write(tags.SOPInstanceUID, "1.2.826.0.1.3680043.10.90.5")
+	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	obj.Write(tags.PlanarConfiguration, 0)
+	obj.Write(tags.NumberOfFrames, "1")
+	obj.Write(tags.Rows, 1)
+	obj.Write(tags.Columns, 2)
+	obj.Write(tags.BitsAllocated, 16)
+	obj.Write(tags.BitsStored, 12)
+	obj.Write(tags.PixelRepresentation, 0)
 
 	pixel := &DICOMTag{
 		Group:     0x7FE0,
@@ -802,7 +802,7 @@ func TestRepresentativePixelTransferSyntaxRoundTrips(t *testing.T) {
 
 func TestDICOMTag_WriteSeq_NonEmpty(t *testing.T) {
 	inner := NewEmptyDCMObj()
-	inner.WriteString(tags.PatientID, "PAT001")
+	inner.Write(tags.PatientID, "PAT001")
 
 	tag := &DICOMTag{}
 	tag.WriteSeq(0x0040, 0xA043, inner)
@@ -820,7 +820,7 @@ func TestDICOMTag_WriteSeq_NonEmpty(t *testing.T) {
 
 func TestDICOMTag_WriteSeq_FFFEGroup_HasNoVR(t *testing.T) {
 	inner := NewEmptyDCMObj()
-	inner.WriteString(tags.PatientID, "X")
+	inner.Write(tags.PatientID, "X")
 
 	tag := &DICOMTag{}
 	tag.WriteSeq(0xFFFE, 0xE000, inner)
@@ -832,7 +832,7 @@ func TestDICOMTag_WriteSeq_FFFEGroup_HasNoVR(t *testing.T) {
 
 func TestDICOMTag_WriteSeq_EvenLength(t *testing.T) {
 	inner := NewEmptyDCMObj()
-	inner.WriteString(tags.PatientID, "A") // odd-length value → padding required
+	inner.Write(tags.PatientID, "A") // odd-length value → padding required
 
 	tag := &DICOMTag{}
 	tag.WriteSeq(0x0010, 0x0020, inner)
@@ -844,7 +844,7 @@ func TestDICOMTag_WriteSeq_EvenLength(t *testing.T) {
 
 func TestDICOMTag_ReadSeq_RoundTrip(t *testing.T) {
 	inner := NewEmptyDCMObj()
-	inner.WriteString(tags.PatientID, "PAT123")
+	inner.Write(tags.PatientID, "PAT123")
 
 	tag := &DICOMTag{}
 	tag.WriteSeq(0x0040, 0xA043, inner)
@@ -858,148 +858,13 @@ func TestDICOMTag_ReadSeq_RoundTrip(t *testing.T) {
 	}
 }
 
-// ── AddConceptNameSeq ─────────────────────────────────────────────────────────
+// ── GetString edge case ──────────────────────────────────────────────────────
 
-func TestAddConceptNameSeq_AddsTag(t *testing.T) {
+func TestGetString_ReturnsEmptyWhenTagAbsent(t *testing.T) {
 	obj := NewEmptyDCMObj()
-	before := obj.TagCount()
-
-	obj.AddConceptNameSeq(0x0040, 0xA043, "1111", "Radiology Report")
-
-	if obj.TagCount() <= before {
-		t.Error("AddConceptNameSeq: no tag was added to object")
-	}
-}
-
-func TestAddConceptNameSeq_TagGroupElement(t *testing.T) {
-	obj := NewEmptyDCMObj()
-	obj.AddConceptNameSeq(0x0040, 0xA043, "CODE1", "Test Concept")
-
-	tag := obj.GetTagAt(obj.TagCount() - 1)
-	if tag.Group != 0x0040 || tag.Element != 0xA043 {
-		t.Errorf("AddConceptNameSeq: tag at %04X/%04X, want 0040/A043", tag.Group, tag.Element)
-	}
-}
-
-// ── AddSRText ─────────────────────────────────────────────────────────────────
-
-func TestAddSRText_AddsTag(t *testing.T) {
-	obj := NewEmptyDCMObj()
-	before := obj.TagCount()
-
-	obj.AddSRText("This is the report body.")
-
-	if obj.TagCount() <= before {
-		t.Error("AddSRText: no tag was added to object")
-	}
-}
-
-func TestAddSRText_EmptyText(t *testing.T) {
-	obj := NewEmptyDCMObj()
-	obj.AddSRText("")
-	if obj.TagCount() == 0 {
-		t.Error("AddSRText: should have added at least one tag even for empty text")
-	}
-}
-
-// ── CreateSR ──────────────────────────────────────────────────────────────────
-
-func testStudy() DICOMStudy {
-	return DICOMStudy{
-		PatientID:          "P001",
-		PatientName:        "Doe^John",
-		PatientBirthDate:   "19800101",
-		PatientSex:         "M",
-		ReferringPhysician: "Dr. Smith",
-		StudyDate:          "20240101",
-		AccessionNumber:    "ACC001",
-		InstitutionName:    "Test Hospital",
-		Description:        "Chest X-Ray",
-		StudyInstanceUID:   "1.2.3.4.5.6",
-		ReportText:         "Normal study.",
-		ObserverName:       "Dr. Observer",
-	}
-}
-
-func TestCreateSR_PopulatesRequiredTags(t *testing.T) {
-	obj := NewEmptyDCMObj()
-	obj.CreateSR(testStudy(), "1.2.3.4.5.6.1", "1.2.3.4.5.6.1.1")
-
-	if uid := obj.GetString(tags.SOPInstanceUID); uid != "1.2.3.4.5.6.1.1" {
-		t.Errorf("CreateSR: SOPInstanceUID = %q", uid)
-	}
-	if patID := obj.GetString(tags.PatientID); patID != "P001" {
-		t.Errorf("CreateSR: PatientID = %q", patID)
-	}
-	if mod := obj.GetString(tags.Modality); mod != "SR" {
-		t.Errorf("CreateSR: Modality = %q, want SR", mod)
-	}
-	if obj.TagCount() == 0 {
-		t.Error("CreateSR: no tags created")
-	}
-}
-
-func TestCreateSR_SeriesAndStudyUIDs(t *testing.T) {
-	obj := NewEmptyDCMObj()
-	obj.CreateSR(testStudy(), "9.8.7.6", "9.8.7.6.1")
-
-	if series := obj.GetString(tags.SeriesInstanceUID); series != "9.8.7.6" {
-		t.Errorf("CreateSR: SeriesInstanceUID = %q, want 9.8.7.6", series)
-	}
-	if study := obj.GetString(tags.StudyInstanceUID); study != "1.2.3.4.5.6" {
-		t.Errorf("CreateSR: StudyInstanceUID = %q", study)
-	}
-}
-
-// ── CreatePDF ─────────────────────────────────────────────────────────────────
-
-func TestCreatePDF_PopulatesRequiredTags(t *testing.T) {
-	f, err := os.CreateTemp("", "test*.pdf")
-	if err != nil {
-		t.Fatalf("CreatePDF: failed to create temp file: %v", err)
-	}
-	defer os.Remove(f.Name())
-	f.Write([]byte{0x25, 0x50, 0x44, 0x46}) // %PDF
-	f.Close()
-
-	obj := NewEmptyDCMObj()
-	obj.CreatePDF(testStudy(), "1.2.3.100", "1.2.3.100.1", f.Name())
-
-	if patID := obj.GetString(tags.PatientID); patID != "P001" {
-		t.Errorf("CreatePDF: PatientID = %q", patID)
-	}
-	if mod := obj.GetString(tags.Modality); mod != "OT" {
-		t.Errorf("CreatePDF: Modality = %q, want OT", mod)
-	}
-	if obj.TagCount() == 0 {
-		t.Error("CreatePDF: no tags created")
-	}
-}
-
-func TestCreatePDF_OddLengthFileGetsZeroPadded(t *testing.T) {
-	f, err := os.CreateTemp("", "test*.pdf")
-	if err != nil {
-		t.Fatalf("CreatePDF: failed to create temp file: %v", err)
-	}
-	defer os.Remove(f.Name())
-	f.Write([]byte{0x01, 0x02, 0x03}) // odd length
-	f.Close()
-
-	obj := NewEmptyDCMObj()
-	obj.CreatePDF(testStudy(), "1.2.3.200", "1.2.3.200.1", f.Name())
-
-	if obj.TagCount() == 0 {
-		t.Error("CreatePDF: no tags created for odd-length file")
-	}
-}
-
-// ── GetStringGE edge case ─────────────────────────────────────────────────────
-
-func TestGetStringGE_ReturnsEmptyWhenTagAbsent(t *testing.T) {
-	obj := NewEmptyDCMObj()
-	got := obj.GetStringGE(0x9999, 0x9999)
+	got := obj.GetString(tags.SOPClassUID)
 	if got != "" {
-		t.Errorf("GetStringGE: want empty string for absent tag, got %q", got)
+		t.Errorf("GetString: want empty string for absent tag, got %q", got)
 	}
 }
 
@@ -1017,11 +882,11 @@ func TestGetPixelData_LargeEncapsulatedTotalSizeNoLongerRejected(t *testing.T) {
 	obj.SetBigEndian(false)
 
 	// 16384×16384 pixels × 3 bytes × 5000 frames ≈ 4 TB uncompressed — well above 512 MiB cap.
-	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
-	obj.WriteStringGE(0x0028, 0x0008, "IS", "5000")
-	obj.WriteUint16GE(0x0028, 0x0010, "US", 16384)
-	obj.WriteUint16GE(0x0028, 0x0011, "US", 16384)
-	obj.WriteUint16GE(0x0028, 0x0100, "US", 8)
+	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	obj.Write(tags.NumberOfFrames, "5000")
+	obj.Write(tags.Rows, 16384)
+	obj.Write(tags.Columns, 16384)
+	obj.Write(tags.BitsAllocated, 8)
 
 	compressedBytes := []byte{0xFF, 0xD8, 0x01, 0x02} // mock compressed frame
 	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
@@ -1050,11 +915,11 @@ func TestGetDecompressedFrame_UncompressedMultiFrame(t *testing.T) {
 	frame1Data := []byte{50, 60, 70, 80}
 	pixelData := append(frame0Data, frame1Data...)
 
-	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
-	obj.WriteStringGE(0x0028, 0x0008, "IS", "2")
-	obj.WriteUint16GE(0x0028, 0x0010, "US", 2) // rows
-	obj.WriteUint16GE(0x0028, 0x0011, "US", 2) // cols
-	obj.WriteUint16GE(0x0028, 0x0100, "US", 8) // bits allocated
+	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	obj.Write(tags.NumberOfFrames, "2")
+	obj.Write(tags.Rows, 2)          // rows
+	obj.Write(tags.Columns, 2)       // cols
+	obj.Write(tags.BitsAllocated, 8) // bits allocated
 	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: uint32(len(pixelData)), VR: "OB", Data: pixelData, BigEndian: false})
 
 	ctx := context.Background()
@@ -1097,11 +962,11 @@ func TestGetDecompressedFrame_LargeEncapsulatedTotalSizeOK(t *testing.T) {
 		framePayload[i] = byte(i % 256)
 	}
 
-	obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
-	obj.WriteStringGE(0x0028, 0x0008, "IS", "8192")
-	obj.WriteUint16GE(0x0028, 0x0010, "US", rows)
-	obj.WriteUint16GE(0x0028, 0x0011, "US", cols)
-	obj.WriteUint16GE(0x0028, 0x0100, "US", bits)
+	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	obj.Write(tags.NumberOfFrames, "8192")
+	obj.Write(tags.Rows, rows)
+	obj.Write(tags.Columns, cols)
+	obj.Write(tags.BitsAllocated, bits)
 
 	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
 	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT
@@ -1143,11 +1008,11 @@ func TestGetDecompressedFrame_NonConformantUncompressedEncapsulated(t *testing.T
 			obj.SetExplicitVR(ts == transfersyntax.ExplicitVRLittleEndian)
 			obj.SetBigEndian(false)
 
-			obj.WriteStringGE(0x0028, 0x0004, "CS", "MONOCHROME2")
-			obj.WriteStringGE(0x0028, 0x0008, "IS", "1")
-			obj.WriteUint16GE(0x0028, 0x0010, "US", rows)
-			obj.WriteUint16GE(0x0028, 0x0011, "US", cols)
-			obj.WriteUint16GE(0x0028, 0x0100, "US", bits)
+			obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+			obj.Write(tags.NumberOfFrames, "1")
+			obj.Write(tags.Rows, rows)
+			obj.Write(tags.Columns, cols)
+			obj.Write(tags.BitsAllocated, bits)
 
 			obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
 			obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT

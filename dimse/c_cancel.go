@@ -29,12 +29,12 @@ func CCancelWriteRQ(pdu network.PDUService, messageIDBeingRespondedTo uint16) er
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2)
 
 	commandObj := media.NewEmptyDCMObj()
-	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	commandObj.WriteUint16(tags.CommandField, dicomcommand.CCancelRequest)
-	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
-	commandObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageIDBeingRespondedTo)
-	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
+	commandObj.Write(tags.CommandGroupLength, commandLength)
+	commandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	commandObj.Write(tags.CommandField, dicomcommand.CCancelRequest)
+	commandObj.Write(tags.MessageID, network.Uniq16odd())
+	commandObj.Write(tags.MessageIDBeingRespondedTo, messageIDBeingRespondedTo)
+	commandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetNone)
 
 	return pdu.Write(commandObj, network.PDVCommand)
 }

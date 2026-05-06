@@ -81,26 +81,26 @@ const ctUID = "1.2.840.10008.5.1.4.1.1.2"
 
 func echoRQObj() media.DICOMObject {
 	obj := media.NewEmptyDCMObj()
-	obj.WriteUint16(tags.CommandField, dicomcommand.CEchoRequest)
-	obj.WriteUint16(tags.MessageID, 1)
-	obj.WriteUint16(tags.CommandDataSetType, 0x0101)
+	obj.Write(tags.CommandField, dicomcommand.CEchoRequest)
+	obj.Write(tags.MessageID, 1)
+	obj.Write(tags.CommandDataSetType, 0x0101)
 	return obj
 }
 
 func findRQObj(queryLevel string) media.DICOMObject {
 	obj := media.NewEmptyDCMObj()
-	obj.WriteUint16(tags.CommandField, dicomcommand.CFindRequest)
-	obj.WriteUint16(tags.MessageID, 1)
-	obj.WriteUint16(tags.CommandDataSetType, 0x0102)
-	obj.WriteString(tags.QueryRetrieveLevel, queryLevel)
+	obj.Write(tags.CommandField, dicomcommand.CFindRequest)
+	obj.Write(tags.MessageID, 1)
+	obj.Write(tags.CommandDataSetType, 0x0102)
+	obj.Write(tags.QueryRetrieveLevel, queryLevel)
 	return obj
 }
 
 func dicomDataObj(sopClassUID, sopInstanceUID string) media.DICOMObject {
 	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	obj.WriteString(tags.SOPClassUID, sopClassUID)
-	obj.WriteString(tags.SOPInstanceUID, sopInstanceUID)
+	obj.Write(tags.SOPClassUID, sopClassUID)
+	obj.Write(tags.SOPInstanceUID, sopInstanceUID)
 	return obj
 }
 
@@ -114,7 +114,7 @@ func TestCEchoReadRQ_True(t *testing.T) {
 
 func TestCEchoReadRQ_FalseForNonEcho(t *testing.T) {
 	obj := media.NewEmptyDCMObj()
-	obj.WriteUint16(tags.CommandField, dicomcommand.CStoreRequest)
+	obj.Write(tags.CommandField, dicomcommand.CStoreRequest)
 	if dimse.CEchoReadRQ(obj) {
 		t.Error("CEchoReadRQ: want false for CStoreRequest")
 	}
@@ -129,10 +129,10 @@ func TestCEchoWriteRQ_WritesCommand(t *testing.T) {
 		t.Fatalf("CEchoWriteRQ: want 1 write, got %d", len(m.written))
 	}
 	w := m.written[0]
-	if cf := w.GetUShort(tags.CommandField); cf != dicomcommand.CEchoRequest {
+	if cf := w.GetUint16(tags.CommandField); cf != dicomcommand.CEchoRequest {
 		t.Errorf("CEchoWriteRQ: CommandField %04X want %04X", cf, dicomcommand.CEchoRequest)
 	}
-	if cdt := w.GetUShort(tags.CommandDataSetType); cdt != 0x0101 {
+	if cdt := w.GetUint16(tags.CommandDataSetType); cdt != 0x0101 {
 		t.Errorf("CEchoWriteRQ: CommandDataSetType %04X want 0101", cdt)
 	}
 }
@@ -146,10 +146,10 @@ func TestCEchoWriteRQ_ErrorMissingSOPClass(t *testing.T) {
 
 func TestCEchoReadRSP_Success(t *testing.T) {
 	rsp := media.NewEmptyDCMObj()
-	rsp.WriteUint16(tags.CommandField, dicomcommand.CEchoResponse)
-	rsp.WriteUint16(tags.CommandDataSetType, 0x0101)
-	rsp.WriteUint16(tags.MessageIDBeingRespondedTo, 1)
-	rsp.WriteUint16(tags.Status, dicomstatus.Success)
+	rsp.Write(tags.CommandField, dicomcommand.CEchoResponse)
+	rsp.Write(tags.CommandDataSetType, 0x0101)
+	rsp.Write(tags.MessageIDBeingRespondedTo, 1)
+	rsp.Write(tags.Status, dicomstatus.Success)
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{rsp}
 	if err := dimse.CEchoReadRSP(m); err != nil {
@@ -159,10 +159,10 @@ func TestCEchoReadRSP_Success(t *testing.T) {
 
 func TestCEchoReadRSP_ErrorInvalidCommandDataSetType(t *testing.T) {
 	rsp := media.NewEmptyDCMObj()
-	rsp.WriteUint16(tags.CommandField, dicomcommand.CEchoResponse)
-	rsp.WriteUint16(tags.CommandDataSetType, 0x0102)
-	rsp.WriteUint16(tags.MessageIDBeingRespondedTo, 1)
-	rsp.WriteUint16(tags.Status, dicomstatus.Success)
+	rsp.Write(tags.CommandField, dicomcommand.CEchoResponse)
+	rsp.Write(tags.CommandDataSetType, 0x0102)
+	rsp.Write(tags.MessageIDBeingRespondedTo, 1)
+	rsp.Write(tags.Status, dicomstatus.Success)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{rsp}
@@ -173,10 +173,10 @@ func TestCEchoReadRSP_ErrorInvalidCommandDataSetType(t *testing.T) {
 
 func TestCEchoReadRSP_ErrorMissingMessageIDBeingRespondedTo(t *testing.T) {
 	rsp := media.NewEmptyDCMObj()
-	rsp.WriteUint16(tags.CommandField, dicomcommand.CEchoResponse)
-	rsp.WriteUint16(tags.CommandDataSetType, 0x0101)
-	rsp.WriteUint16(tags.MessageIDBeingRespondedTo, 0)
-	rsp.WriteUint16(tags.Status, dicomstatus.Success)
+	rsp.Write(tags.CommandField, dicomcommand.CEchoResponse)
+	rsp.Write(tags.CommandDataSetType, 0x0101)
+	rsp.Write(tags.MessageIDBeingRespondedTo, 0)
+	rsp.Write(tags.Status, dicomstatus.Success)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{rsp}
@@ -195,7 +195,7 @@ func TestCEchoReadRSP_ErrorOnNoPDU(t *testing.T) {
 func TestCEchoWriteRSP_WritesResponse(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := echoRQObj()
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 	if err := dimse.CEchoWriteRSP(m, rq); err != nil {
 		t.Fatalf("CEchoWriteRSP: %v", err)
@@ -204,10 +204,10 @@ func TestCEchoWriteRSP_WritesResponse(t *testing.T) {
 		t.Fatal("CEchoWriteRSP: nothing written")
 	}
 	rsp := m.written[0]
-	if cf := rsp.GetUShort(tags.CommandField); cf != dicomcommand.CEchoResponse {
+	if cf := rsp.GetUint16(tags.CommandField); cf != dicomcommand.CEchoResponse {
 		t.Errorf("CEchoWriteRSP: CommandField %04X want CEchoResponse", cf)
 	}
-	if st := rsp.GetUShort(tags.Status); st != dicomstatus.Success {
+	if st := rsp.GetUint16(tags.Status); st != dicomstatus.Success {
 		t.Errorf("CEchoWriteRSP: Status %04X want Success", st)
 	}
 }
@@ -223,7 +223,7 @@ func TestCEchoWriteRSP_ErrorWhenNoMessageID(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
 	if err := dimse.CEchoWriteRSP(m, rq); err == nil {
 		t.Error("CEchoWriteRSP: want error when MessageID is missing")
 	}
@@ -241,20 +241,20 @@ func TestCEchoWriteRSP_ErrorWhenNilCommand(t *testing.T) {
 
 func TestCFindWriteRQ_WritesCommandAndData(t *testing.T) {
 	m := newMockPDU(ctUID)
-	if err := dimse.CFindWriteRQ(m, findRQObj("STUDY")); err != nil {
+	if err := dimse.CFindWriteRQ(m, findRQObj("STUDY"), priority.Medium); err != nil {
 		t.Fatalf("CFindWriteRQ: %v", err)
 	}
 	if len(m.written) != 2 {
 		t.Fatalf("CFindWriteRQ: want 2 writes, got %d", len(m.written))
 	}
-	if cf := m.written[0].GetUShort(tags.CommandField); cf != dicomcommand.CFindRequest {
+	if cf := m.written[0].GetUint16(tags.CommandField); cf != dicomcommand.CFindRequest {
 		t.Errorf("CFindWriteRQ: CommandField %04X want CFindRequest", cf)
 	}
 }
 
 func TestCFindWriteRQ_ErrorMissingSOPClass(t *testing.T) {
 	m := newMockPDU("")
-	if err := dimse.CFindWriteRQ(m, findRQObj("STUDY")); err == nil {
+	if err := dimse.CFindWriteRQ(m, findRQObj("STUDY"), priority.Medium); err == nil {
 		t.Error("CFindWriteRQ: want error when AffectedSOPClassUID is missing")
 	}
 }
@@ -268,13 +268,13 @@ func TestCCancelWriteRQ_WritesCommand(t *testing.T) {
 		t.Fatalf("CCancelWriteRQ: want 1 write, got %d", len(m.written))
 	}
 	cmd := m.written[0]
-	if cf := cmd.GetUShort(tags.CommandField); cf != dicomcommand.CCancelRequest {
+	if cf := cmd.GetUint16(tags.CommandField); cf != dicomcommand.CCancelRequest {
 		t.Errorf("CCancelWriteRQ: CommandField %04X want CCancelRequest", cf)
 	}
-	if ds := cmd.GetUShort(tags.CommandDataSetType); ds != 0x0101 {
+	if ds := cmd.GetUint16(tags.CommandDataSetType); ds != 0x0101 {
 		t.Errorf("CCancelWriteRQ: CommandDataSetType %04X want 0101", ds)
 	}
-	if mid := cmd.GetUShort(tags.MessageIDBeingRespondedTo); mid != 41 {
+	if mid := cmd.GetUint16(tags.MessageIDBeingRespondedTo); mid != 41 {
 		t.Errorf("CCancelWriteRQ: MessageIDBeingRespondedTo %d want 41", mid)
 	}
 }
@@ -288,17 +288,17 @@ func TestCCancelWriteRQ_ErrorMissingTargetMessageID(t *testing.T) {
 
 func TestCFindReadRSP_PendingThenFinal(t *testing.T) {
 	pending := media.NewEmptyDCMObj()
-	pending.WriteUint16(tags.CommandField, dicomcommand.CFindResponse)
-	pending.WriteUint16(tags.Status, dicomstatus.Pending)
-	pending.WriteUint16(tags.CommandDataSetType, 0x0102)
+	pending.Write(tags.CommandField, dicomcommand.CFindResponse)
+	pending.Write(tags.Status, dicomstatus.Pending)
+	pending.Write(tags.CommandDataSetType, 0x0102)
 
 	dataset := media.NewEmptyDCMObj()
-	dataset.WriteString(tags.PatientID, "P001")
+	dataset.Write(tags.PatientID, "P001")
 
 	final := media.NewEmptyDCMObj()
-	final.WriteUint16(tags.CommandField, dicomcommand.CFindResponse)
-	final.WriteUint16(tags.Status, dicomstatus.Success)
-	final.WriteUint16(tags.CommandDataSetType, 0x0101)
+	final.Write(tags.CommandField, dicomcommand.CFindResponse)
+	final.Write(tags.Status, dicomstatus.Success)
+	final.Write(tags.CommandDataSetType, 0x0101)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{pending, dataset, final}
@@ -329,9 +329,9 @@ func TestCFindReadRSP_ErrorOnNoPDU(t *testing.T) {
 
 func TestCFindReadRSP_ErrorPendingWithoutDataset(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CFindResponse)
-	cmd.WriteUint16(tags.Status, dicomstatus.Pending)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.CommandField, dicomcommand.CFindResponse)
+	cmd.Write(tags.Status, dicomstatus.Pending)
+	cmd.Write(tags.CommandDataSetType, 0x0101)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -343,12 +343,12 @@ func TestCFindReadRSP_ErrorPendingWithoutDataset(t *testing.T) {
 
 func TestCFindReadRSP_ErrorFinalWithDataset(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CFindResponse)
-	cmd.WriteUint16(tags.Status, dicomstatus.Success)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0102)
+	cmd.Write(tags.CommandField, dicomcommand.CFindResponse)
+	cmd.Write(tags.Status, dicomstatus.Success)
+	cmd.Write(tags.CommandDataSetType, 0x0102)
 
 	ds := media.NewEmptyDCMObj()
-	ds.WriteString(tags.PatientID, "P001")
+	ds.Write(tags.PatientID, "P001")
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd, ds}
@@ -360,9 +360,9 @@ func TestCFindReadRSP_ErrorFinalWithDataset(t *testing.T) {
 
 func TestCFindReadRSP_ErrorInvalidCommandDataSetType(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CFindResponse)
-	cmd.WriteUint16(tags.Status, dicomstatus.Success)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x9999)
+	cmd.Write(tags.CommandField, dicomcommand.CFindResponse)
+	cmd.Write(tags.Status, dicomstatus.Success)
+	cmd.Write(tags.CommandDataSetType, 0x9999)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -374,9 +374,9 @@ func TestCFindReadRSP_ErrorInvalidCommandDataSetType(t *testing.T) {
 
 func TestCFindReadRSP_ErrorInvalidStatusCode(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CFindResponse)
-	cmd.WriteUint16(tags.Status, 0x2222)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.CommandField, dicomcommand.CFindResponse)
+	cmd.Write(tags.Status, 0x2222)
+	cmd.Write(tags.CommandDataSetType, 0x0101)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -389,10 +389,10 @@ func TestCFindReadRSP_ErrorInvalidStatusCode(t *testing.T) {
 func TestCFindWriteRSP_Pending(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := findRQObj("STUDY")
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 	result := media.NewEmptyDCMObj()
-	result.WriteString(tags.PatientID, "P001")
+	result.Write(tags.PatientID, "P001")
 	if err := dimse.CFindWriteRSP(m, rq, result, dicomstatus.Pending); err != nil {
 		t.Fatalf("CFindWriteRSP (pending): %v", err)
 	}
@@ -404,7 +404,7 @@ func TestCFindWriteRSP_Pending(t *testing.T) {
 func TestCFindWriteRSP_Final(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := findRQObj("STUDY")
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 	if err := dimse.CFindWriteRSP(m, rq, media.NewEmptyDCMObj(), dicomstatus.Success); err != nil {
 		t.Fatalf("CFindWriteRSP (final): %v", err)
@@ -422,7 +422,7 @@ func TestCFindWriteRSP_ErrorNoMessageID(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
 	if err := dimse.CFindWriteRSP(m, rq, media.NewEmptyDCMObj(), dicomstatus.Success); err == nil {
 		t.Error("CFindWriteRSP: want error when MessageID is missing")
 	}
@@ -439,7 +439,7 @@ func TestCFindWriteRSP_ErrorNilRequest(t *testing.T) {
 func TestCFindWriteRSP_ErrorPendingWithoutDataset(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := findRQObj("STUDY")
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 
 	if err := dimse.CFindWriteRSP(m, rq, media.NewEmptyDCMObj(), dicomstatus.Pending); err == nil {
@@ -450,11 +450,11 @@ func TestCFindWriteRSP_ErrorPendingWithoutDataset(t *testing.T) {
 func TestCFindWriteRSP_ErrorFinalWithDataset(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := findRQObj("STUDY")
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 
 	resp := media.NewEmptyDCMObj()
-	resp.WriteString(tags.PatientID, "P001")
+	resp.Write(tags.PatientID, "P001")
 
 	if err := dimse.CFindWriteRSP(m, rq, resp, dicomstatus.Success); err == nil {
 		t.Error("CFindWriteRSP: want error for final response with dataset")
@@ -464,7 +464,7 @@ func TestCFindWriteRSP_ErrorFinalWithDataset(t *testing.T) {
 func TestCFindWriteRSP_ErrorInvalidStatusCode(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := findRQObj("STUDY")
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 
 	if err := dimse.CFindWriteRSP(m, rq, media.NewEmptyDCMObj(), 0x2222); err == nil {
@@ -476,13 +476,13 @@ func TestCFindWriteRSP_ErrorInvalidStatusCode(t *testing.T) {
 
 func TestCStoreWriteRQ_WritesCommandAndData(t *testing.T) {
 	m := newMockPDU(ctUID)
-	if err := dimse.CStoreWriteRQ(m, dicomDataObj(ctUID, "1.2.3.4.5.6")); err != nil {
+	if err := dimse.CStoreWriteRQ(m, dicomDataObj(ctUID, "1.2.3.4.5.6"), priority.Medium); err != nil {
 		t.Fatalf("CStoreWriteRQ: %v", err)
 	}
 	if len(m.written) != 2 {
 		t.Fatalf("CStoreWriteRQ: want 2 writes, got %d", len(m.written))
 	}
-	if cf := m.written[0].GetUShort(tags.CommandField); cf != dicomcommand.CStoreRequest {
+	if cf := m.written[0].GetUint16(tags.CommandField); cf != dicomcommand.CStoreRequest {
 		t.Errorf("CStoreWriteRQ: CommandField %04X want CStoreRequest", cf)
 	}
 }
@@ -490,17 +490,17 @@ func TestCStoreWriteRQ_WritesCommandAndData(t *testing.T) {
 func TestCStoreWriteRQ_CommandGroupLengthNonZeroForEvenUID(t *testing.T) {
 	evenUID := "1.2.840.10008.5.1.4.1"
 	m := newMockPDU(ctUID)
-	if err := dimse.CStoreWriteRQ(m, dicomDataObj(ctUID, evenUID)); err != nil {
+	if err := dimse.CStoreWriteRQ(m, dicomDataObj(ctUID, evenUID), priority.Medium); err != nil {
 		t.Fatalf("CStoreWriteRQ (even UID): %v", err)
 	}
-	if m.written[0].GetUInt(tags.CommandGroupLength) == 0 {
+	if m.written[0].GetUint32(tags.CommandGroupLength) == 0 {
 		t.Error("CStoreWriteRQ: CommandGroupLength must not be zero for even-length UID")
 	}
 }
 
 func TestCStoreWriteRQ_AffectedSOPInstanceUIDAlwaysPresent(t *testing.T) {
 	m := newMockPDU(ctUID)
-	if err := dimse.CStoreWriteRQ(m, dicomDataObj(ctUID, "1.2.3")); err != nil {
+	if err := dimse.CStoreWriteRQ(m, dicomDataObj(ctUID, "1.2.3"), priority.Medium); err != nil {
 		t.Fatalf("CStoreWriteRQ: %v", err)
 	}
 	if uid := m.written[0].GetString(tags.AffectedSOPInstanceUID); uid == "" {
@@ -510,7 +510,7 @@ func TestCStoreWriteRQ_AffectedSOPInstanceUIDAlwaysPresent(t *testing.T) {
 
 func TestCStoreWriteRQ_ErrorMissingSOPInstanceUID(t *testing.T) {
 	m := newMockPDU(ctUID)
-	if err := dimse.CStoreWriteRQ(m, dicomDataObj(ctUID, "")); err == nil {
+	if err := dimse.CStoreWriteRQ(m, dicomDataObj(ctUID, ""), priority.Medium); err == nil {
 		t.Error("CStoreWriteRQ: want error when SOPInstanceUID is missing")
 	}
 }
@@ -518,17 +518,17 @@ func TestCStoreWriteRQ_ErrorMissingSOPInstanceUID(t *testing.T) {
 func TestCStoreWriteRQ_ErrorMissingSOPClassUID(t *testing.T) {
 	// Neither the data object nor the PDU negotiation provides a SOP class UID.
 	m := newMockPDU("")
-	if err := dimse.CStoreWriteRQ(m, dicomDataObj("", "1.2.3")); err == nil {
+	if err := dimse.CStoreWriteRQ(m, dicomDataObj("", "1.2.3"), priority.Medium); err == nil {
 		t.Error("CStoreWriteRQ: want error when AffectedSOPClassUID is missing")
 	}
 }
 
 func TestCStoreReadRSP_Success(t *testing.T) {
 	rsp := media.NewEmptyDCMObj()
-	rsp.WriteUint16(tags.CommandField, dicomcommand.CStoreResponse)
-	rsp.WriteUint16(tags.CommandDataSetType, 0x0101)
-	rsp.WriteUint16(tags.MessageIDBeingRespondedTo, 1)
-	rsp.WriteUint16(tags.Status, dicomstatus.Success)
+	rsp.Write(tags.CommandField, dicomcommand.CStoreResponse)
+	rsp.Write(tags.CommandDataSetType, 0x0101)
+	rsp.Write(tags.MessageIDBeingRespondedTo, 1)
+	rsp.Write(tags.Status, dicomstatus.Success)
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{rsp}
 	st, err := dimse.CStoreReadRSP(m)
@@ -549,8 +549,8 @@ func TestCStoreReadRSP_ErrorOnNoPDU(t *testing.T) {
 
 func TestCStoreReadRSP_ErrorInvalidStatusCode(t *testing.T) {
 	rsp := media.NewEmptyDCMObj()
-	rsp.WriteUint16(tags.CommandField, dicomcommand.CStoreResponse)
-	rsp.WriteUint16(tags.Status, 0xFE00)
+	rsp.Write(tags.CommandField, dicomcommand.CStoreResponse)
+	rsp.Write(tags.Status, 0xFE00)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{rsp}
@@ -562,10 +562,10 @@ func TestCStoreReadRSP_ErrorInvalidStatusCode(t *testing.T) {
 
 func TestCStoreReadRSP_ErrorInvalidCommandDataSetType(t *testing.T) {
 	rsp := media.NewEmptyDCMObj()
-	rsp.WriteUint16(tags.CommandField, dicomcommand.CStoreResponse)
-	rsp.WriteUint16(tags.CommandDataSetType, 0x0102)
-	rsp.WriteUint16(tags.MessageIDBeingRespondedTo, 1)
-	rsp.WriteUint16(tags.Status, dicomstatus.Success)
+	rsp.Write(tags.CommandField, dicomcommand.CStoreResponse)
+	rsp.Write(tags.CommandDataSetType, 0x0102)
+	rsp.Write(tags.MessageIDBeingRespondedTo, 1)
+	rsp.Write(tags.Status, dicomstatus.Success)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{rsp}
@@ -577,10 +577,10 @@ func TestCStoreReadRSP_ErrorInvalidCommandDataSetType(t *testing.T) {
 
 func TestCStoreReadRSP_ErrorMissingMessageIDBeingRespondedTo(t *testing.T) {
 	rsp := media.NewEmptyDCMObj()
-	rsp.WriteUint16(tags.CommandField, dicomcommand.CStoreResponse)
-	rsp.WriteUint16(tags.CommandDataSetType, 0x0101)
-	rsp.WriteUint16(tags.MessageIDBeingRespondedTo, 0)
-	rsp.WriteUint16(tags.Status, dicomstatus.Success)
+	rsp.Write(tags.CommandField, dicomcommand.CStoreResponse)
+	rsp.Write(tags.CommandDataSetType, 0x0101)
+	rsp.Write(tags.MessageIDBeingRespondedTo, 0)
+	rsp.Write(tags.Status, dicomstatus.Success)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{rsp}
@@ -594,9 +594,9 @@ func TestCStoreWriteRSP_WritesResponse(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-	rq.WriteString(tags.AffectedSOPInstanceUID, "1.2.3.4")
-	rq.WriteUint16(tags.MessageID, 42)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPInstanceUID, "1.2.3.4")
+	rq.Write(tags.MessageID, 42)
 	if err := dimse.CStoreWriteRSP(m, rq, dicomstatus.Success); err != nil {
 		t.Fatalf("CStoreWriteRSP: %v", err)
 	}
@@ -604,10 +604,10 @@ func TestCStoreWriteRSP_WritesResponse(t *testing.T) {
 		t.Fatal("CStoreWriteRSP: nothing written")
 	}
 	rsp := m.written[0]
-	if cf := rsp.GetUShort(tags.CommandField); cf != dicomcommand.CStoreResponse {
+	if cf := rsp.GetUint16(tags.CommandField); cf != dicomcommand.CStoreResponse {
 		t.Errorf("CStoreWriteRSP: CommandField %04X want CStoreResponse", cf)
 	}
-	if st := rsp.GetUShort(tags.Status); st != dicomstatus.Success {
+	if st := rsp.GetUint16(tags.Status); st != dicomstatus.Success {
 		t.Errorf("CStoreWriteRSP: Status %04X want Success", st)
 	}
 }
@@ -616,14 +616,14 @@ func TestCStoreWriteRSP_AllowsWarningStatus(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-	rq.WriteString(tags.AffectedSOPInstanceUID, "1.2.3")
-	rq.WriteUint16(tags.MessageID, 5)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPInstanceUID, "1.2.3")
+	rq.Write(tags.MessageID, 5)
 
 	if err := dimse.CStoreWriteRSP(m, rq, dicomstatus.WarningElementsDiscarded); err != nil {
 		t.Fatalf("CStoreWriteRSP: %v", err)
 	}
-	if got := m.written[0].GetUShort(tags.Status); got != dicomstatus.WarningElementsDiscarded {
+	if got := m.written[0].GetUint16(tags.Status); got != dicomstatus.WarningElementsDiscarded {
 		t.Fatalf("CStoreWriteRSP: status %04X want %04X", got, dicomstatus.WarningElementsDiscarded)
 	}
 }
@@ -632,13 +632,13 @@ func TestCStoreWriteRSP_CommandGroupLengthUsesInstanceUID(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID) // 25 chars
-	rq.WriteString(tags.AffectedSOPInstanceUID, "1.2.3")
-	rq.WriteUint16(tags.MessageID, 1)
+	rq.Write(tags.AffectedSOPClassUID, ctUID) // 25 chars
+	rq.Write(tags.AffectedSOPInstanceUID, "1.2.3")
+	rq.Write(tags.MessageID, 1)
 	if err := dimse.CStoreWriteRSP(m, rq, dicomstatus.Success); err != nil {
 		t.Fatalf("CStoreWriteRSP: %v", err)
 	}
-	if m.written[0].GetUInt(tags.CommandGroupLength) == 0 {
+	if m.written[0].GetUint32(tags.CommandGroupLength) == 0 {
 		t.Error("CStoreWriteRSP: CommandGroupLength must not be zero")
 	}
 }
@@ -654,7 +654,7 @@ func TestCStoreWriteRSP_ErrorNoSOPInstanceUID(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
 	if err := dimse.CStoreWriteRSP(m, rq, dicomstatus.Success); err == nil {
 		t.Error("CStoreWriteRSP: want error when AffectedSOPInstanceUID absent")
 	}
@@ -672,9 +672,9 @@ func TestCStoreWriteRSP_ErrorInvalidStatusCode(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-	rq.WriteString(tags.AffectedSOPInstanceUID, "1.2.3")
-	rq.WriteUint16(tags.MessageID, 3)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPInstanceUID, "1.2.3")
+	rq.Write(tags.MessageID, 3)
 
 	if err := dimse.CStoreWriteRSP(m, rq, 0xFE00); err == nil {
 		t.Error("CStoreWriteRSP: want error for invalid C-STORE status code")
@@ -685,8 +685,8 @@ func TestCStoreWriteRSP_ErrorMissingMessageID(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-	rq.WriteString(tags.AffectedSOPInstanceUID, "1.2.3")
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPInstanceUID, "1.2.3")
 
 	if err := dimse.CStoreWriteRSP(m, rq, dicomstatus.Success); err == nil {
 		t.Error("CStoreWriteRSP: want error when MessageID is missing")
@@ -698,14 +698,14 @@ func TestCStoreWriteRSP_ErrorMissingMessageID(t *testing.T) {
 func TestCMoveWriteRQ_WritesCommandAndData(t *testing.T) {
 	m := newMockPDU(ctUID)
 	q := media.NewEmptyDCMObj()
-	q.WriteString(tags.QueryRetrieveLevel, "STUDY")
+	q.Write(tags.QueryRetrieveLevel, "STUDY")
 	if err := dimse.CMoveWriteRQ(m, q, "DEST_AE", priority.Medium); err != nil {
 		t.Fatalf("CMoveWriteRQ: %v", err)
 	}
 	if len(m.written) != 2 {
 		t.Fatalf("CMoveWriteRQ: want 2 writes, got %d", len(m.written))
 	}
-	if cf := m.written[0].GetUShort(tags.CommandField); cf != dicomcommand.CMoveRequest {
+	if cf := m.written[0].GetUint16(tags.CommandField); cf != dicomcommand.CMoveRequest {
 		t.Errorf("CMoveWriteRQ: CommandField %04X want CMoveRequest", cf)
 	}
 }
@@ -714,34 +714,34 @@ func TestCMoveWriteRSP_AllSubopCountsPresent(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-	rq.WriteUint16(tags.MessageID, 1)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.MessageID, 1)
 	if err := dimse.CMoveWriteRSP(m, rq, dicomstatus.WarningSubOperationsCompleteOneOrMoreFailures, 0, 3, 1, 0); err != nil {
 		t.Fatalf("CMoveWriteRSP: %v", err)
 	}
 	rsp := m.written[0]
-	if cf := rsp.GetUShort(tags.CommandField); cf != dicomcommand.CMoveResponse {
+	if cf := rsp.GetUint16(tags.CommandField); cf != dicomcommand.CMoveResponse {
 		t.Errorf("CMoveWriteRSP: CommandField %04X want CMoveResponse", cf)
 	}
-	_ = rsp.GetUShort(tags.NumberOfRemainingSuboperations)
-	_ = rsp.GetUShort(tags.NumberOfCompletedSuboperations)
-	_ = rsp.GetUShort(tags.NumberOfFailedSuboperations)
-	_ = rsp.GetUShort(tags.NumberOfWarningSuboperations)
+	_ = rsp.GetUint16(tags.NumberOfRemainingSuboperations)
+	_ = rsp.GetUint16(tags.NumberOfCompletedSuboperations)
+	_ = rsp.GetUint16(tags.NumberOfFailedSuboperations)
+	_ = rsp.GetUint16(tags.NumberOfWarningSuboperations)
 }
 
 func TestCMoveReadRSP_PendingThenFinal(t *testing.T) {
 	pending := media.NewEmptyDCMObj()
-	pending.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
-	pending.WriteUint16(tags.Status, dicomstatus.Pending)
-	pending.WriteUint16(tags.CommandDataSetType, 0x0102) // Dataset follows
-	pending.WriteUint16(tags.NumberOfRemainingSuboperations, 2)
+	pending.Write(tags.CommandField, dicomcommand.CMoveResponse)
+	pending.Write(tags.Status, dicomstatus.Pending)
+	pending.Write(tags.CommandDataSetType, 0x0102) // Dataset follows
+	pending.Write(tags.NumberOfRemainingSuboperations, 2)
 
 	dataset := media.NewEmptyDCMObj()
 
 	final := media.NewEmptyDCMObj()
-	final.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
-	final.WriteUint16(tags.Status, dicomstatus.Success)
-	final.WriteUint16(tags.CommandDataSetType, 0x0101) // No dataset
+	final.Write(tags.CommandField, dicomcommand.CMoveResponse)
+	final.Write(tags.Status, dicomstatus.Success)
+	final.Write(tags.CommandDataSetType, 0x0101) // No dataset
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{pending, dataset, final}
@@ -780,9 +780,9 @@ func TestCMoveReadRSP_ErrorOnNoPDU(t *testing.T) {
 
 func TestCMoveReadRSP_ErrorInvalidCommandDataSetType(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
-	cmd.WriteUint16(tags.Status, dicomstatus.Success)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x4321)
+	cmd.Write(tags.CommandField, dicomcommand.CMoveResponse)
+	cmd.Write(tags.Status, dicomstatus.Success)
+	cmd.Write(tags.CommandDataSetType, 0x4321)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -799,17 +799,17 @@ func TestCMoveReadRQ_SuccessWithIdentifier(t *testing.T) {
 	// Construct a C-MOVE-RQ command
 	cmd := media.NewEmptyDCMObj()
 	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
-	cmd.WriteUint16(tags.MessageID, 1)
-	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
-	cmd.WriteString(tags.MoveDestination, "DEST_AE")
-	cmd.WriteUint16(tags.Priority, 0) // Low
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0102)
+	cmd.Write(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.Write(tags.MessageID, 1)
+	cmd.Write(tags.AffectedSOPClassUID, ctUID)
+	cmd.Write(tags.MoveDestination, "DEST_AE")
+	cmd.Write(tags.Priority, 0) // Low
+	cmd.Write(tags.CommandDataSetType, 0x0102)
 
 	// Construct identifier dataset
 	identifier := media.NewEmptyDCMObj()
-	identifier.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	identifier.WriteString(tags.PatientID, "P001")
+	identifier.Write(tags.QueryRetrieveLevel, "STUDY")
+	identifier.Write(tags.PatientID, "P001")
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd, identifier}
@@ -842,12 +842,12 @@ func TestCMoveReadRQ_SuccessWithIdentifier(t *testing.T) {
 func TestCMoveReadRQ_SuccessWithoutIdentifier(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
 	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
-	cmd.WriteUint16(tags.MessageID, 1)
-	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
-	cmd.WriteString(tags.MoveDestination, "DEST_AE")
-	cmd.WriteUint16(tags.Priority, 2) // High
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.Write(tags.MessageID, 1)
+	cmd.Write(tags.AffectedSOPClassUID, ctUID)
+	cmd.Write(tags.MoveDestination, "DEST_AE")
+	cmd.Write(tags.Priority, 2) // High
+	cmd.Write(tags.CommandDataSetType, 0x0101)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -868,11 +868,11 @@ func TestCMoveReadRQ_SuccessWithoutIdentifier(t *testing.T) {
 func TestCMoveReadRQ_ErrorMissingSOPClassUID(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
 	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
-	cmd.WriteUint16(tags.MessageID, 1)
+	cmd.Write(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.Write(tags.MessageID, 1)
 	// Missing AffectedSOPClassUID
-	cmd.WriteString(tags.MoveDestination, "DEST_AE")
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.MoveDestination, "DEST_AE")
+	cmd.Write(tags.CommandDataSetType, 0x0101)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -886,11 +886,11 @@ func TestCMoveReadRQ_ErrorMissingSOPClassUID(t *testing.T) {
 func TestCMoveReadRQ_ErrorMissingMessageID(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
 	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.Write(tags.CommandField, dicomcommand.CMoveRequest)
 	// Missing MessageID
-	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
-	cmd.WriteString(tags.MoveDestination, "DEST_AE")
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.AffectedSOPClassUID, ctUID)
+	cmd.Write(tags.MoveDestination, "DEST_AE")
+	cmd.Write(tags.CommandDataSetType, 0x0101)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -904,11 +904,11 @@ func TestCMoveReadRQ_ErrorMissingMessageID(t *testing.T) {
 func TestCMoveReadRQ_ErrorMissingMoveDestination(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
 	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
-	cmd.WriteUint16(tags.MessageID, 1)
-	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
+	cmd.Write(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.Write(tags.MessageID, 1)
+	cmd.Write(tags.AffectedSOPClassUID, ctUID)
 	// Missing MoveDestination
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.CommandDataSetType, 0x0101)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -922,11 +922,11 @@ func TestCMoveReadRQ_ErrorMissingMoveDestination(t *testing.T) {
 func TestCMoveReadRQ_ErrorInvalidCommandDataSetType(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
 	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
-	cmd.WriteUint16(tags.MessageID, 1)
-	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
-	cmd.WriteString(tags.MoveDestination, "DEST_AE")
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0103) // Invalid
+	cmd.Write(tags.CommandField, dicomcommand.CMoveRequest)
+	cmd.Write(tags.MessageID, 1)
+	cmd.Write(tags.AffectedSOPClassUID, ctUID)
+	cmd.Write(tags.MoveDestination, "DEST_AE")
+	cmd.Write(tags.CommandDataSetType, 0x0103) // Invalid
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -940,11 +940,11 @@ func TestCMoveReadRQ_ErrorInvalidCommandDataSetType(t *testing.T) {
 func TestCMoveReadRQ_ErrorWrongCommandField(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
 	cmd.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CFindRequest) // Wrong command
-	cmd.WriteUint16(tags.MessageID, 1)
-	cmd.WriteString(tags.AffectedSOPClassUID, ctUID)
-	cmd.WriteString(tags.MoveDestination, "DEST_AE")
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.CommandField, dicomcommand.CFindRequest) // Wrong command
+	cmd.Write(tags.MessageID, 1)
+	cmd.Write(tags.AffectedSOPClassUID, ctUID)
+	cmd.Write(tags.MoveDestination, "DEST_AE")
+	cmd.Write(tags.CommandDataSetType, 0x0101)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -960,14 +960,14 @@ func TestCMoveReadRQ_ErrorWrongCommandField(t *testing.T) {
 func TestCMoveWriteRQ_LowPriority(t *testing.T) {
 	m := newMockPDU(ctUID)
 	q := media.NewEmptyDCMObj()
-	q.WriteString(tags.QueryRetrieveLevel, "STUDY")
+	q.Write(tags.QueryRetrieveLevel, "STUDY")
 	if err := dimse.CMoveWriteRQ(m, q, "DEST_AE", 2); err != nil {
 		t.Fatalf("CMoveWriteRQ: %v", err)
 	}
 	if len(m.written) != 2 {
 		t.Fatalf("CMoveWriteRQ: want 2 writes, got %d", len(m.written))
 	}
-	if pri := m.written[0].GetUShort(tags.Priority); pri != 2 {
+	if pri := m.written[0].GetUint16(tags.Priority); pri != 2 {
 		t.Errorf("CMoveWriteRQ: Priority %d want 2", pri)
 	}
 }
@@ -991,7 +991,7 @@ func TestCMoveWriteRQ_EmptyDataset(t *testing.T) {
 		t.Fatalf("CMoveWriteRQ (empty dataset): want 1 write, got %d", len(m.written))
 	}
 	// CommandDataSetType should be 0x0101 (no dataset)
-	if cdt := m.written[0].GetUShort(tags.CommandDataSetType); cdt != 0x0101 {
+	if cdt := m.written[0].GetUint16(tags.CommandDataSetType); cdt != 0x0101 {
 		t.Errorf("CMoveWriteRQ: CommandDataSetType %04X want 0x0101", cdt)
 	}
 }
@@ -1000,13 +1000,13 @@ func TestCMoveWriteRQ_EmptyDataset(t *testing.T) {
 
 func TestGetCMoveResponseStats(t *testing.T) {
 	rsp := media.NewEmptyDCMObj()
-	rsp.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
-	rsp.WriteUint16(tags.Status, dicomstatus.Pending)
-	rsp.WriteUint16(tags.CommandDataSetType, 0x0101)
-	rsp.WriteUint16(tags.NumberOfRemainingSuboperations, 5)
-	rsp.WriteUint16(tags.NumberOfCompletedSuboperations, 3)
-	rsp.WriteUint16(tags.NumberOfFailedSuboperations, 1)
-	rsp.WriteUint16(tags.NumberOfWarningSuboperations, 0)
+	rsp.Write(tags.CommandField, dicomcommand.CMoveResponse)
+	rsp.Write(tags.Status, dicomstatus.Pending)
+	rsp.Write(tags.CommandDataSetType, 0x0101)
+	rsp.Write(tags.NumberOfRemainingSuboperations, 5)
+	rsp.Write(tags.NumberOfCompletedSuboperations, 3)
+	rsp.Write(tags.NumberOfFailedSuboperations, 1)
+	rsp.Write(tags.NumberOfWarningSuboperations, 0)
 
 	stats := dimse.GetCMoveResponseStats(rsp)
 	if stats.Remaining != 5 {
@@ -1027,7 +1027,7 @@ func TestGetCMoveResponseStats(t *testing.T) {
 
 func TestCMoveRequest_GetMoveLevelFromIdentifier(t *testing.T) {
 	identifier := media.NewEmptyDCMObj()
-	identifier.WriteString(tags.QueryRetrieveLevel, "STUDY")
+	identifier.Write(tags.QueryRetrieveLevel, "STUDY")
 
 	req := &dimse.CMoveRequest{
 		IdentifierDataSet: identifier,
@@ -1044,14 +1044,14 @@ func TestCMoveRequest_GetMoveLevelFromIdentifier(t *testing.T) {
 func TestCGetWriteRQ_WritesCommandAndData(t *testing.T) {
 	m := newMockPDU(ctUID)
 	q := media.NewEmptyDCMObj()
-	q.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	if err := dimse.CGetWriteRQ(m, q); err != nil {
+	q.Write(tags.QueryRetrieveLevel, "STUDY")
+	if err := dimse.CGetWriteRQ(m, q, priority.Medium); err != nil {
 		t.Fatalf("CGetWriteRQ: %v", err)
 	}
 	if len(m.written) != 2 {
 		t.Fatalf("CGetWriteRQ: want 2 writes, got %d", len(m.written))
 	}
-	if cf := m.written[0].GetUShort(tags.CommandField); cf != dicomcommand.CGetRequest {
+	if cf := m.written[0].GetUint16(tags.CommandField); cf != dicomcommand.CGetRequest {
 		t.Errorf("CGetWriteRQ: CommandField %04X want CGetRequest", cf)
 	}
 }
@@ -1059,23 +1059,23 @@ func TestCGetWriteRQ_WritesCommandAndData(t *testing.T) {
 func TestCGetWriteRQ_ErrorMissingSOPClass(t *testing.T) {
 	m := newMockPDU("")
 	q := media.NewEmptyDCMObj()
-	q.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	if err := dimse.CGetWriteRQ(m, q); err == nil {
+	q.Write(tags.QueryRetrieveLevel, "STUDY")
+	if err := dimse.CGetWriteRQ(m, q, priority.Medium); err == nil {
 		t.Error("CGetWriteRQ: want error when Affected SOP Class UID is missing")
 	}
 }
 
 func TestCGetReadRSP_PendingThenFinal(t *testing.T) {
 	pending := media.NewEmptyDCMObj()
-	pending.WriteUint16(tags.CommandField, dicomcommand.CGetResponse)
-	pending.WriteUint16(tags.Status, dicomstatus.Pending)
-	pending.WriteUint16(tags.CommandDataSetType, 0x0101)
-	pending.WriteUint16(tags.NumberOfRemainingSuboperations, 2)
+	pending.Write(tags.CommandField, dicomcommand.CGetResponse)
+	pending.Write(tags.Status, dicomstatus.Pending)
+	pending.Write(tags.CommandDataSetType, 0x0101)
+	pending.Write(tags.NumberOfRemainingSuboperations, 2)
 
 	final := media.NewEmptyDCMObj()
-	final.WriteUint16(tags.CommandField, dicomcommand.CGetResponse)
-	final.WriteUint16(tags.Status, dicomstatus.Success)
-	final.WriteUint16(tags.CommandDataSetType, 0x0101)
+	final.Write(tags.CommandField, dicomcommand.CGetResponse)
+	final.Write(tags.Status, dicomstatus.Success)
+	final.Write(tags.CommandDataSetType, 0x0101)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{pending, final}
@@ -1100,9 +1100,9 @@ func TestCGetReadRSP_PendingThenFinal(t *testing.T) {
 
 func TestCGetReadRSP_ErrorInvalidCommandDataSetType(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CGetResponse)
-	cmd.WriteUint16(tags.Status, dicomstatus.Success)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x1234)
+	cmd.Write(tags.CommandField, dicomcommand.CGetResponse)
+	cmd.Write(tags.Status, dicomstatus.Success)
+	cmd.Write(tags.CommandDataSetType, 0x1234)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -1115,13 +1115,13 @@ func TestCGetReadRSP_ErrorInvalidCommandDataSetType(t *testing.T) {
 
 func TestCGetReadRSP_ErrorInvalidStatusCode(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CGetResponse)
-	cmd.WriteUint16(tags.Status, 0x2222)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
-	cmd.WriteUint16(tags.NumberOfRemainingSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfCompletedSuboperations, 1)
-	cmd.WriteUint16(tags.NumberOfFailedSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfWarningSuboperations, 0)
+	cmd.Write(tags.CommandField, dicomcommand.CGetResponse)
+	cmd.Write(tags.Status, 0x2222)
+	cmd.Write(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.NumberOfRemainingSuboperations, 0)
+	cmd.Write(tags.NumberOfCompletedSuboperations, 1)
+	cmd.Write(tags.NumberOfFailedSuboperations, 0)
+	cmd.Write(tags.NumberOfWarningSuboperations, 0)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -1136,9 +1136,9 @@ func TestCGetWriteRSP_WritesResponse(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-	rq.WriteUint16(tags.CommandField, dicomcommand.CGetRequest)
-	rq.WriteUint16(tags.MessageID, 7)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.CommandField, dicomcommand.CGetRequest)
+	rq.Write(tags.MessageID, 7)
 
 	if err := dimse.CGetWriteRSP(m, rq, dicomstatus.Success, 0, 1, 0, 0); err != nil {
 		t.Fatalf("CGetWriteRSP: %v", err)
@@ -1146,20 +1146,20 @@ func TestCGetWriteRSP_WritesResponse(t *testing.T) {
 	if len(m.written) != 1 {
 		t.Fatalf("CGetWriteRSP: want 1 write, got %d", len(m.written))
 	}
-	if cf := m.written[0].GetUShort(tags.CommandField); cf != dicomcommand.CGetResponse {
+	if cf := m.written[0].GetUint16(tags.CommandField); cf != dicomcommand.CGetResponse {
 		t.Errorf("CGetWriteRSP: CommandField %04X want CGetResponse", cf)
 	}
 }
 
 func TestCMoveReadRSP_ErrorInvalidStatusCode(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
-	cmd.WriteUint16(tags.Status, 0x2222)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
-	cmd.WriteUint16(tags.NumberOfRemainingSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfCompletedSuboperations, 1)
-	cmd.WriteUint16(tags.NumberOfFailedSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfWarningSuboperations, 0)
+	cmd.Write(tags.CommandField, dicomcommand.CMoveResponse)
+	cmd.Write(tags.Status, 0x2222)
+	cmd.Write(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.NumberOfRemainingSuboperations, 0)
+	cmd.Write(tags.NumberOfCompletedSuboperations, 1)
+	cmd.Write(tags.NumberOfFailedSuboperations, 0)
+	cmd.Write(tags.NumberOfWarningSuboperations, 0)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -1174,7 +1174,7 @@ func TestCGetWriteRSP_ErrorNoMessageID(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
 	if err := dimse.CGetWriteRSP(m, rq, dicomstatus.Success, 0, 0, 0, 0); err == nil {
 		t.Error("CGetWriteRSP: want error when MessageID is missing")
 	}
@@ -1184,9 +1184,9 @@ func TestCGetWriteRSP_ErrorInvalidStatusCode(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-	rq.WriteUint16(tags.CommandField, dicomcommand.CGetRequest)
-	rq.WriteUint16(tags.MessageID, 99)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.CommandField, dicomcommand.CGetRequest)
+	rq.Write(tags.MessageID, 99)
 
 	if err := dimse.CGetWriteRSP(m, rq, 0x2222, 0, 0, 1, 0); err == nil {
 		t.Error("CGetWriteRSP: want error for invalid status code")
@@ -1197,9 +1197,9 @@ func TestCGetWriteRSP_ErrorCMoveSpecificStatus(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-	rq.WriteUint16(tags.CommandField, dicomcommand.CGetRequest)
-	rq.WriteUint16(tags.MessageID, 101)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.CommandField, dicomcommand.CGetRequest)
+	rq.Write(tags.MessageID, 101)
 
 	if err := dimse.CGetWriteRSP(m, rq, dicomstatus.RefusedMoveDestinationUnknown, 0, 0, 1, 0); err == nil {
 		t.Error("CGetWriteRSP: want error for C-MOVE-specific status")
@@ -1212,9 +1212,9 @@ func TestNWriteRSP_WritesResponse(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.RequestedSOPClassUID, ctUID)
-	rq.WriteString(tags.RequestedSOPInstanceUID, "1.2.3.4.5")
-	rq.WriteUint16(tags.MessageID, 9)
+	rq.Write(tags.RequestedSOPClassUID, ctUID)
+	rq.Write(tags.RequestedSOPInstanceUID, "1.2.3.4.5")
+	rq.Write(tags.MessageID, 9)
 
 	if err := dimse.NWriteRSP(m, rq, dicomcommand.NGetResponse, dicomstatus.FailureSOPClassNotSupported, media.NewEmptyDCMObj()); err != nil {
 		t.Fatalf("NWriteRSP: %v", err)
@@ -1222,7 +1222,7 @@ func TestNWriteRSP_WritesResponse(t *testing.T) {
 	if len(m.written) != 1 {
 		t.Fatalf("NWriteRSP: want 1 write, got %d", len(m.written))
 	}
-	if cf := m.written[0].GetUShort(tags.CommandField); cf != dicomcommand.NGetResponse {
+	if cf := m.written[0].GetUint16(tags.CommandField); cf != dicomcommand.NGetResponse {
 		t.Errorf("NWriteRSP: CommandField %04X want NGetResponse", cf)
 	}
 }
@@ -1247,14 +1247,14 @@ func TestCFindReadRSP_StatusMatrix(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := media.NewEmptyDCMObj()
-			cmd.WriteUint16(tags.CommandField, dicomcommand.CFindResponse)
-			cmd.WriteUint16(tags.Status, tc.status)
-			cmd.WriteUint16(tags.CommandDataSetType, tc.commandDST)
+			cmd.Write(tags.CommandField, dicomcommand.CFindResponse)
+			cmd.Write(tags.Status, tc.status)
+			cmd.Write(tags.CommandDataSetType, tc.commandDST)
 
 			m := newMockPDU(ctUID)
 			if tc.expectDataset {
 				ds := media.NewEmptyDCMObj()
-				ds.WriteString(tags.PatientID, "P001")
+				ds.Write(tags.PatientID, "P001")
 				m.nextPDUs = []media.DICOMObject{cmd, ds}
 			} else {
 				m.nextPDUs = []media.DICOMObject{cmd}
@@ -1285,9 +1285,9 @@ func TestCFindReadRSP_StatusMatrix(t *testing.T) {
 
 func TestCFindReadRSP_RejectsBxxxWarningStatus(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CFindResponse)
-	cmd.WriteUint16(tags.Status, dicomstatus.WarningSubOperationsCompleteOneOrMoreFailures)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.CommandField, dicomcommand.CFindResponse)
+	cmd.Write(tags.Status, dicomstatus.WarningSubOperationsCompleteOneOrMoreFailures)
+	cmd.Write(tags.CommandDataSetType, 0x0101)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -1316,15 +1316,15 @@ func TestCGetReadRSP_StatusAndPendingMatrix(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := media.NewEmptyDCMObj()
-			cmd.WriteUint16(tags.CommandField, dicomcommand.CGetResponse)
-			cmd.WriteUint16(tags.Status, tc.status)
-			cmd.WriteUint16(tags.CommandDataSetType, tc.commandDST)
-			cmd.WriteUint16(tags.NumberOfRemainingSuboperations, tc.remaining)
+			cmd.Write(tags.CommandField, dicomcommand.CGetResponse)
+			cmd.Write(tags.Status, tc.status)
+			cmd.Write(tags.CommandDataSetType, tc.commandDST)
+			cmd.Write(tags.NumberOfRemainingSuboperations, tc.remaining)
 
 			m := newMockPDU(ctUID)
 			if tc.expectDataset {
 				ds := media.NewEmptyDCMObj()
-				ds.WriteString(tags.PatientID, "P001")
+				ds.Write(tags.PatientID, "P001")
 				m.nextPDUs = []media.DICOMObject{cmd, ds}
 			} else {
 				m.nextPDUs = []media.DICOMObject{cmd}
@@ -1353,13 +1353,13 @@ func TestCGetReadRSP_StatusAndPendingMatrix(t *testing.T) {
 
 func TestCGetReadRSP_RejectsCMoveSpecificStatus(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CGetResponse)
-	cmd.WriteUint16(tags.Status, dicomstatus.RefusedMoveDestinationUnknown)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
-	cmd.WriteUint16(tags.NumberOfRemainingSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfCompletedSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfFailedSuboperations, 1)
-	cmd.WriteUint16(tags.NumberOfWarningSuboperations, 0)
+	cmd.Write(tags.CommandField, dicomcommand.CGetResponse)
+	cmd.Write(tags.Status, dicomstatus.RefusedMoveDestinationUnknown)
+	cmd.Write(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.NumberOfRemainingSuboperations, 0)
+	cmd.Write(tags.NumberOfCompletedSuboperations, 0)
+	cmd.Write(tags.NumberOfFailedSuboperations, 1)
+	cmd.Write(tags.NumberOfWarningSuboperations, 0)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -1372,13 +1372,13 @@ func TestCGetReadRSP_RejectsCMoveSpecificStatus(t *testing.T) {
 
 func TestCGetReadRSP_RejectsInvalidBxxxWarningStatus(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CGetResponse)
-	cmd.WriteUint16(tags.Status, dicomstatus.WarningDataSetDoesNotMatchSOPClass)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
-	cmd.WriteUint16(tags.NumberOfRemainingSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfCompletedSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfFailedSuboperations, 1)
-	cmd.WriteUint16(tags.NumberOfWarningSuboperations, 0)
+	cmd.Write(tags.CommandField, dicomcommand.CGetResponse)
+	cmd.Write(tags.Status, dicomstatus.WarningDataSetDoesNotMatchSOPClass)
+	cmd.Write(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.NumberOfRemainingSuboperations, 0)
+	cmd.Write(tags.NumberOfCompletedSuboperations, 0)
+	cmd.Write(tags.NumberOfFailedSuboperations, 1)
+	cmd.Write(tags.NumberOfWarningSuboperations, 0)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -1411,18 +1411,18 @@ func TestCMoveReadRSP_StatusAndPendingMatrix(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := media.NewEmptyDCMObj()
-			cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
-			cmd.WriteUint16(tags.Status, tc.status)
-			cmd.WriteUint16(tags.CommandDataSetType, tc.commandDST)
-			cmd.WriteUint16(tags.NumberOfRemainingSuboperations, tc.remaining)
-			cmd.WriteUint16(tags.NumberOfCompletedSuboperations, tc.completed)
-			cmd.WriteUint16(tags.NumberOfFailedSuboperations, tc.failed)
-			cmd.WriteUint16(tags.NumberOfWarningSuboperations, tc.warnings)
+			cmd.Write(tags.CommandField, dicomcommand.CMoveResponse)
+			cmd.Write(tags.Status, tc.status)
+			cmd.Write(tags.CommandDataSetType, tc.commandDST)
+			cmd.Write(tags.NumberOfRemainingSuboperations, tc.remaining)
+			cmd.Write(tags.NumberOfCompletedSuboperations, tc.completed)
+			cmd.Write(tags.NumberOfFailedSuboperations, tc.failed)
+			cmd.Write(tags.NumberOfWarningSuboperations, tc.warnings)
 
 			m := newMockPDU(ctUID)
 			if tc.expectDataset {
 				ds := media.NewEmptyDCMObj()
-				ds.WriteString(tags.PatientID, "P001")
+				ds.Write(tags.PatientID, "P001")
 				m.nextPDUs = []media.DICOMObject{cmd, ds}
 			} else {
 				m.nextPDUs = []media.DICOMObject{cmd}
@@ -1451,13 +1451,13 @@ func TestCMoveReadRSP_StatusAndPendingMatrix(t *testing.T) {
 
 func TestCMoveReadRSP_RejectsInvalidBxxxWarningStatus(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
-	cmd.WriteUint16(tags.Status, dicomstatus.WarningElementsDiscarded)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
-	cmd.WriteUint16(tags.NumberOfRemainingSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfCompletedSuboperations, 1)
-	cmd.WriteUint16(tags.NumberOfFailedSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfWarningSuboperations, 1)
+	cmd.Write(tags.CommandField, dicomcommand.CMoveResponse)
+	cmd.Write(tags.Status, dicomstatus.WarningElementsDiscarded)
+	cmd.Write(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.NumberOfRemainingSuboperations, 0)
+	cmd.Write(tags.NumberOfCompletedSuboperations, 1)
+	cmd.Write(tags.NumberOfFailedSuboperations, 0)
+	cmd.Write(tags.NumberOfWarningSuboperations, 1)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}
@@ -1493,15 +1493,15 @@ func TestCGetWriteRSP_StatusPropagationMatrix(t *testing.T) {
 			m := newMockPDU(ctUID)
 			rq := media.NewEmptyDCMObj()
 			rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-			rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-			rq.WriteUint16(tags.CommandField, dicomcommand.CGetRequest)
-			rq.WriteUint16(tags.MessageID, 11)
+			rq.Write(tags.AffectedSOPClassUID, ctUID)
+			rq.Write(tags.CommandField, dicomcommand.CGetRequest)
+			rq.Write(tags.MessageID, 11)
 
 			remaining, completed, failed, warnings := countersForStatus(st)
 			if err := dimse.CGetWriteRSP(m, rq, st, remaining, completed, failed, warnings); err != nil {
 				t.Fatalf("CGetWriteRSP: %v", err)
 			}
-			got := m.written[0].GetUShort(tags.Status)
+			got := m.written[0].GetUint16(tags.Status)
 			if got != st {
 				t.Fatalf("CGetWriteRSP: status %04X want %04X", got, st)
 			}
@@ -1534,14 +1534,14 @@ func TestCMoveWriteRSP_StatusPropagationMatrix(t *testing.T) {
 			m := newMockPDU(ctUID)
 			rq := media.NewEmptyDCMObj()
 			rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-			rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-			rq.WriteUint16(tags.MessageID, 13)
+			rq.Write(tags.AffectedSOPClassUID, ctUID)
+			rq.Write(tags.MessageID, 13)
 
 			remaining, completed, failed, warnings := countersForStatus(st)
 			if err := dimse.CMoveWriteRSP(m, rq, st, remaining, completed, failed, warnings); err != nil {
 				t.Fatalf("CMoveWriteRSP: %v", err)
 			}
-			got := m.written[0].GetUShort(tags.Status)
+			got := m.written[0].GetUint16(tags.Status)
 			if got != st {
 				t.Fatalf("CMoveWriteRSP: status %04X want %04X", got, st)
 			}
@@ -1553,8 +1553,8 @@ func TestCMoveWriteRSP_ErrorInvalidStatusCode(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-	rq.WriteUint16(tags.MessageID, 77)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.MessageID, 77)
 
 	if err := dimse.CMoveWriteRSP(m, rq, 0x2222, 0, 0, 1, 0); err == nil {
 		t.Error("CMoveWriteRSP: want error for invalid status code")
@@ -1565,9 +1565,9 @@ func TestCGetWriteRSP_RejectsInvalidSuboperationCounters(t *testing.T) {
 	m := newMockPDU(ctUID)
 	rq := media.NewEmptyDCMObj()
 	rq.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	rq.WriteString(tags.AffectedSOPClassUID, ctUID)
-	rq.WriteUint16(tags.CommandField, dicomcommand.CGetRequest)
-	rq.WriteUint16(tags.MessageID, 21)
+	rq.Write(tags.AffectedSOPClassUID, ctUID)
+	rq.Write(tags.CommandField, dicomcommand.CGetRequest)
+	rq.Write(tags.MessageID, 21)
 
 	if err := dimse.CGetWriteRSP(m, rq, dicomstatus.Pending, 0, 1, 0, 0); err == nil {
 		t.Fatal("CGetWriteRSP: want error when pending has remaining=0")
@@ -1582,13 +1582,13 @@ func TestCGetWriteRSP_RejectsInvalidSuboperationCounters(t *testing.T) {
 
 func TestCMoveReadRSP_RejectsInvalidSuboperationCounters(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteUint16(tags.CommandField, dicomcommand.CMoveResponse)
-	cmd.WriteUint16(tags.Status, dicomstatus.Pending)
-	cmd.WriteUint16(tags.CommandDataSetType, 0x0101)
-	cmd.WriteUint16(tags.NumberOfRemainingSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfCompletedSuboperations, 1)
-	cmd.WriteUint16(tags.NumberOfFailedSuboperations, 0)
-	cmd.WriteUint16(tags.NumberOfWarningSuboperations, 0)
+	cmd.Write(tags.CommandField, dicomcommand.CMoveResponse)
+	cmd.Write(tags.Status, dicomstatus.Pending)
+	cmd.Write(tags.CommandDataSetType, 0x0101)
+	cmd.Write(tags.NumberOfRemainingSuboperations, 0)
+	cmd.Write(tags.NumberOfCompletedSuboperations, 1)
+	cmd.Write(tags.NumberOfFailedSuboperations, 0)
+	cmd.Write(tags.NumberOfWarningSuboperations, 0)
 
 	m := newMockPDU(ctUID)
 	m.nextPDUs = []media.DICOMObject{cmd}

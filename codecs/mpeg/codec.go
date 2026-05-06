@@ -3,6 +3,7 @@ package mpeg
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/innovative-io/io-dicom/codecs/internal/backendmgr"
 )
@@ -72,6 +73,9 @@ var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 func init() {
 	registerNativeBackends()
 	mgr.SelectDefault()
+	if mgr.BackendName() == "passthrough" {
+		slog.Warn("mpeg: no native backend available; encode will pass raw bytes unchanged (build with -tags ffmpeg)")
+	}
 }
 
 // SetBackend overrides the active MPEG backend. Passing nil resets to passthrough.

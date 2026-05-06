@@ -6,11 +6,12 @@ import (
 	"net"
 	"testing"
 
+	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 )
 
 func TestDICOMBuffer_IsBigEndian(t *testing.T) {
-	buf := NewEmptyBufData()
+	buf := NewDICOMBuffer()
 	if buf.IsBigEndian() {
 		t.Fatal("new buffer should be little-endian")
 	}
@@ -21,23 +22,23 @@ func TestDICOMBuffer_IsBigEndian(t *testing.T) {
 }
 
 func TestDICOMBuffer_ClearMemoryStream(t *testing.T) {
-	buf := NewBufDataFromBytes([]byte{1, 2, 3})
-	buf.ClearMemoryStream()
+	buf := NewDICOMBufferFromBytes([]byte{1, 2, 3})
+	buf.Clear()
 	if buf.GetSize() != 0 {
 		t.Fatalf("ClearMemoryStream() size = %d, want 0", buf.GetSize())
 	}
 }
 
 func TestDICOMBuffer_ReadByte(t *testing.T) {
-	buf := NewBufDataFromBytes([]byte{0xAA, 0xBB})
-	b, err := buf.ReadByte()
+	buf := NewDICOMBufferFromBytes([]byte{0xAA, 0xBB})
+	b, err := buf.GetByte()
 	if err != nil || b != 0xAA {
-		t.Fatalf("ReadByte() = %v, %v", b, err)
+		t.Fatalf("GetByte() = %v, %v", b, err)
 	}
 }
 
 func TestDICOMBuffer_WriteAETitle(t *testing.T) {
-	buf := NewEmptyBufData()
+	buf := NewDICOMBuffer()
 	buf.WriteAETitle("SCU")
 	// 16-byte field: "SCU" followed by spaces
 	got := buf.GetAllBytes()
@@ -54,8 +55,21 @@ func TestDICOMBuffer_WriteAETitle(t *testing.T) {
 	}
 }
 
+func TestDICOMBuffer_WriteAETitle_Truncate(t *testing.T) {
+	buf := NewDICOMBuffer()
+	// 17-character AE title must be silently truncated to 16 bytes.
+	buf.WriteAETitle("AVERYLONGAETITLE1")
+	got := buf.GetAllBytes()
+	if len(got) != 16 {
+		t.Fatalf("WriteAETitle() wrote %d bytes with long input, want 16", len(got))
+	}
+	if string(got) != "AVERYLONGAETITLE" {
+		t.Fatalf("WriteAETitle() truncated = %q, want AVERYLONGAETITLE", got)
+	}
+}
+
 func TestDICOMBuffer_WriteByte(t *testing.T) {
-	buf := NewEmptyBufData()
+	buf := NewDICOMBuffer()
 	if err := buf.WriteByte(0xFF); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +80,7 @@ func TestDICOMBuffer_WriteByte(t *testing.T) {
 }
 
 func TestDICOMBuffer_WriteString(t *testing.T) {
-	buf := NewEmptyBufData()
+	buf := NewDICOMBuffer()
 	buf.WriteString("HELLO")
 	got := buf.GetAllBytes()
 	if string(got) != "HELLO" {
@@ -75,18 +89,18 @@ func TestDICOMBuffer_WriteString(t *testing.T) {
 }
 
 func TestDICOMBuffer_ReadUint16_BigEndian(t *testing.T) {
-	buf := NewBufDataFromBytes([]byte{0x01, 0x02})
+	buf := NewDICOMBufferFromBytes([]byte{0x01, 0x02})
 	buf.SetBigEndian(true)
-	v, err := buf.ReadUint16()
+	v, err := buf.ReadUint16(buf.IsBigEndian())
 	if err != nil || v != 0x0102 {
 		t.Fatalf("ReadUint16 BE = %v, %v", v, err)
 	}
 }
 
 func TestDICOMBuffer_ReadUint32_BigEndian(t *testing.T) {
-	buf := NewBufDataFromBytes([]byte{0x00, 0x00, 0x01, 0x02})
+	buf := NewDICOMBufferFromBytes([]byte{0x00, 0x00, 0x01, 0x02})
 	buf.SetBigEndian(true)
-	v, err := buf.ReadUint32()
+	v, err := buf.ReadUint32(buf.IsBigEndian())
 	if err != nil || v != 0x00000102 {
 		t.Fatalf("ReadUint32 BE = %v, %v", v, err)
 	}
@@ -98,7 +112,7 @@ func TestDICOMBuffer_Send(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	buf := NewBufDataFromBytes([]byte{0x01, 0x02, 0x03})
+	buf := NewDICOMBufferFromBytes([]byte{0x01, 0x02, 0x03})
 	errCh := make(chan error, 1)
 	go func() {
 		bw := bufio.NewReadWriter(bufio.NewReader(client), bufio.NewWriter(client))
@@ -129,7 +143,7 @@ func TestDICOMBuffer_WriteObj_NormalizesAmbiguousPixelDataVRForNativeExplicitSyn
 		Data:    []byte{1, 2, 3, 4},
 	})
 
-	buf := NewEmptyBufData()
+	buf := NewDICOMBuffer()
 	buf.WriteObj(obj)
 	got := buf.GetAllBytes()
 
@@ -146,11 +160,11 @@ func TestDICOMBuffer_WriteObj_NormalizesAmbiguousPixelDataVRForNativeExplicitSyn
 	roundtrip := NewEmptyDCMObj()
 	roundtrip.SetExplicitVR(true)
 	roundtrip.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
-	if err := NewBufDataFromBytes(got).ReadObj(roundtrip); err != nil {
+	if err := NewDICOMBufferFromBytes(got).ReadObj(roundtrip); err != nil {
 		t.Fatalf("ReadObj() error = %v", err)
 	}
 
-	pixelData := roundtrip.GetTagGE(0x7FE0, 0x0010)
+	pixelData := roundtrip.GetTag(tags.PixelData)
 	if pixelData == nil {
 		t.Fatal("pixel data tag missing after roundtrip")
 	}
@@ -174,7 +188,7 @@ func TestDICOMBuffer_WriteObj_NormalizesAmbiguousPixelDataVRForEncapsulatedSynta
 		Data:    []byte{1, 2, 3, 4},
 	})
 
-	buf := NewEmptyBufData()
+	buf := NewDICOMBuffer()
 	buf.WriteObj(obj)
 	got := buf.GetAllBytes()
 
@@ -199,7 +213,7 @@ func TestWriteReadTag_LongExplicitVRs(t *testing.T) {
 
 	for _, vr := range longVRs {
 		t.Run(vr, func(t *testing.T) {
-			buf := NewEmptyBufData()
+			buf := NewDICOMBuffer()
 			buf.WriteTag(&DICOMTag{
 				Group:   0x0042,
 				Element: 0x0011,
@@ -208,7 +222,7 @@ func TestWriteReadTag_LongExplicitVRs(t *testing.T) {
 				Data:    payload,
 			}, true /* explicitVR */)
 
-			roundtrip := NewBufDataFromBytes(buf.GetAllBytes())
+			roundtrip := NewDICOMBufferFromBytes(buf.GetAllBytes())
 			tag, err := roundtrip.ReadTag(true)
 			if err != nil {
 				t.Fatalf("ReadTag() error = %v", err)
@@ -230,7 +244,7 @@ func TestWriteReadTag_LongExplicitVRs(t *testing.T) {
 // a Length field that exceeds the actual len(Data), writeTag truncates the header
 // length to match len(Data) so the written stream is always self-consistent.
 func TestWriteTag_DataShorterThanLength(t *testing.T) {
-	buf := NewEmptyBufData()
+	buf := NewDICOMBuffer()
 	buf.WriteTag(&DICOMTag{
 		Group:   0x0008,
 		Element: 0x0060,
@@ -240,7 +254,7 @@ func TestWriteTag_DataShorterThanLength(t *testing.T) {
 	}, true /* explicitVR */)
 
 	// Read back: the header length should be 2 (actual), not 8.
-	roundtrip := NewBufDataFromBytes(buf.GetAllBytes())
+	roundtrip := NewDICOMBufferFromBytes(buf.GetAllBytes())
 	tag, err := roundtrip.ReadTag(true)
 	if err != nil {
 		t.Fatalf("ReadTag() error = %v", err)
@@ -295,7 +309,7 @@ func TestReadVR_AllStandardVRsRoundtrip(t *testing.T) {
 	}
 	for _, vr := range standard {
 		t.Run(vr, func(t *testing.T) {
-			buf := NewEmptyBufData()
+			buf := NewDICOMBuffer()
 			buf.WriteTag(&DICOMTag{
 				Group:   0x0043,
 				Element: 0x0001,
@@ -303,7 +317,7 @@ func TestReadVR_AllStandardVRsRoundtrip(t *testing.T) {
 				Length:  0, // no data — just test the VR field
 			}, true)
 
-			roundtrip := NewBufDataFromBytes(buf.GetAllBytes())
+			roundtrip := NewDICOMBufferFromBytes(buf.GetAllBytes())
 			tag, err := roundtrip.ReadTag(true)
 			if err != nil {
 				t.Fatalf("ReadTag(%q) error = %v", vr, err)

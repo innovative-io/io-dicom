@@ -9,11 +9,10 @@ import (
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomcommand"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
-	"github.com/innovative-io/io-dicom/network/priority"
 )
 
 // CGetWriteRQ writes a C-GET-RQ command and identifier dataset.
-func CGetWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
+func CGetWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, pri uint16) error {
 	commandObj := media.NewEmptyDCMObj()
 
 	sopClassUID := sopClassUID(pdu)
@@ -24,12 +23,12 @@ func CGetWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
-	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	commandObj.WriteUint16(tags.CommandField, dicomcommand.CGetRequest)
-	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
-	commandObj.WriteUint16(tags.Priority, priority.Medium)
-	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetPresent)
+	commandObj.Write(tags.CommandGroupLength, commandLength)
+	commandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	commandObj.Write(tags.CommandField, dicomcommand.CGetRequest)
+	commandObj.Write(tags.MessageID, network.Uniq16odd())
+	commandObj.Write(tags.Priority, pri)
+	commandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetPresent)
 
 	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
@@ -44,26 +43,26 @@ func CGetReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint1
 		return nil, dicomstatus.FailureProcessingFailure, fmt.Errorf("CGetReadRSP: failed to read response PDU: %w", err)
 	}
 
-	if got := responseCommandObj.GetUShort(tags.CommandField); got != dicomcommand.CGetResponse {
+	if got := responseCommandObj.GetUint16(tags.CommandField); got != dicomcommand.CGetResponse {
 		return nil, dicomstatus.FailureProcessingFailure,
 			fmt.Errorf("CGetReadRSP: expected %s (0x%04X), got %s (0x%04X)",
 				dicomcommand.Description(dicomcommand.CGetResponse), dicomcommand.CGetResponse,
 				dicomcommand.Description(got), got)
 	}
 
-	status := responseCommandObj.GetUShort(tags.Status)
+	status := responseCommandObj.GetUint16(tags.Status)
 	if err := validateQROperationStatus(status, "CGetReadRSP"); err != nil {
 		return nil, dicomstatus.FailureProcessingFailure, err
 	}
-	commandDataSetType := responseCommandObj.GetUShort(tags.CommandDataSetType)
+	commandDataSetType := responseCommandObj.GetUint16(tags.CommandDataSetType)
 	if commandDataSetType != dicomcommand.DataSetNone && commandDataSetType != dicomcommand.DataSetPresent {
 		return nil, dicomstatus.FailureProcessingFailure,
 			fmt.Errorf("CGetReadRSP: invalid CommandDataSetType 0x%04X (must be DataSetNone or DataSetPresent)", commandDataSetType)
 	}
-	remaining := int(responseCommandObj.GetUShort(tags.NumberOfRemainingSuboperations))
-	completed := int(responseCommandObj.GetUShort(tags.NumberOfCompletedSuboperations))
-	failed := int(responseCommandObj.GetUShort(tags.NumberOfFailedSuboperations))
-	warnings := int(responseCommandObj.GetUShort(tags.NumberOfWarningSuboperations))
+	remaining := responseCommandObj.GetUint16(tags.NumberOfRemainingSuboperations)
+	completed := responseCommandObj.GetUint16(tags.NumberOfCompletedSuboperations)
+	failed := responseCommandObj.GetUint16(tags.NumberOfFailedSuboperations)
+	warnings := responseCommandObj.GetUint16(tags.NumberOfWarningSuboperations)
 
 	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings); err != nil {
 		return nil, dicomstatus.FailureProcessingFailure, fmt.Errorf("CGetReadRSP: invalid sub-operation counters: %w", err)
@@ -71,7 +70,7 @@ func CGetReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint1
 
 	if status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings {
 		if pending != nil {
-			*pending = remaining
+			*pending = int(remaining)
 		}
 	} else if pending != nil {
 		*pending = -1
@@ -102,12 +101,12 @@ func CGetWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, s
 		return errors.New("CGetWriteRSP: Affected SOP Class UID is required")
 	}
 
-	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	messageID := requestCommandObj.GetUint16(tags.MessageID)
 	if messageID == 0 {
 		return errors.New("CGetWriteRSP: MessageID is required")
 	}
 
-	if err := validateSuboperationCounters(status, int(remaining), int(completed), int(failed), int(warnings)); err != nil {
+	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings); err != nil {
 		return fmt.Errorf("CGetWriteRSP: %w", err)
 	}
 	if err := validateQROperationStatus(status, "CGetWriteRSP"); err != nil {
@@ -118,16 +117,16 @@ func CGetWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, s
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2 + 8 + 2)
 
-	responseCommandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	responseCommandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	responseCommandObj.WriteUint16(tags.CommandField, dicomcommand.CGetResponse)
-	responseCommandObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
-	responseCommandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetNone)
-	responseCommandObj.WriteUint16(tags.Status, status)
-	responseCommandObj.WriteUint16(tags.NumberOfRemainingSuboperations, remaining)
-	responseCommandObj.WriteUint16(tags.NumberOfCompletedSuboperations, completed)
-	responseCommandObj.WriteUint16(tags.NumberOfFailedSuboperations, failed)
-	responseCommandObj.WriteUint16(tags.NumberOfWarningSuboperations, warnings)
+	responseCommandObj.Write(tags.CommandGroupLength, commandLength)
+	responseCommandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	responseCommandObj.Write(tags.CommandField, dicomcommand.CGetResponse)
+	responseCommandObj.Write(tags.MessageIDBeingRespondedTo, messageID)
+	responseCommandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetNone)
+	responseCommandObj.Write(tags.Status, status)
+	responseCommandObj.Write(tags.NumberOfRemainingSuboperations, remaining)
+	responseCommandObj.Write(tags.NumberOfCompletedSuboperations, completed)
+	responseCommandObj.Write(tags.NumberOfFailedSuboperations, failed)
+	responseCommandObj.Write(tags.NumberOfWarningSuboperations, warnings)
 
 	return pdu.Write(responseCommandObj, network.PDVCommand)
 }

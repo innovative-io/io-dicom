@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // UserInformation - UserInformation
@@ -22,8 +22,8 @@ type UserInformation interface {
 	GetImplementationVersion() UIDItem
 	SetImplementationVersionName(name string)
 	Write(rw *bufio.ReadWriter) (err error)
-	Read(ms media.MemoryStream) (err error)
-	ReadDynamic(ms media.MemoryStream) (err error)
+	Read(buf *media.DICOMBuffer) (err error)
+	ReadDynamic(buf *media.DICOMBuffer) (err error)
 }
 
 type userInformation struct {
@@ -104,7 +104,7 @@ func (ui *userInformation) SetImplementationVersionName(name string) {
 }
 
 func (ui *userInformation) Write(rw *bufio.ReadWriter) (err error) {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	bd.SetBigEndian(true)
 	ui.Size()
@@ -123,44 +123,44 @@ func (ui *userInformation) Write(rw *bufio.ReadWriter) (err error) {
 	return
 }
 
-func (ui *userInformation) Read(ms media.MemoryStream) (err error) {
-	if ui.ItemType, err = ms.GetByte(); err != nil {
+func (ui *userInformation) Read(buf *media.DICOMBuffer) (err error) {
+	if ui.ItemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return ui.ReadDynamic(ms)
+	return ui.ReadDynamic(buf)
 }
 
-func (ui *userInformation) ReadDynamic(ms media.MemoryStream) (err error) {
-	if ui.Reserved1, err = ms.GetByte(); err != nil {
+func (ui *userInformation) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if ui.Reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if ui.Length, err = ms.GetUint16(); err != nil {
+	if ui.Length, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
 
 	Count := int(ui.Length)
 	for Count > 0 {
-		TempByte, err := ms.GetByte()
+		TempByte, err := buf.GetByte()
 		if err != nil {
 			return err
 		}
 
 		switch TempByte {
 		case pdutype.MaximumSubLengthItem:
-			ui.MaxSubLength.ReadDynamic(ms)
+			ui.MaxSubLength.ReadDynamic(buf)
 			Count = Count - int(ui.MaxSubLength.Size())
 		case pdutype.ImplementationClassUIDItem:
-			ui.ImpClass.ReadDynamic(ms)
+			ui.ImpClass.ReadDynamic(buf)
 			Count = Count - int(ui.ImpClass.GetSize())
 		case pdutype.AsyncOperationsWindowItem:
-			ui.AsyncOpWindow.ReadDynamic(ms)
+			ui.AsyncOpWindow.ReadDynamic(buf)
 			Count = Count - int(ui.AsyncOpWindow.Size())
 		case pdutype.SCPSCURoleSelectionItem:
-			ui.SCPSCURole.ReadDynamic(ms)
+			ui.SCPSCURole.ReadDynamic(buf)
 			Count = Count - int(ui.SCPSCURole.Size())
 			ui.UserInfoBaggage += uint32(ui.SCPSCURole.Size())
 		case pdutype.ImplementationVersionNameItem:
-			ui.ImpVersion.ReadDynamic(ms)
+			ui.ImpVersion.ReadDynamic(buf)
 			Count = Count - int(ui.ImpVersion.GetSize())
 		default:
 			ui.UserInfoBaggage = uint32(Count)

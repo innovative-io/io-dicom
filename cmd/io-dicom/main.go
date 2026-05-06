@@ -210,10 +210,10 @@ func main() {
 	if *cmwl {
 		request := media.NewEmptyDCMObj()
 		// Add standard MWL matching keys with empty values (wildcard = match all).
-		request.WriteString(tags.PatientName, "")
-		request.WriteString(tags.PatientID, "")
-		request.WriteString(tags.AccessionNumber, "")
-		request.WriteString(tags.RequestedProcedureID, "")
+		request.Write(tags.PatientName, "")
+		request.Write(tags.PatientID, "")
+		request.Write(tags.AccessionNumber, "")
+		request.Write(tags.RequestedProcedureID, "")
 		scu := services.NewSCU(destination)
 		scu.SetOnCFindResult(func(result media.DICOMObject) {
 			log.Printf("Worklist item: patient=%s accession=%s\n",

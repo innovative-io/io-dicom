@@ -52,12 +52,12 @@ func TestChangeTransferSyntaxContextPropagatesCodecContext(t *testing.T) {
 		ExplicitVR:     true,
 		BigEndian:      false,
 	}
-	obj.WriteString(tags.PhotometricInterpretation, "MONOCHROME2")
-	obj.WriteUint16(tags.Rows, 1)
-	obj.WriteUint16(tags.Columns, 1)
-	obj.WriteUint16(tags.BitsAllocated, 8)
-	obj.WriteUint16(tags.BitsStored, 8)
-	obj.WriteUint16(tags.PixelRepresentation, 0)
+	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
+	obj.Write(tags.Rows, 1)
+	obj.Write(tags.Columns, 1)
+	obj.Write(tags.BitsAllocated, 8)
+	obj.Write(tags.BitsStored, 8)
+	obj.Write(tags.PixelRepresentation, 0)
 	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
 	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false})
 	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 1, VR: "DL", Data: []byte{0x01}, BigEndian: false})

@@ -232,9 +232,9 @@ func TestWriteSelectsPresentationContextByAbstractSyntax(t *testing.T) {
 	pdu.Pdata.PresentationContextID = 1
 
 	cmd := media.NewEmptyDCMObj()
-	cmd.WriteString(tags.AffectedSOPClassUID, sopclass.PatientRootQueryRetrieveInformationModelFind.UID)
-	cmd.WriteUint16(tags.CommandField, 0x0020)
-	cmd.WriteUint16(tags.MessageID, 1)
+	cmd.Write(tags.AffectedSOPClassUID, sopclass.PatientRootQueryRetrieveInformationModelFind.UID)
+	cmd.Write(tags.CommandField, 0x0020)
+	cmd.Write(tags.MessageID, 1)
 
 	if err := pdu.Write(cmd, byte(1)); err != nil {
 		t.Fatalf("Write() error = %v", err)

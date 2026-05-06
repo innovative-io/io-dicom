@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"log/slog"
 	"sort"
 	"sync"
 )
@@ -106,6 +107,7 @@ func selectDefaultBackend() {
 
 	preferred := preferredBackendNameLocked()
 	if preferred == "passthrough" {
+		slog.Warn("jpeg: no native backend available; 12/16-bit encode will pass raw bytes unchanged (build with -tags libjpeg)")
 		return
 	}
 	factory := backendFactories[preferred]

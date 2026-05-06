@@ -74,9 +74,9 @@ func TestAbortRequest_WriteRead_Roundtrip(t *testing.T) {
 		t.Fatal("AbortRequest.Write produced no bytes")
 	}
 
-	ms := media.NewMemoryStreamFromBytes(data)
+	buf := media.NewDICOMBufferFromBytes(data)
 	a2 := NewAbortRequest()
-	if err := a2.Read(ms); err != nil {
+	if err := a2.Read(buf); err != nil {
 		t.Fatalf("AbortRequest.Read: %v", err)
 	}
 }
@@ -88,9 +88,9 @@ func TestAbortRequest_ReadDynamic_Roundtrip(t *testing.T) {
 		t.Fatalf("AbortRequest.Write: %v", err)
 	}
 	// ReadDynamic skips the first ItemType byte
-	ms := media.NewMemoryStreamFromBytes(data[1:])
+	buf := media.NewDICOMBufferFromBytes(data[1:])
 	a2 := NewAbortRequest()
-	if err := a2.ReadDynamic(ms); err != nil {
+	if err := a2.ReadDynamic(buf); err != nil {
 		t.Fatalf("AbortRequest.ReadDynamic: %v", err)
 	}
 }
@@ -157,9 +157,9 @@ func TestAssociationReject_WriteRead_Roundtrip(t *testing.T) {
 		t.Fatalf("AssociationReject.Write: %v", err)
 	}
 
-	ms := media.NewMemoryStreamFromBytes(data)
+	buf := media.NewDICOMBufferFromBytes(data)
 	rj2 := NewAssociationReject()
-	if err := rj2.Read(ms); err != nil {
+	if err := rj2.Read(buf); err != nil {
 		t.Fatalf("AssociationReject.Read: %v", err)
 	}
 	if rj2.GetReason() != rj.GetReason() {
@@ -173,9 +173,9 @@ func TestAssociationReject_ReadDynamic_Roundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssociationReject.Write: %v", err)
 	}
-	ms := media.NewMemoryStreamFromBytes(data[1:])
+	buf := media.NewDICOMBufferFromBytes(data[1:])
 	rj2 := NewAssociationReject()
-	if err := rj2.ReadDynamic(ms); err != nil {
+	if err := rj2.ReadDynamic(buf); err != nil {
 		t.Fatalf("AssociationReject.ReadDynamic: %v", err)
 	}
 }
@@ -196,9 +196,9 @@ func TestReleaseRequest_WriteRead_Roundtrip(t *testing.T) {
 		t.Fatalf("ReleaseRequest.Write: %v", err)
 	}
 
-	ms := media.NewMemoryStreamFromBytes(data)
+	buf := media.NewDICOMBufferFromBytes(data)
 	r2 := NewReleaseRequest()
-	if err := r2.Read(ms); err != nil {
+	if err := r2.Read(buf); err != nil {
 		t.Fatalf("ReleaseRequest.Read: %v", err)
 	}
 }
@@ -209,9 +209,9 @@ func TestReleaseRequest_ReadDynamic_Roundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReleaseRequest.Write: %v", err)
 	}
-	ms := media.NewMemoryStreamFromBytes(data[1:])
+	buf := media.NewDICOMBufferFromBytes(data[1:])
 	r2 := NewReleaseRequest()
-	if err := r2.ReadDynamic(ms); err != nil {
+	if err := r2.ReadDynamic(buf); err != nil {
 		t.Fatalf("ReleaseRequest.ReadDynamic: %v", err)
 	}
 }
@@ -232,9 +232,9 @@ func TestReleaseResponse_WriteRead_Roundtrip(t *testing.T) {
 		t.Fatalf("ReleaseResponse.Write: %v", err)
 	}
 
-	ms := media.NewMemoryStreamFromBytes(data)
+	buf := media.NewDICOMBufferFromBytes(data)
 	r2 := NewReleaseResponse()
-	if err := r2.Read(ms); err != nil {
+	if err := r2.Read(buf); err != nil {
 		t.Fatalf("ReleaseResponse.Read: %v", err)
 	}
 }
@@ -245,9 +245,9 @@ func TestReleaseResponse_ReadDynamic_Roundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReleaseResponse.Write: %v", err)
 	}
-	ms := media.NewMemoryStreamFromBytes(data[1:])
+	buf := media.NewDICOMBufferFromBytes(data[1:])
 	r2 := NewReleaseResponse()
-	if err := r2.ReadDynamic(ms); err != nil {
+	if err := r2.ReadDynamic(buf); err != nil {
 		t.Fatalf("ReleaseResponse.ReadDynamic: %v", err)
 	}
 }
@@ -273,16 +273,16 @@ func TestMaximumPDULength_WriteRead_Roundtrip(t *testing.T) {
 	m := NewMaximumPDULength()
 	m.SetMaximumLength(32768)
 
-	var buf bytes.Buffer
-	rw := bufio.NewReadWriter(bufio.NewReader(&buf), bufio.NewWriter(&buf))
+	var out bytes.Buffer
+	rw := bufio.NewReadWriter(bufio.NewReader(&out), bufio.NewWriter(&out))
 	if !m.Write(rw) {
 		t.Fatal("MaximumPDULength.Write returned false")
 	}
 	rw.Flush()
 
-	ms := media.NewMemoryStreamFromBytes(buf.Bytes())
+	buf := media.NewDICOMBufferFromBytes(out.Bytes())
 	m2 := NewMaximumPDULength()
-	if err := m2.Read(ms); err != nil {
+	if err := m2.Read(buf); err != nil {
 		t.Fatalf("MaximumPDULength.Read: %v", err)
 	}
 	if m2.GetMaximumLength() != 32768 {
@@ -294,15 +294,15 @@ func TestMaximumPDULength_ReadDynamic_Roundtrip(t *testing.T) {
 	m := NewMaximumPDULength()
 	m.SetMaximumLength(1024)
 
-	var buf bytes.Buffer
-	rw := bufio.NewReadWriter(bufio.NewReader(&buf), bufio.NewWriter(&buf))
+	var out bytes.Buffer
+	rw := bufio.NewReadWriter(bufio.NewReader(&out), bufio.NewWriter(&out))
 	m.Write(rw)
 	rw.Flush()
 
 	// ReadDynamic skips ItemType byte
-	ms := media.NewMemoryStreamFromBytes(buf.Bytes()[1:])
+	buf := media.NewDICOMBufferFromBytes(out.Bytes()[1:])
 	m2 := NewMaximumPDULength()
-	if err := m2.ReadDynamic(ms); err != nil {
+	if err := m2.ReadDynamic(buf); err != nil {
 		t.Fatalf("MaximumPDULength.ReadDynamic: %v", err)
 	}
 	if m2.GetMaximumLength() != 1024 {
@@ -338,9 +338,9 @@ func TestAsyncOperationWindow_ReadDynamic(t *testing.T) {
 		0x00, 0x05, // MaxNumberOperationsInvoked = 5
 		0x00, 0x03, // MaxNumberOperationsPerformed = 3
 	}
-	ms := media.NewMemoryStreamFromBytes(data)
+	buf := media.NewDICOMBufferFromBytes(data)
 	a := NewAsyncOperationWindow()
-	if err := a.ReadDynamic(ms); err != nil {
+	if err := a.ReadDynamic(buf); err != nil {
 		t.Fatalf("AsyncOperationWindow.ReadDynamic: %v", err)
 	}
 	if a.GetMaxNumberOperationsInvoked() != 5 {
@@ -360,9 +360,9 @@ func TestAsyncOperationWindow_Read(t *testing.T) {
 		0x00, 0x02, // invoked = 2
 		0x00, 0x01, // performed = 1
 	}
-	ms := media.NewMemoryStreamFromBytes(data)
+	buf := media.NewDICOMBufferFromBytes(data)
 	a := NewAsyncOperationWindow()
-	if err := a.Read(ms); err != nil {
+	if err := a.Read(buf); err != nil {
 		t.Fatalf("AsyncOperationWindow.Read: %v", err)
 	}
 	if a.GetMaxNumberOperationsInvoked() != 2 {
@@ -390,9 +390,9 @@ func TestRoleSelect_WriteRead_Roundtrip(t *testing.T) {
 		t.Fatal("RoleSelect.Write produced no bytes")
 	}
 
-	ms := media.NewMemoryStreamFromBytes(data)
+	buf := media.NewDICOMBufferFromBytes(data)
 	r2 := NewRoleSelect()
-	if err := r2.Read(ms); err != nil {
+	if err := r2.Read(buf); err != nil {
 		t.Fatalf("RoleSelect.Read: %v", err)
 	}
 }
@@ -401,19 +401,19 @@ func TestRoleSelect_ReadDynamic(t *testing.T) {
 	uid := "1.2.840.10008.5.1.4.1.1.2"
 	uidLen := uint16(len(uid))
 	// Build: reserved(1) + length(2) + uidLength(2) + uid + scuRole(1) + scpRole(1)
-	var buf bytes.Buffer
-	buf.WriteByte(0x00) // reserved
-	buf.WriteByte(byte((4 + uidLen + 2) >> 8))
-	buf.WriteByte(byte(4 + uidLen + 2)) // length
-	buf.WriteByte(byte(uidLen >> 8))
-	buf.WriteByte(byte(uidLen))
-	buf.WriteString(uid)
-	buf.WriteByte(0x01) // SCURole
-	buf.WriteByte(0x01) // SCPRole
+	var out bytes.Buffer
+	out.WriteByte(0x00) // reserved
+	out.WriteByte(byte((4 + uidLen + 2) >> 8))
+	out.WriteByte(byte(4 + uidLen + 2)) // length
+	out.WriteByte(byte(uidLen >> 8))
+	out.WriteByte(byte(uidLen))
+	out.WriteString(uid)
+	out.WriteByte(0x01) // SCURole
+	out.WriteByte(0x01) // SCPRole
 
-	ms := media.NewMemoryStreamFromBytes(buf.Bytes())
+	buf := media.NewDICOMBufferFromBytes(out.Bytes())
 	r := NewRoleSelect()
-	if err := r.ReadDynamic(ms); err != nil {
+	if err := r.ReadDynamic(buf); err != nil {
 		t.Fatalf("RoleSelect.ReadDynamic: %v", err)
 	}
 }
@@ -452,9 +452,9 @@ func TestUIDItem_WriteRead_Roundtrip(t *testing.T) {
 		t.Fatalf("UIDItem.Write: %v", err)
 	}
 
-	ms := media.NewMemoryStreamFromBytes(data)
+	buf := media.NewDICOMBufferFromBytes(data)
 	u2 := NewUIDItem("", 0x00)
-	if err := u2.Read(ms); err != nil {
+	if err := u2.Read(buf); err != nil {
 		t.Fatalf("UIDItem.Read: %v", err)
 	}
 	if u2.GetUID() != uid {
@@ -470,9 +470,9 @@ func TestUIDItem_ReadDynamic_Roundtrip(t *testing.T) {
 		t.Fatalf("UIDItem.Write: %v", err)
 	}
 	// ReadDynamic skips ItemType byte
-	ms := media.NewMemoryStreamFromBytes(data[1:])
+	buf := media.NewDICOMBufferFromBytes(data[1:])
 	u2 := NewUIDItem("", 0x00)
-	if err := u2.ReadDynamic(ms); err != nil {
+	if err := u2.ReadDynamic(buf); err != nil {
 		t.Fatalf("UIDItem.ReadDynamic: %v", err)
 	}
 	if u2.GetUID() != uid {

@@ -13,6 +13,10 @@ import (
 // ErrNotDICOM is returned when a file does not contain a valid DICOM preamble.
 var ErrNotDICOM = errors.New("media: not a DICOM file (DICM preamble missing)")
 
+// ErrFileTooSmall is returned when the file or payload is smaller than the
+// minimum required DICOM size (132 bytes: 128-byte preamble + 4-byte magic).
+var ErrFileTooSmall = errors.New("media: file too small to be a valid DICOM file")
+
 // IndexRecord holds the flat metadata extracted from a DICOM file.
 // It contains exactly the fields needed to populate patient/study/series/instance
 // database records, with no pixel data ever loaded.
@@ -76,7 +80,7 @@ func ParseIndexFromFile(path string) (*IndexRecord, error) {
 		return nil, fmt.Errorf("media: ParseIndexFromFile %q: %w", path, err)
 	}
 	if n < 132 {
-		return nil, fmt.Errorf("media: ParseIndexFromFile %q: file too small (%d bytes)", path, n)
+		return nil, fmt.Errorf("media: ParseIndexFromFile %q: %w (%d bytes)", path, ErrFileTooSmall, n)
 	}
 
 	rec := &IndexRecord{FilePath: path}
@@ -92,7 +96,7 @@ func ParseIndexFromFile(path string) (*IndexRecord, error) {
 // Returns ErrNotDICOM if data does not begin with a valid DICOM preamble.
 func ParseIndexFromBytes(data []byte) (*IndexRecord, error) {
 	if len(data) < 132 {
-		return nil, fmt.Errorf("media: ParseIndexFromBytes: payload too small (%d bytes)", len(data))
+		return nil, fmt.Errorf("media: ParseIndexFromBytes: %w (%d bytes)", ErrFileTooSmall, len(data))
 	}
 	limit := len(data)
 	if limit > indexReadLimit {
@@ -109,7 +113,7 @@ func ParseIndexFromBytes(data []byte) (*IndexRecord, error) {
 //
 // Phase 1 reads group 0002 with the fixed LE/explicit encoding required by PS3.10 §10.1.
 // Phase 2 reads the dataset with the encoding declared by the TransferSyntaxUID.
-// This two-phase approach mirrors parseBufData: group 0002 is ALWAYS little-endian,
+// This two-phase approach mirrors parseDICOMBuffer: group 0002 is ALWAYS little-endian,
 // so we must not set BigEndian until after all group-0002 bytes are consumed.
 //
 // Parsing stops after tag (0020,0013) InstanceNumber — pixel data at (7FE0,0010)
@@ -124,13 +128,10 @@ func extractIndexTags(data []byte, rec *IndexRecord) error {
 		return ErrNotDICOM
 	}
 
-	bd := &dicomBuffer{
-		BigEndian: false,
-		MS: &memoryStream{
-			Data:     data,
-			Position: 132, // skip 128-byte preamble + "DICM" magic
-			Size:     len(data),
-		},
+	buf := &DICOMBuffer{
+		data:     data,
+		position: 132, // skip 128-byte preamble + "DICM" magic
+		size:     len(data),
 	}
 
 	// Phase 1: Read group 0002 tags (always LE explicit VR, per PS3.10 §10.1).
@@ -141,15 +142,15 @@ func extractIndexTags(data []byte, rec *IndexRecord) error {
 		pendingBigEndian  bool
 		implicitVRDataset bool
 	)
-	for bd.MS.Position < bd.MS.Size {
-		prePos := bd.MS.Position
-		tag, err := bd.ReadTag(true) // group 0002 is always explicit VR
+	for buf.position < buf.size {
+		prePos := buf.position
+		tag, err := buf.ReadTag(true) // group 0002 is always explicit VR
 		if err != nil || tag == nil {
 			break
 		}
 		if tag.Group != 0x0002 {
 			// Rewind: this first dataset tag must be read again in phase 2.
-			bd.MS.Position = prePos
+			buf.position = prePos
 			break
 		}
 		switch tag.Element {
@@ -170,13 +171,13 @@ func extractIndexTags(data []byte, rec *IndexRecord) error {
 	// Apply dataset encoding flags after all group-0002 bytes have been consumed.
 	explicitVR := !implicitVRDataset
 	if pendingBigEndian {
-		bd.SetBigEndian(true)
+		buf.SetBigEndian(true)
 	}
 
 	// Phase 2: Read dataset tags with correct endianness until (0020,0013).
 	sqDepth := 0
-	for bd.MS.Position < bd.MS.Size {
-		tag, err := bd.ReadTag(explicitVR)
+	for buf.position < buf.size {
+		tag, err := buf.ReadTag(explicitVR)
 		if err != nil {
 			// Truncation at read-window boundary — treat as end of metadata.
 			break

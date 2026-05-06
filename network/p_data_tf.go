@@ -2,10 +2,10 @@ package network
 
 import (
 	"bufio"
-	"errors"
+	"fmt"
 
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // PresentationDataTransfer - PresentationDataTransfer
@@ -13,7 +13,7 @@ type PresentationDataTransfer struct {
 	ItemType              byte
 	Reserved1             byte
 	Length                uint32
-	Buffer                media.DICOMBuffer
+	Buffer                *media.DICOMBuffer
 	BlockSize             uint32
 	MsgStatus             uint32
 	Endian                uint32
@@ -23,12 +23,12 @@ type PresentationDataTransfer struct {
 }
 
 // ReadDynamic - ReadDynamic
-func (pd *PresentationDataTransfer) ReadDynamic(ms media.MemoryStream) (err error) {
+func (pd *PresentationDataTransfer) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 	if pd.Length == 0 {
-		if pd.Reserved1, err = ms.GetByte(); err != nil {
+		if pd.Reserved1, err = buf.GetByte(); err != nil {
 			return
 		}
-		if pd.Length, err = ms.GetUint32(); err != nil {
+		if pd.Length, err = buf.ReadUint32(true); err != nil {
 			return
 		}
 	}
@@ -38,20 +38,24 @@ func (pd *PresentationDataTransfer) ReadDynamic(ms media.MemoryStream) (err erro
 	pd.MsgStatus = 0
 
 	for count > 0 {
-		if pd.pdv.Length, err = ms.GetUint32(); err != nil {
+		if pd.pdv.Length, err = buf.ReadUint32(true); err != nil {
 			return err
 		}
-		if pd.pdv.PresentationContextID, err = ms.GetByte(); err != nil {
+		if pd.pdv.PresentationContextID, err = buf.GetByte(); err != nil {
 			return err
 		}
-		if pd.pdv.MsgHeader, err = ms.GetByte(); err != nil {
+		if pd.pdv.MsgHeader, err = buf.GetByte(); err != nil {
 			return err
 		}
 
-		buff := make([]byte, pd.pdv.Length-2)
-		ms.ReadData(buff)
-
-		pd.Buffer.Write(buff, int(pd.pdv.Length-2))
+		// ReadSlice returns a zero-copy view into buf's backing array —
+		// buf is freshly allocated per PDU and never reused, so the slice
+		// is stable for the lifetime of this call.
+		pdvPayload, err := buf.ReadSlice(int(pd.pdv.Length - 2))
+		if err != nil {
+			return err
+		}
+		pd.Buffer.Write(pdvPayload, int(pd.pdv.Length-2))
 		count = count - pd.pdv.Length - 4
 		pd.Length = pd.Length - pd.pdv.Length - 4
 
@@ -89,16 +93,16 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 		pd.Length = pd.pdv.Length + 4
 		pd.ItemType = pdutype.PDUDataTransfer
 		pd.Reserved1 = 0
-		bd := media.NewEmptyBufData()
-		bd.SetBigEndian(true)
-		bd.WriteByte(pd.ItemType)
-		bd.WriteByte(pd.Reserved1)
-		bd.WriteUint32(pd.Length)
-		bd.WriteUint32(pd.pdv.Length)
-		bd.WriteByte(pd.pdv.PresentationContextID)
-		bd.WriteByte(pd.MsgHeader)
-		if err := bd.Send(rw); err != nil {
-			return errors.New("pdata::Write, bd.Send(conn) failed")
+		buf := media.NewDICOMBuffer()
+		buf.SetBigEndian(true)
+		buf.WriteByte(pd.ItemType)
+		buf.WriteByte(pd.Reserved1)
+		buf.WriteUint32(pd.Length)
+		buf.WriteUint32(pd.pdv.Length)
+		buf.WriteByte(pd.pdv.PresentationContextID)
+		buf.WriteByte(pd.MsgHeader)
+		if err := buf.Send(rw); err != nil {
+			return fmt.Errorf("pdata::Write: %w", err)
 		}
 		rw.Flush()
 		pd.Length = TLength
@@ -121,34 +125,34 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 		pd.Length = pd.pdv.Length + 4
 		pd.ItemType = pdutype.PDUDataTransfer
 		pd.Reserved1 = 0
-		bd := media.NewEmptyBufData()
+		buf := media.NewDICOMBuffer()
 
-		bd.SetBigEndian(true)
-		bd.WriteByte(pd.ItemType)
-		bd.WriteByte(pd.Reserved1)
-		bd.WriteUint32(pd.Length)
-		bd.WriteUint32(pd.pdv.Length)
-		bd.WriteByte(pd.pdv.PresentationContextID)
-		bd.WriteByte(pd.MsgHeader)
+		buf.SetBigEndian(true)
+		buf.WriteByte(pd.ItemType)
+		buf.WriteByte(pd.Reserved1)
+		buf.WriteUint32(pd.Length)
+		buf.WriteUint32(pd.pdv.Length)
+		buf.WriteByte(pd.pdv.PresentationContextID)
+		buf.WriteByte(pd.MsgHeader)
 
-		if err := bd.Send(rw); err != nil {
-			return errors.New("pdata::Write, bd.Send(conn) failed")
+		if err := buf.Send(rw); err != nil {
+			return fmt.Errorf("pdata::Write: %w", err)
 		}
 
 		buff, err := pd.Buffer.Read(int(pd.BlockSize))
 		if err != nil {
-			return errors.New("pdata::Write, " + err.Error())
+			return fmt.Errorf("pdata::Write: %w", err)
 		}
 
 		n, err := rw.Write(buff)
 		if err != nil {
-			return errors.New("pdata::Write, " + err.Error())
+			return fmt.Errorf("pdata::Write: %w", err)
 		}
 
 		rw.Flush()
 
 		if n != int(pd.BlockSize) {
-			return errors.New("pdata::Write, n!=int(pd.BlockSize)")
+			return fmt.Errorf("pdata::Write: wrote %d bytes, expected %d", n, pd.BlockSize)
 		}
 
 		SentSize += pd.BlockSize

@@ -8,11 +8,10 @@ import (
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomcommand"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
-	"github.com/innovative-io/io-dicom/network/priority"
 )
 
 // CFindWriteRQ CFind request write
-func CFindWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
+func CFindWriteRQ(pdu network.PDUService, dataObj media.DICOMObject, pri uint16) error {
 	commandObj := media.NewEmptyDCMObj()
 
 	sopClassUID := sopClassUID(pdu)
@@ -23,12 +22,12 @@ func CFindWriteRQ(pdu network.PDUService, dataObj media.DICOMObject) error {
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
-	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	commandObj.WriteUint16(tags.CommandField, dicomcommand.CFindRequest)
-	commandObj.WriteUint16(tags.MessageID, network.Uniq16odd())
-	commandObj.WriteUint16(tags.Priority, priority.Medium)
-	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetPresent)
+	commandObj.Write(tags.CommandGroupLength, commandLength)
+	commandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	commandObj.Write(tags.CommandField, dicomcommand.CFindRequest)
+	commandObj.Write(tags.MessageID, network.Uniq16odd())
+	commandObj.Write(tags.Priority, pri)
+	commandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetPresent)
 
 	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
@@ -44,12 +43,12 @@ func CFindReadRSP(pdu network.PDUService) (media.DICOMObject, uint16, error) {
 	}
 
 	// Is this a C-Find RSP?
-	if responseCommandObj.GetUShort(tags.CommandField) == dicomcommand.CFindResponse {
-		status := responseCommandObj.GetUShort(tags.Status)
+	if responseCommandObj.GetUint16(tags.CommandField) == dicomcommand.CFindResponse {
+		status := responseCommandObj.GetUint16(tags.Status)
 		if err := validateQROperationStatus(status, "CFindReadRSP"); err != nil {
 			return nil, dicomstatus.FailureProcessingFailure, err
 		}
-		commandDataSetType := responseCommandObj.GetUShort(tags.CommandDataSetType)
+		commandDataSetType := responseCommandObj.GetUint16(tags.CommandDataSetType)
 
 		if commandDataSetType != dicomcommand.DataSetNone && commandDataSetType != dicomcommand.DataSetPresent {
 			return nil, dicomstatus.FailureProcessingFailure,
@@ -109,7 +108,7 @@ func CFindWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 		return errors.New("CFindWriteRSP: AffectedSOPClassUID is required")
 	}
 
-	messageID := requestCommandObj.GetUShort(tags.MessageID)
+	messageID := requestCommandObj.GetUint16(tags.MessageID)
 	if messageID == 0 {
 		return errors.New("CFindWriteRSP: MessageID is required")
 	}
@@ -118,12 +117,12 @@ func CFindWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
-	responseCommandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	responseCommandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	responseCommandObj.WriteUint16(tags.CommandField, dicomcommand.CFindResponse)
-	responseCommandObj.WriteUint16(tags.MessageIDBeingRespondedTo, messageID)
-	responseCommandObj.WriteUint16(tags.CommandDataSetType, leDSType)
-	responseCommandObj.WriteUint16(tags.Status, status)
+	responseCommandObj.Write(tags.CommandGroupLength, commandLength)
+	responseCommandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	responseCommandObj.Write(tags.CommandField, dicomcommand.CFindResponse)
+	responseCommandObj.Write(tags.MessageIDBeingRespondedTo, messageID)
+	responseCommandObj.Write(tags.CommandDataSetType, leDSType)
+	responseCommandObj.Write(tags.Status, status)
 
 	if err := pdu.Write(responseCommandObj, network.PDVCommand); err != nil {
 		return err

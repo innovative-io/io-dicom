@@ -2,7 +2,7 @@ package network
 
 import (
 	"github.com/innovative-io/io-dicom/media"
-	"github.com/innovative-io/io-dicom/network/pdutype"
+	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
 // AsyncOperationWindow - AsyncOperationWindow
@@ -10,8 +10,8 @@ type AsyncOperationWindow interface {
 	GetMaxNumberOperationsInvoked() uint16
 	GetMaxNumberOperationsPerformed() uint16
 	Size() uint16
-	Read(ms media.MemoryStream) (err error)
-	ReadDynamic(ms media.MemoryStream) (err error)
+	Read(buf *media.DICOMBuffer) (err error)
+	ReadDynamic(buf *media.DICOMBuffer) (err error)
 }
 
 type asyncOperationWindow struct {
@@ -41,24 +41,24 @@ func (async *asyncOperationWindow) Size() uint16 {
 	return async.Length + 4
 }
 
-func (async *asyncOperationWindow) Read(ms media.MemoryStream) (err error) {
-	if async.ItemType, err = ms.GetByte(); err != nil {
+func (async *asyncOperationWindow) Read(buf *media.DICOMBuffer) (err error) {
+	if async.ItemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return async.ReadDynamic(ms)
+	return async.ReadDynamic(buf)
 }
 
-func (async *asyncOperationWindow) ReadDynamic(ms media.MemoryStream) (err error) {
-	if async.Reserved1, err = ms.GetByte(); err != nil {
+func (async *asyncOperationWindow) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if async.Reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if async.Length, err = ms.GetUint16(); err != nil {
+	if async.Length, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
-	if async.MaxNumberOperationsInvoked, err = ms.GetUint16(); err != nil {
+	if async.MaxNumberOperationsInvoked, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
-	if async.MaxNumberOperationsPerformed, err = ms.GetUint16(); err != nil {
+	if async.MaxNumberOperationsPerformed, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
 	return

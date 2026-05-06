@@ -3,6 +3,7 @@ package jpegxl
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/innovative-io/io-dicom/codecs/internal/backendmgr"
 )
@@ -59,6 +60,9 @@ var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 func init() {
 	registerNativeBackends()
 	mgr.SelectDefault()
+	if mgr.BackendName() == "passthrough" {
+		slog.Warn("jpegxl: no native backend available; encode will pass raw bytes unchanged (build with -tags libjxl)")
+	}
 }
 
 // SetBackend overrides the active JPEG XL backend. Passing nil resets to passthrough.

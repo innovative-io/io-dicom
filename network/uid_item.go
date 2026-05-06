@@ -18,8 +18,8 @@ type UIDItem interface {
 	SetType(itemType byte)
 	SetUID(uid string)
 	Write(rw *bufio.ReadWriter) error
-	Read(ms media.MemoryStream) (err error)
-	ReadDynamic(ms media.MemoryStream) (err error)
+	Read(buf *media.DICOMBuffer) (err error)
+	ReadDynamic(buf *media.DICOMBuffer) (err error)
 }
 
 type uidItem struct {
@@ -74,7 +74,7 @@ func (u *uidItem) SetUID(uid string) {
 }
 
 func (u *uidItem) Write(rw *bufio.ReadWriter) error {
-	bd := media.NewEmptyBufData()
+	bd := media.NewDICOMBuffer()
 
 	bd.SetBigEndian(true)
 	bd.WriteByte(u.itemType)
@@ -85,23 +85,23 @@ func (u *uidItem) Write(rw *bufio.ReadWriter) error {
 	return bd.Send(rw)
 }
 
-func (u *uidItem) Read(ms media.MemoryStream) (err error) {
-	if u.itemType, err = ms.GetByte(); err != nil {
+func (u *uidItem) Read(buf *media.DICOMBuffer) (err error) {
+	if u.itemType, err = buf.GetByte(); err != nil {
 		return err
 	}
-	return u.ReadDynamic(ms)
+	return u.ReadDynamic(buf)
 }
 
-func (u *uidItem) ReadDynamic(ms media.MemoryStream) (err error) {
-	if u.reserved1, err = ms.GetByte(); err != nil {
+func (u *uidItem) ReadDynamic(buf *media.DICOMBuffer) (err error) {
+	if u.reserved1, err = buf.GetByte(); err != nil {
 		return err
 	}
-	if u.length, err = ms.GetUint16(); err != nil {
+	if u.length, err = buf.ReadUint16(true); err != nil {
 		return err
 	}
 
 	buffer := make([]byte, u.length)
-	ms.ReadData(buffer)
+	buf.ReadData(buffer)
 	u.uid = string(buffer)
 
 	return

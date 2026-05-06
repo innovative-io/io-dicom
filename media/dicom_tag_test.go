@@ -10,7 +10,7 @@ func TestDICOMTag_GetUInt_LittleEndian(t *testing.T) {
 	data := make([]byte, 4)
 	binary.LittleEndian.PutUint32(data, 0x12345678)
 	tag := &DICOMTag{Length: 4, Data: data, BigEndian: false}
-	if got := tag.GetUInt(); got != 0x12345678 {
+	if got := tag.GetUint32(); got != 0x12345678 {
 		t.Fatalf("GetUInt() = 0x%X, want 0x12345678", got)
 	}
 }
@@ -19,21 +19,21 @@ func TestDICOMTag_GetUInt_BigEndian(t *testing.T) {
 	data := make([]byte, 4)
 	binary.BigEndian.PutUint32(data, 0xDEADBEEF)
 	tag := &DICOMTag{Length: 4, Data: data, BigEndian: true}
-	if got := tag.GetUInt(); got != 0xDEADBEEF {
+	if got := tag.GetUint32(); got != 0xDEADBEEF {
 		t.Fatalf("GetUInt() BE = 0x%X", got)
 	}
 }
 
 func TestDICOMTag_GetUInt_WrongLength(t *testing.T) {
 	tag := &DICOMTag{Length: 2, Data: []byte{0x01, 0x02}}
-	if got := tag.GetUInt(); got != 0 {
+	if got := tag.GetUint32(); got != 0 {
 		t.Fatalf("GetUInt() with 2-byte data should return 0, got %d", got)
 	}
 }
 
 func TestDICOMTag_GetUInt_TruncatedData(t *testing.T) {
 	tag := &DICOMTag{Length: 4, Data: []byte{0x01, 0x02, 0x03}}
-	if got := tag.GetUInt(); got != 0 {
+	if got := tag.GetUint32(); got != 0 {
 		t.Fatalf("GetUInt() with truncated data should return 0, got %d", got)
 	}
 }
@@ -77,21 +77,21 @@ func TestDICOMTag_GetUShort_BigEndian(t *testing.T) {
 	data := make([]byte, 2)
 	binary.BigEndian.PutUint16(data, 0xABCD)
 	tag := &DICOMTag{Length: 2, Data: data, BigEndian: true}
-	if got := tag.GetUShort(); got != 0xABCD {
+	if got := tag.GetUint16(); got != 0xABCD {
 		t.Fatalf("GetUShort() BE = 0x%X", got)
 	}
 }
 
 func TestDICOMTag_GetUShort_WrongLength(t *testing.T) {
 	tag := &DICOMTag{Length: 0, Data: []byte{}}
-	if got := tag.GetUShort(); got != 0 {
+	if got := tag.GetUint16(); got != 0 {
 		t.Fatalf("GetUShort() with length 0 should return 0, got %d", got)
 	}
 }
 
 func TestDICOMTag_GetUShort_TruncatedData(t *testing.T) {
 	tag := &DICOMTag{Length: 2, Data: []byte{0x01}}
-	if got := tag.GetUShort(); got != 0 {
+	if got := tag.GetUint16(); got != 0 {
 		t.Fatalf("GetUShort() with truncated data should return 0, got %d", got)
 	}
 }
@@ -116,7 +116,7 @@ func TestDICOMTag_GetString_RespectsTagLength(t *testing.T) {
 func TestReadSeq_TruncatedData(t *testing.T) {
 	// Write one complete implicit-VR tag (group 0008, element 0060, length 2, data "CT")
 	// followed by a deliberately truncated tag (header only, no data).
-	buf := NewEmptyBufData()
+	buf := NewDICOMBuffer()
 	// complete tag: (0008,0060) US length=2 data="CT"
 	buf.WriteUint16(0x0008) // group
 	buf.WriteUint16(0x0060) // element

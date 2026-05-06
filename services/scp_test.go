@@ -151,8 +151,8 @@ func TestSCP_CFindRejectsInvalidQueryRetrieveLevel(t *testing.T) {
 	}
 
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "NOT_A_LEVEL")
-	query.WriteString(tags.PatientID, "P123")
+	query.Write(tags.QueryRetrieveLevel, "NOT_A_LEVEL")
+	query.Write(tags.PatientID, "P123")
 
 	scu := NewSCU(dest)
 	_, status, err := scu.FindSCU(context.Background(), query, 5)
@@ -175,8 +175,8 @@ func TestSCP_CFindAllowsEmptyQueryRetrieveLevelForWorklist(t *testing.T) {
 			t.Fatalf("findLevel = %q, want empty string for worklist", findLevel)
 		}
 		result := media.NewEmptyDCMObj()
-		result.WriteString(tags.PatientID, "MWL-001")
-		result.WriteString(tags.PatientName, "Test^Worklist")
+		result.Write(tags.PatientID, "MWL-001")
+		result.Write(tags.PatientName, "Test^Worklist")
 		emit(result)
 		return CFindResult{Status: dicomstatus.Success}, nil
 	})
@@ -192,7 +192,7 @@ func TestSCP_CFindAllowsEmptyQueryRetrieveLevelForWorklist(t *testing.T) {
 	}
 
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.PatientName, "Test*")
+	query.Write(tags.PatientName, "Test*")
 
 	scu := NewSCU(dest)
 	results := 0
@@ -266,7 +266,7 @@ func TestSCP_CFindInFlightCancelPreemptsStreaming(t *testing.T) {
 		close(handlerStarted)
 		for i := 0; i < 200; i++ {
 			obj := media.NewEmptyDCMObj()
-			obj.WriteString(tags.PatientID, fmt.Sprintf("P%03d", i))
+			obj.Write(tags.PatientID, fmt.Sprintf("P%03d", i))
 			emit(obj)
 			select {
 			case <-ctx.Done():
@@ -294,8 +294,8 @@ func TestSCP_CFindInFlightCancelPreemptsStreaming(t *testing.T) {
 
 	msgID := uint16(111)
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	query.WriteString(tags.PatientID, "*")
+	query.Write(tags.QueryRetrieveLevel, "STUDY")
+	query.Write(tags.PatientID, "*")
 
 	if err := writeCFindRQWithMessageID(pdu, query, msgID); err != nil {
 		t.Fatalf("writeCFindRQWithMessageID: %v", err)
@@ -356,7 +356,7 @@ func TestSCP_CFindCancelTimeoutAbortsAssociation(t *testing.T) {
 	testSCP.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, findLevel string, data media.DICOMObject, emit func(media.DICOMObject)) (CFindResult, error) {
 		close(handlerStarted)
 		obj := media.NewEmptyDCMObj()
-		obj.WriteString(tags.PatientID, "P000")
+		obj.Write(tags.PatientID, "P000")
 		emit(obj)
 		time.Sleep(2 * time.Second)
 		return CFindResult{Status: dicomstatus.Success}, nil
@@ -379,8 +379,8 @@ func TestSCP_CFindCancelTimeoutAbortsAssociation(t *testing.T) {
 
 	msgID := uint16(112)
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	query.WriteString(tags.PatientID, "*")
+	query.Write(tags.QueryRetrieveLevel, "STUDY")
+	query.Write(tags.PatientID, "*")
 
 	if err := writeCFindRQWithMessageID(pdu, query, msgID); err != nil {
 		t.Fatalf("writeCFindRQWithMessageID: %v", err)
@@ -420,12 +420,12 @@ func writeCFindRQWithMessageID(pdu network.PDUService, dataObj media.DICOMObject
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
 	commandObj := media.NewEmptyDCMObj()
-	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	commandObj.WriteUint16(tags.CommandField, dicomcommand.CFindRequest)
-	commandObj.WriteUint16(tags.MessageID, messageID)
-	commandObj.WriteUint16(tags.Priority, priority.Medium)
-	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetPresent)
+	commandObj.Write(tags.CommandGroupLength, commandLength)
+	commandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	commandObj.Write(tags.CommandField, dicomcommand.CFindRequest)
+	commandObj.Write(tags.MessageID, messageID)
+	commandObj.Write(tags.Priority, priority.Medium)
+	commandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetPresent)
 
 	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
@@ -469,8 +469,8 @@ func TestSCP_CGetInFlightCancelOverridesFinalStatus(t *testing.T) {
 
 	msgID := uint16(113)
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	query.WriteString(tags.PatientID, "*")
+	query.Write(tags.QueryRetrieveLevel, "STUDY")
+	query.Write(tags.PatientID, "*")
 
 	if err := writeCGetRQWithMessageID(pdu, query, msgID); err != nil {
 		t.Fatalf("writeCGetRQWithMessageID: %v", err)
@@ -541,8 +541,8 @@ func TestSCP_CMoveInFlightCancelOverridesFinalStatus(t *testing.T) {
 
 	msgID := uint16(115)
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	query.WriteString(tags.PatientID, "*")
+	query.Write(tags.QueryRetrieveLevel, "STUDY")
+	query.Write(tags.PatientID, "*")
 
 	if err := writeCMoveRQWithMessageID(pdu, query, "DEST_AE", msgID); err != nil {
 		t.Fatalf("writeCMoveRQWithMessageID: %v", err)
@@ -606,8 +606,8 @@ func TestSCP_CGetRejectsNonMonotonicProgress(t *testing.T) {
 
 	msgID := uint16(117)
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	query.WriteString(tags.PatientID, "*")
+	query.Write(tags.QueryRetrieveLevel, "STUDY")
+	query.Write(tags.PatientID, "*")
 	if err := writeCGetRQWithMessageID(pdu, query, msgID); err != nil {
 		t.Fatalf("writeCGetRQWithMessageID: %v", err)
 	}
@@ -659,8 +659,8 @@ func TestSCP_CMoveRejectsNonMonotonicProgress(t *testing.T) {
 
 	msgID := uint16(119)
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	query.WriteString(tags.PatientID, "*")
+	query.Write(tags.QueryRetrieveLevel, "STUDY")
+	query.Write(tags.PatientID, "*")
 	if err := writeCMoveRQWithMessageID(pdu, query, "DEST_AE", msgID); err != nil {
 		t.Fatalf("writeCMoveRQWithMessageID: %v", err)
 	}
@@ -716,8 +716,8 @@ func TestSCP_CGetCancelTimeoutAbortsAssociation(t *testing.T) {
 
 	msgID := uint16(121)
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	query.WriteString(tags.PatientID, "*")
+	query.Write(tags.QueryRetrieveLevel, "STUDY")
+	query.Write(tags.PatientID, "*")
 	if err := writeCGetRQWithMessageID(pdu, query, msgID); err != nil {
 		t.Fatalf("writeCGetRQWithMessageID: %v", err)
 	}
@@ -752,12 +752,12 @@ func writeCGetRQWithMessageID(pdu network.PDUService, dataObj media.DICOMObject,
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + 2)
 
 	commandObj := media.NewEmptyDCMObj()
-	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	commandObj.WriteUint16(tags.CommandField, dicomcommand.CGetRequest)
-	commandObj.WriteUint16(tags.MessageID, messageID)
-	commandObj.WriteUint16(tags.Priority, priority.Medium)
-	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetPresent)
+	commandObj.Write(tags.CommandGroupLength, commandLength)
+	commandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	commandObj.Write(tags.CommandField, dicomcommand.CGetRequest)
+	commandObj.Write(tags.MessageID, messageID)
+	commandObj.Write(tags.Priority, priority.Medium)
+	commandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetPresent)
 
 	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
@@ -780,13 +780,13 @@ func writeCMoveRQWithMessageID(pdu network.PDUService, dataObj media.DICOMObject
 	commandLength := uint32(8 + sopClassUIDLength + 8 + 2 + 8 + 2 + 8 + destinationAETitleLength + 8 + 2 + 8 + 2)
 
 	commandObj := media.NewEmptyDCMObj()
-	commandObj.WriteUint32(tags.CommandGroupLength, commandLength)
-	commandObj.WriteString(tags.AffectedSOPClassUID, sopClassUID)
-	commandObj.WriteUint16(tags.CommandField, dicomcommand.CMoveRequest)
-	commandObj.WriteUint16(tags.MessageID, messageID)
-	commandObj.WriteString(tags.MoveDestination, destinationAETitle)
-	commandObj.WriteUint16(tags.Priority, priority.Medium)
-	commandObj.WriteUint16(tags.CommandDataSetType, dicomcommand.DataSetPresent)
+	commandObj.Write(tags.CommandGroupLength, commandLength)
+	commandObj.Write(tags.AffectedSOPClassUID, sopClassUID)
+	commandObj.Write(tags.CommandField, dicomcommand.CMoveRequest)
+	commandObj.Write(tags.MessageID, messageID)
+	commandObj.Write(tags.MoveDestination, destinationAETitle)
+	commandObj.Write(tags.Priority, priority.Medium)
+	commandObj.Write(tags.CommandDataSetType, dicomcommand.DataSetPresent)
 
 	if err := pdu.Write(commandObj, network.PDVCommand); err != nil {
 		return err
@@ -843,8 +843,8 @@ func TestSCP_CGetStoreSubop(t *testing.T) {
 	defer pdu.Close()
 
 	query := media.NewEmptyDCMObj()
-	query.WriteString(tags.QueryRetrieveLevel, "STUDY")
-	query.WriteString(tags.StudyInstanceUID, "1.2.3.4")
+	query.Write(tags.QueryRetrieveLevel, "STUDY")
+	query.Write(tags.StudyInstanceUID, "1.2.3.4")
 
 	if err := writeCGetRQWithMessageID(pdu, query, 127); err != nil {
 		t.Fatalf("writeCGetRQWithMessageID: %v", err)
@@ -855,7 +855,7 @@ func TestSCP_CGetStoreSubop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NextPDU (C-STORE-RQ): %v", err)
 	}
-	cmd := dco.GetUShort(tags.CommandField)
+	cmd := dco.GetUint16(tags.CommandField)
 	if cmd != dicomcommand.CStoreRequest {
 		t.Fatalf("expected C-STORE-RQ (0x0001), got 0x%04X", cmd)
 	}
