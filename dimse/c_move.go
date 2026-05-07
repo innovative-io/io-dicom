@@ -64,9 +64,9 @@ func CMoveReadRQ(pdu network.PDUService) (*CMoveRequest, error) {
 		return nil, err
 	}
 
-	// If CommandDataSetType indicates identifier dataset present (DataSetPresent),
-	// read it from the next PDU.
-	if req.CommandDataSetType == dicomcommand.DataSetPresent {
+	// If CommandDataSetType indicates identifier dataset present (any value != 0x0101),
+	// read it from the next PDU per DICOM PS3.7 §9.3.1.
+	if req.CommandDataSetType != dicomcommand.DataSetNone {
 		identifierDataSet, err := pdu.NextPDU()
 		if err != nil {
 			return nil, fmt.Errorf("CMoveReadRQ: failed to read identifier dataset: %w", err)
@@ -89,9 +89,8 @@ func validateCMoveRequest(req *CMoveRequest) error {
 	if req.MoveDestination == "" {
 		return errors.New("CMoveReadRQ: Move Destination is required")
 	}
-	if req.CommandDataSetType != dicomcommand.DataSetNone && req.CommandDataSetType != dicomcommand.DataSetPresent {
-		return fmt.Errorf("CMoveReadRQ: invalid CommandDataSetType 0x%04X (must be DataSetNone or DataSetPresent)", req.CommandDataSetType)
-	}
+	// Per DICOM PS3.7 §9.3.1, 0x0101 means no dataset; any other value means dataset present.
+	// Accept all conformant implementations (e.g. DCMTK uses 0x0001 for DataSetPresent).
 	return nil
 }
 
@@ -193,10 +192,8 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 		return nil, dicomstatus.FailureProcessingFailure, err
 	}
 	commandDataSetType := responseCommandObj.GetUint16(tags.CommandDataSetType)
-	if commandDataSetType != dicomcommand.DataSetNone && commandDataSetType != dicomcommand.DataSetPresent {
-		return nil, dicomstatus.FailureProcessingFailure,
-			fmt.Errorf("CMoveReadRSP: invalid CommandDataSetType 0x%04X (must be DataSetNone or DataSetPresent)", commandDataSetType)
-	}
+	// Per DICOM PS3.7 §9.3.1, 0x0101 means no dataset; any other value means dataset present.
+	hasDataSet := commandDataSetType != dicomcommand.DataSetNone
 
 	// Extract sub-operation counts per PS3.7 §C.4.2.1.9
 	remaining := responseCommandObj.GetUint16(tags.NumberOfRemainingSuboperations)
@@ -205,7 +202,7 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 	warnings := responseCommandObj.GetUint16(tags.NumberOfWarningSuboperations)
 
 	// Update pending count
-	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings); err != nil {
+	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings, false); err != nil {
 		return nil, dicomstatus.FailureProcessingFailure, fmt.Errorf("CMoveReadRSP: invalid sub-operation counters: %w", err)
 	}
 
@@ -219,8 +216,8 @@ func CMoveReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint
 		}
 	}
 
-	// If CommandDataSetType indicates dataset present (DataSetPresent), read it
-	if commandDataSetType == dicomcommand.DataSetPresent {
+	// If CommandDataSetType indicates dataset present, read it
+	if hasDataSet {
 		responseDataObj, err := pdu.NextPDU()
 		if err != nil {
 			return nil, status, fmt.Errorf("CMoveReadRSP: failed to read response dataset: %w", err)
@@ -285,7 +282,7 @@ func CMoveWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, 
 
 	sopClassUIDLength := paddedLen(sopClassUID)
 
-	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings); err != nil {
+	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings, true); err != nil {
 		return fmt.Errorf("CMoveWriteRSP: %w", err)
 	}
 	if err := validateQROperationStatus(status, "CMoveWriteRSP"); err != nil {

@@ -49,23 +49,21 @@ func CFindReadRSP(pdu network.PDUService) (media.DICOMObject, uint16, error) {
 			return nil, dicomstatus.FailureProcessingFailure, err
 		}
 		commandDataSetType := responseCommandObj.GetUint16(tags.CommandDataSetType)
+		// Per DICOM PS3.7 §9.3.1, 0x0101 means no dataset; any other value means
+		// dataset present. Accept all conformant implementations (e.g. DCMTK uses 0x0001).
+		hasDataSet := commandDataSetType != dicomcommand.DataSetNone
 
-		if commandDataSetType != dicomcommand.DataSetNone && commandDataSetType != dicomcommand.DataSetPresent {
-			return nil, dicomstatus.FailureProcessingFailure,
-				errors.New("CFindReadRSP: invalid CommandDataSetType (must be DataSetNone or DataSetPresent)")
-		}
-
-		if (status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings) && commandDataSetType == dicomcommand.DataSetNone {
+		if (status == dicomstatus.Pending || status == dicomstatus.PendingWithWarnings) && !hasDataSet {
 			return nil, dicomstatus.FailureProcessingFailure,
 				errors.New("CFindReadRSP: pending response must include an identifier dataset")
 		}
 
-		if status != dicomstatus.Pending && status != dicomstatus.PendingWithWarnings && commandDataSetType == dicomcommand.DataSetPresent {
+		if status != dicomstatus.Pending && status != dicomstatus.PendingWithWarnings && hasDataSet {
 			return nil, dicomstatus.FailureProcessingFailure,
 				errors.New("CFindReadRSP: final response must not include an identifier dataset")
 		}
 
-		if commandDataSetType == dicomcommand.DataSetPresent {
+		if hasDataSet {
 			responseDataObj, err := pdu.NextPDU()
 			if err != nil {
 				return nil, dicomstatus.FailureProcessingFailure, err

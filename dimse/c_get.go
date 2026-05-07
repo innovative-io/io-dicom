@@ -55,16 +55,15 @@ func CGetReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint1
 		return nil, dicomstatus.FailureProcessingFailure, err
 	}
 	commandDataSetType := responseCommandObj.GetUint16(tags.CommandDataSetType)
-	if commandDataSetType != dicomcommand.DataSetNone && commandDataSetType != dicomcommand.DataSetPresent {
-		return nil, dicomstatus.FailureProcessingFailure,
-			fmt.Errorf("CGetReadRSP: invalid CommandDataSetType 0x%04X (must be DataSetNone or DataSetPresent)", commandDataSetType)
-	}
+	// Per DICOM PS3.7 §9.3.1, 0x0101 means no dataset; any other value means
+	// dataset present. Accept all conformant implementations (e.g. DCMTK uses 0x0001).
+	hasDataSet := commandDataSetType != dicomcommand.DataSetNone
 	remaining := responseCommandObj.GetUint16(tags.NumberOfRemainingSuboperations)
 	completed := responseCommandObj.GetUint16(tags.NumberOfCompletedSuboperations)
 	failed := responseCommandObj.GetUint16(tags.NumberOfFailedSuboperations)
 	warnings := responseCommandObj.GetUint16(tags.NumberOfWarningSuboperations)
 
-	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings); err != nil {
+	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings, false); err != nil {
 		return nil, dicomstatus.FailureProcessingFailure, fmt.Errorf("CGetReadRSP: invalid sub-operation counters: %w", err)
 	}
 
@@ -76,7 +75,7 @@ func CGetReadRSP(pdu network.PDUService, pending *int) (media.DICOMObject, uint1
 		*pending = -1
 	}
 
-	if commandDataSetType == dicomcommand.DataSetPresent {
+	if hasDataSet {
 		responseDataObj, err := pdu.NextPDU()
 		if err != nil {
 			return nil, status, fmt.Errorf("CGetReadRSP: failed to read response dataset: %w", err)
@@ -106,7 +105,7 @@ func CGetWriteRSP(pdu network.PDUService, requestCommandObj media.DICOMObject, s
 		return errors.New("CGetWriteRSP: MessageID is required")
 	}
 
-	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings); err != nil {
+	if err := validateSuboperationCounters(status, remaining, completed, failed, warnings, true); err != nil {
 		return fmt.Errorf("CGetWriteRSP: %w", err)
 	}
 	if err := validateQROperationStatus(status, "CGetWriteRSP"); err != nil {

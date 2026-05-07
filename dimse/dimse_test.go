@@ -1580,7 +1580,11 @@ func TestCGetWriteRSP_RejectsInvalidSuboperationCounters(t *testing.T) {
 	}
 }
 
-func TestCMoveReadRSP_RejectsInvalidSuboperationCounters(t *testing.T) {
+// TestCMoveReadRSP_AcceptsPendingWithZeroRemaining verifies that the read path
+// accepts a Pending response with remaining=0. Some implementations (e.g. DCMTK
+// dcmqrscp) send this before the final response, which is non-conformant per
+// DICOM PS3.7 but common enough to require interoperability.
+func TestCMoveReadRSP_AcceptsPendingWithZeroRemaining(t *testing.T) {
 	cmd := media.NewEmptyDCMObj()
 	cmd.Write(tags.CommandField, dicomcommand.CMoveResponse)
 	cmd.Write(tags.Status, dicomstatus.Pending)
@@ -1594,7 +1598,14 @@ func TestCMoveReadRSP_RejectsInvalidSuboperationCounters(t *testing.T) {
 	m.nextPDUs = []media.DICOMObject{cmd}
 	pending := 5
 
-	if _, _, err := dimse.CMoveReadRSP(m, &pending); err == nil {
-		t.Fatal("CMoveReadRSP: want error when pending has remaining=0")
+	_, status, err := dimse.CMoveReadRSP(m, &pending)
+	if err != nil {
+		t.Fatalf("CMoveReadRSP: unexpected error for Pending+remaining=0: %v", err)
+	}
+	if status != dicomstatus.Pending {
+		t.Errorf("CMoveReadRSP: status %04X want Pending", status)
+	}
+	if pending != 0 {
+		t.Errorf("CMoveReadRSP: pending count %d want 0", pending)
 	}
 }
