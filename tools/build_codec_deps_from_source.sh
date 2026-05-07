@@ -122,6 +122,37 @@ build_jpegxl() {
     -DJPEGXL_FORCE_SYSTEM_HWY=ON
   cmake --build "$build" --parallel "$JOBS"
   cmake --install "$build"
+
+  # libjxl is built against system (Homebrew) highway and brotli.
+  # Copy those transitive dependencies into the prefix so they can be bundled
+  # into the app and are present on machines other than the build host.
+  copy_jxl_system_deps
+}
+
+# Detect libhwy and libbrotli{common,dec,enc} by inspecting the installed libjxl
+# via otool, then copy any that resolve outside the prefix into $LIB_DIR.
+copy_jxl_system_deps() {
+  local libjxl="$LIB_DIR/libjxl.dylib"
+  [[ -f "$libjxl" ]] || return 0
+
+  local dep resolved name
+  while IFS= read -r dep; do
+    [[ -z "$dep" ]] && continue
+    [[ "$dep" == /System/* || "$dep" == /usr/lib/* ]] && continue
+    [[ "$dep" == @* ]] && continue
+    name="$(basename "$dep")"
+    # Only the dylibs we care about: highway and brotli
+    case "$name" in
+      libhwy.*.dylib|libbrotli*.dylib) ;;
+      *) continue ;;
+    esac
+    if [[ -f "$dep" && ! -f "$LIB_DIR/$name" ]]; then
+      echo "[codec-deps] bundling jxl dep: $name"
+      cp -f "$dep" "$LIB_DIR/$name"
+      # Fix install name so it resolves via @rpath in the app bundle
+      install_name_tool -id "@rpath/$name" "$LIB_DIR/$name" 2>/dev/null || true
+    fi
+  done < <(otool -L "$libjxl" | tail -n +2 | awk '{print $1}')
 }
 
 build_openjph() {
