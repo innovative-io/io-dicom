@@ -220,8 +220,6 @@ static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst,
 		return -1;
 	}
 
-	OPJ_UINT32 width = image->x1 - image->x0;
-	OPJ_UINT32 height = image->y1 - image->y0;
 	if (!opj_set_decode_area(codec, image, image->x0, image->y0, image->x1, image->y1) ||
 		!opj_decode(codec, stream, image) ||
 		!opj_end_decompress(codec, stream)) {
@@ -232,8 +230,13 @@ static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst,
 		return -1;
 	}
 
+	// Use component[0] dimensions: these reflect the actual decoded sample
+	// grid and are correct even when the J2K reference-grid origin is non-zero.
+	OPJ_UINT32 width = image->comps[0].w;
+	OPJ_UINT32 height = image->comps[0].h;
 	OPJ_UINT32 numcomps = image->numcomps;
 	OPJ_UINT32 prec = image->comps[0].prec;
+	OPJ_UINT32 sgnd = image->comps[0].sgnd;
 	if (!(prec == 8 || prec == 12 || prec == 16)) {
 		io_openjpeg_set_error(err, err_len, "unsupported decoded precision");
 		opj_stream_destroy(stream);
@@ -249,7 +252,7 @@ static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst,
 		return -1;
 	}
 	for (OPJ_UINT32 comp = 0; comp < numcomps; ++comp) {
-		if (image->comps[comp].sgnd != 0 || image->comps[comp].prec != prec ||
+		if (image->comps[comp].sgnd != sgnd || image->comps[comp].prec != prec ||
 			image->comps[comp].w != width || image->comps[comp].h != height || image->comps[comp].data == NULL) {
 			io_openjpeg_set_error(err, err_len, "unsupported decoded image layout");
 			opj_stream_destroy(stream);
@@ -274,30 +277,39 @@ static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst,
 		for (size_t i = 0; i < pixels; ++i) {
 			for (OPJ_UINT32 comp = 0; comp < numcomps; ++comp) {
 				OPJ_INT32 sample = image->comps[comp].data[i];
-				if (sample < 0 || sample > 255) {
+				OPJ_INT32 min_val = sgnd ? -(OPJ_INT32)(1u << (prec - 1)) : 0;
+				OPJ_INT32 max_val = sgnd ? (OPJ_INT32)((1u << (prec - 1)) - 1) : (OPJ_INT32)((1u << prec) - 1);
+				if (sample < min_val || sample > max_val) {
 					io_openjpeg_set_error(err, err_len, "decoded sample out of range");
 					opj_stream_destroy(stream);
 					opj_destroy_codec(codec);
 					opj_image_destroy(image);
 					return -1;
 				}
-				dst[i * numcomps + comp] = (uint8_t)sample;
+				// Cast through int8_t preserves the two's-complement bit pattern
+				// for both signed and unsigned 8-bit values.
+				dst[i * numcomps + comp] = (uint8_t)(OPJ_INT8)sample;
 			}
 		}
 	} else {
 		for (size_t i = 0; i < pixels; ++i) {
 			for (OPJ_UINT32 comp = 0; comp < numcomps; ++comp) {
 				OPJ_INT32 sample = image->comps[comp].data[i];
-				if (sample < 0 || sample > 65535) {
+				OPJ_INT32 min_val = sgnd ? -(OPJ_INT32)(1u << (prec - 1)) : 0;
+				OPJ_INT32 max_val = sgnd ? (OPJ_INT32)((1u << (prec - 1)) - 1) : (OPJ_INT32)((1u << prec) - 1);
+				if (sample < min_val || sample > max_val) {
 					io_openjpeg_set_error(err, err_len, "decoded sample out of range");
 					opj_stream_destroy(stream);
 					opj_destroy_codec(codec);
 					opj_image_destroy(image);
 					return -1;
 				}
+				// Use OPJ_UINT32 cast to get defined big-endian byte extraction
+				// for both signed and unsigned samples (preserves bit pattern).
+				OPJ_UINT32 uval = (OPJ_UINT32)(OPJ_INT32)sample;
 				size_t offset = (i * numcomps + comp) * 2;
-				dst[offset] = (uint8_t)((sample >> 8) & 0xFF);
-				dst[offset + 1] = (uint8_t)(sample & 0xFF);
+				dst[offset] = (uint8_t)((uval >> 8) & 0xFF);
+				dst[offset + 1] = (uint8_t)(uval & 0xFF);
 			}
 		}
 	}
