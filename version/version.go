@@ -1,4 +1,4 @@
 package version
 
 // Version is the current release version of the io-dicom library.
-const Version = "2.5.1"
+const Version = "2.5.2"
