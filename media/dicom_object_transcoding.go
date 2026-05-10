@@ -558,11 +558,25 @@ func (obj *dicomObject) uncompress(ctx context.Context, i int, img []byte, size 
 			if tag == nil {
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG lossless frame %d", j)
 			}
-			if bitsa == 8 {
+			prec := jpeg.SOFPrecision(tag.Data)
+			if prec == 0 {
+				// Could not read SOF — fall back to bitsa heuristic
+				if bitsa <= 12 {
+					prec = 12
+				} else {
+					prec = 16
+				}
+			}
+			switch {
+			case prec == 8:
 				if err := jpeg.DIJG8decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
 					return err
 				}
-			} else {
+			case prec <= 12:
+				if err := jpeg.DIJG12decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
+					return err
+				}
+			default:
 				if err := jpeg.DIJG16decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
 					return err
 				}
@@ -596,8 +610,14 @@ func (obj *dicomObject) uncompress(ctx context.Context, i int, img []byte, size 
 			if tag == nil {
 				return fmt.Errorf("DICOMObject::ConvertTransferSyntax, missing JPEG extended frame %d", j)
 			}
-			if err := jpeg.DIJG12decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
-				return err
+			if jpeg.SOFPrecision(tag.Data) == 8 {
+				if err := jpeg.DIJG8decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
+					return err
+				}
+			} else {
+				if err := jpeg.DIJG12decodeContext(ctx, tag.Data, tag.Length, img[offset:], single); err != nil {
+					return err
+				}
 			}
 			obj.DelTag(i + 1)
 		}

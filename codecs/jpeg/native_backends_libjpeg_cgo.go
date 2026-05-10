@@ -397,6 +397,91 @@ static int io_libjpeg_decode16(const uint8_t* src, size_t src_size,
 	free(row);
 	return 0;
 }
+
+// io_libjpeg_decode8 decodes an 8-bit JPEG (baseline, progressive, or
+// extended) into a raw byte buffer. Unlike the 12/16-bit counterparts there is
+// no data_precision guard: libjpeg handles any SOF type whose output samples
+// fit in a JSAMPLE (8 bits). This allows decoding progressive/spectral-select
+// and restart-marker images that the pure-Go image/jpeg package rejects.
+static int io_libjpeg_decode8(const uint8_t* src, size_t src_size,
+		uint8_t* dst, size_t dst_size, char* err, size_t err_len) {
+	struct jpeg_decompress_struct cinfo;
+	io_libjpeg_error_mgr jerr;
+	JSAMPLE* row = NULL;
+	JSAMPROW row_ptr[1] = { NULL };
+	size_t pixels_per_row;
+	size_t expected;
+
+	if (!src || !dst || src_size == 0 || dst_size == 0) {
+		io_libjpeg_set_error(err, err_len, "invalid libjpeg 8-bit decode parameters");
+		return -1;
+	}
+
+	memset(&cinfo, 0, sizeof(cinfo));
+	memset(&jerr, 0, sizeof(jerr));
+	cinfo.err = jpeg_std_error(&jerr.pub);
+	jerr.pub.error_exit = io_libjpeg_error_exit;
+	jerr.err = err;
+	jerr.err_len = err_len;
+
+	if (setjmp(jerr.setjmp_buffer)) {
+		if (row) {
+			free(row);
+		}
+		jpeg_destroy_decompress(&cinfo);
+		return -1;
+	}
+
+	jpeg_create_decompress(&cinfo);
+	jpeg_mem_src(&cinfo, src, (unsigned long)src_size);
+	if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
+		io_libjpeg_set_error(err, err_len, "jpeg_read_header failed for 8-bit payload");
+		jpeg_destroy_decompress(&cinfo);
+		return -1;
+	}
+	if (!jpeg_start_decompress(&cinfo)) {
+		io_libjpeg_set_error(err, err_len, "jpeg_start_decompress failed for 8-bit payload");
+		jpeg_destroy_decompress(&cinfo);
+		return -1;
+	}
+	if (cinfo.output_components != 1 && cinfo.output_components != 3) {
+		io_libjpeg_set_error(err, err_len, "unsupported 8-bit component count from libjpeg decode");
+		jpeg_destroy_decompress(&cinfo);
+		return -1;
+	}
+
+	pixels_per_row = (size_t)cinfo.output_width * (size_t)cinfo.output_components;
+	expected = pixels_per_row * (size_t)cinfo.output_height;
+	if (expected > dst_size) {
+		io_libjpeg_set_error(err, err_len, "decoded 8-bit payload does not fit output buffer");
+		jpeg_destroy_decompress(&cinfo);
+		return -1;
+	}
+
+	row = (JSAMPLE*)malloc(pixels_per_row * sizeof(JSAMPLE));
+	if (!row) {
+		io_libjpeg_set_error(err, err_len, "failed to allocate libjpeg 8-bit decode row buffer");
+		jpeg_destroy_decompress(&cinfo);
+		return -1;
+	}
+	row_ptr[0] = row;
+
+	while (cinfo.output_scanline < cinfo.output_height) {
+		if (jpeg_read_scanlines(&cinfo, row_ptr, 1) != 1) {
+			io_libjpeg_set_error(err, err_len, "jpeg_read_scanlines failed");
+			free(row);
+			jpeg_destroy_decompress(&cinfo);
+			return -1;
+		}
+		uint8_t* dst_row = dst + ((size_t)(cinfo.output_scanline - 1) * pixels_per_row);
+		memcpy(dst_row, row, pixels_per_row);
+	}
+
+	jpeg_finish_decompress(&cinfo);
+	jpeg_destroy_decompress(&cinfo);
+	free(row);
+	return 0;
+}
 */
 import "C"
 
@@ -589,4 +674,34 @@ func (libjpegBackend) Encode16Context(_ context.Context, raw []byte, width uint1
 
 func registerNativeBackends() {
 	_ = RegisterBackend("libjpeg", func() Backend { return libjpegBackend{} })
+}
+
+// Decode8Context decodes an 8-bit JPEG (baseline, progressive, or extended)
+// via libjpeg. It is only called when the pure-Go decoder fails on a valid
+// JPEG payload (e.g. progressive scan, restart markers, or APP markers that
+// the stdlib rejects).
+func (libjpegBackend) Decode8Context(_ context.Context, encoded []byte, output []byte) error {
+	if len(encoded) == 0 || len(output) == 0 {
+		return errLibJPEGInvalidPayload
+	}
+	if len(encoded) > maxCodecPayloadBytes || len(output) > maxCodecPayloadBytes {
+		return errLibJPEGInvalidPayload
+	}
+
+	errBuf := make([]C.char, 256)
+	rc := C.io_libjpeg_decode8(
+		(*C.uint8_t)(unsafe.Pointer(&encoded[0])),
+		C.size_t(len(encoded)),
+		(*C.uint8_t)(unsafe.Pointer(&output[0])),
+		C.size_t(len(output)),
+		(*C.char)(unsafe.Pointer(&errBuf[0])),
+		C.size_t(len(errBuf)),
+	)
+	if rc != 0 {
+		if msg := C.GoString((*C.char)(unsafe.Pointer(&errBuf[0]))); msg != "" {
+			return fmt.Errorf("libjpeg decode8: %s", msg)
+		}
+		return errors.New("libjpeg decode8 failed")
+	}
+	return nil
 }

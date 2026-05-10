@@ -832,16 +832,37 @@ func decompressSingleFrame(ctx context.Context, tsUID string, compressed []byte,
 		return rle.RLEdecode(compressed, out, compLen, outLen, photoInt)
 	case transfersyntax.JPEGLosslessSV1.UID,
 		transfersyntax.JPEGLossless.UID:
-		if bitsa == 8 {
-			return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
+		// Dispatch on the precision declared in the JPEG SOF header rather than
+		// bitsa: DICOM metadata may differ from the actual payload precision
+		// (e.g. 10-bit CT stored with bitsa=12, or non-conformant encoders).
+		prec := jpeg.SOFPrecision(compressed)
+		if prec == 0 {
+			// Could not read SOF — fall back to bitsa heuristic.
+			if bitsa == 8 {
+				return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
+			}
+			if bitsa <= 12 {
+				return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
+			}
+			return jpeg.DIJG16decodeContext(ctx, compressed, compLen, out, outLen)
 		}
-		return jpeg.DIJG16decodeContext(ctx, compressed, compLen, out, outLen)
+		switch {
+		case prec == 8:
+			return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
+		case prec <= 12:
+			return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
+		default:
+			return jpeg.DIJG16decodeContext(ctx, compressed, compLen, out, outLen)
+		}
 	case transfersyntax.JPEGBaseline8Bit.UID:
 		if bitsa == 8 {
 			return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
 		}
 		return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
 	case transfersyntax.JPEGExtended12Bit.UID:
+		if jpeg.SOFPrecision(compressed) == 8 {
+			return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
+		}
 		return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
 	case transfersyntax.JPEGLSLossless.UID,
 		transfersyntax.JPEGLSNearLossless.UID:
@@ -907,6 +928,25 @@ func (obj *dicomObject) GetDecompressedFrame(ctx context.Context, frameIndex int
 	photoInt, RGB := pm.photoInt, pm.RGB
 	frames := pm.frames
 	tag := obj.GetTagAt(i)
+
+	// For encapsulated pixel data with missing Rows/Columns tags (e.g. Secondary
+	// Capture photographs stored as JPEG), try to recover the dimensions from the
+	// JPEG SOF header of the first compressed fragment.
+	if (rows == 0 || cols == 0) && tag != nil && tag.Length == 0xFFFFFFFF {
+		// Layout: [i] = pixel data tag, [i+1] = BOT item, [i+2] = first fragment.
+		if i+2 < len(obj.Tags) {
+			if frag := obj.GetTagAt(i + 2); frag != nil &&
+				frag.Group == 0xFFFE && frag.Element == 0xE000 && len(frag.Data) > 0 {
+				if hdr := jpeg.ReadSOFHeader(frag.Data); hdr.Width > 0 && hdr.Height > 0 {
+					cols = hdr.Width
+					rows = hdr.Height
+					if bitsa == 0 {
+						bitsa = uint16(hdr.Precision)
+					}
+				}
+			}
+		}
+	}
 
 	// Per-frame size only — no frames multiplication.
 	frameSz := uint64(cols) * uint64(rows) * uint64(bitsa) / 8

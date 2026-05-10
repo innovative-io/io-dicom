@@ -35,6 +35,81 @@ var supportedTransferSyntaxUIDs = []string{
 	"1.2.840.10008.1.2.4.70",
 }
 
+// SOFPrecision scans a JPEG payload and returns the sample precision (bits per
+// SOFHeader holds the key fields from the first JPEG SOF (Start of Frame)
+// segment. All fields are zero when the SOF cannot be found.
+type SOFHeader struct {
+	Precision uint8
+	Height    uint16
+	Width     uint16
+}
+
+// ReadSOFHeader scans a JPEG payload and returns the fields declared in the
+// first SOF (Start of Frame) segment. Returns a zero-valued struct when the
+// SOF cannot be found (e.g. the payload is too short or malformed).
+// SOF markers: 0xC0–0xC3, 0xC5–0xC7, 0xC9–0xCB, 0xCD–0xCF (DHT 0xC4 and
+// JPG 0xC8 are not SOF markers and are skipped).
+func ReadSOFHeader(data []byte) SOFHeader {
+	// Must start with SOI 0xFFD8
+	if len(data) < 4 || data[0] != 0xFF || data[1] != 0xD8 {
+		return SOFHeader{}
+	}
+	i := 2
+	for i+3 < len(data) {
+		if data[i] != 0xFF {
+			return SOFHeader{}
+		}
+		marker := data[i+1]
+		i += 2
+		// Markers with no length field: SOI, EOI, RST0-7, TEM
+		if marker == 0xD8 || marker == 0xD9 || (marker >= 0xD0 && marker <= 0xD7) || marker == 0x01 {
+			continue
+		}
+		if i+2 > len(data) {
+			return SOFHeader{}
+		}
+		segLen := int(data[i])<<8 | int(data[i+1])
+		if segLen < 2 || i+segLen > len(data) {
+			return SOFHeader{}
+		}
+		// SOF markers (exclude DHT=0xC4 and JPG=0xC8)
+		isSOF := (marker >= 0xC0 && marker <= 0xC3) ||
+			(marker >= 0xC5 && marker <= 0xC7) ||
+			(marker >= 0xC9 && marker <= 0xCB) ||
+			(marker >= 0xCD && marker <= 0xCF)
+		if isSOF {
+			// SOF data layout: length(2) precision(1) height(2) width(2) …
+			if i+7 <= len(data) {
+				return SOFHeader{
+					Precision: data[i+2],
+					Height:    uint16(data[i+3])<<8 | uint16(data[i+4]),
+					Width:     uint16(data[i+5])<<8 | uint16(data[i+6]),
+				}
+			}
+			if i+3 <= len(data) {
+				return SOFHeader{Precision: data[i+2]}
+			}
+			return SOFHeader{}
+		}
+		i += segLen
+	}
+	return SOFHeader{}
+}
+
+// SOFPrecision returns the data_precision (bits per sample) declared in the
+// first SOF segment of a JPEG payload. Returns 0 if the precision cannot be
+// determined (e.g. the payload is too short or malformed).
+func SOFPrecision(data []byte) uint8 {
+	return ReadSOFHeader(data).Precision
+}
+
+// nativeDecode8Backend is an optional interface that native backends may
+// implement to handle 8-bit JPEG variants that the pure-Go decoder rejects
+// (progressive scan, restart markers, extended sequential, etc.).
+type nativeDecode8Backend interface {
+	Decode8Context(ctx context.Context, encoded []byte, output []byte) error
+}
+
 // Backend defines pluggable implementations for JPEG 12/16-bit profiles.
 // Baseline 8-bit continues to use the built-in pure-Go implementation.
 type Backend interface {
@@ -273,7 +348,7 @@ func encode16WithContext(ctx context.Context, raw []byte, width uint16, height u
 	return backend.Encode16(raw, width, height, samples, mode)
 }
 
-func DIJG8decodeContext(_ context.Context, jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
+func DIJG8decodeContext(ctx context.Context, jpegData []byte, jpegSize uint32, outputData []byte, outputSize uint32) error {
 	if jpegSize > uint32(len(jpegData)) || outputSize > uint32(len(outputData)) {
 		return errPayloadTruncated
 	}
@@ -289,6 +364,13 @@ func DIJG8decodeContext(_ context.Context, jpegData []byte, jpegSize uint32, out
 
 	img, err := jpeg.Decode(bytes.NewReader(jpegData))
 	if err != nil {
+		// Fall back to the native libjpeg backend if available. It supports
+		// progressive, extended-sequential, restart-marker, and other JPEG
+		// variants that the pure-Go decoder rejects.
+		backend := activeBackend()
+		if n8, ok := backend.(nativeDecode8Backend); ok {
+			return n8.Decode8Context(ctx, jpegData, outputData)
+		}
 		return err
 	}
 
