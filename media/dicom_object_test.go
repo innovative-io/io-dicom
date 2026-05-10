@@ -1034,3 +1034,66 @@ func TestGetDecompressedFrame_NonConformantUncompressedEncapsulated(t *testing.T
 		})
 	}
 }
+
+// TestChangeTransferSyntax_NoPixelData verifies that ChangeTransferSyntax
+// succeeds for DICOM objects that have no pixel data element (e.g. non-image
+// SOP classes such as Structured Reports and Key Object Selection Documents),
+// as long as both source and target TSes share the same tag encoding.
+func TestChangeTransferSyntax_NoPixelData(t *testing.T) {
+	InitDict()
+
+	// Build a minimal non-image object (no Pixel Data tag) in EVLE.
+	obj := NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+	obj.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.88.11") // Basic Text SR
+	obj.Write(tags.SOPInstanceUID, "1.2.3.4.5")
+	obj.Write(tags.PatientID, "P-001")
+
+	// All compressed TSes share explicit-VR little-endian tag encoding, so
+	// converting a no-pixel-data object to any of them must succeed.
+	compressedTargets := []*transfersyntax.TransferSyntax{
+		transfersyntax.JPEGLosslessSV1,
+		transfersyntax.JPEGLossless,
+		transfersyntax.JPEG2000Lossless,
+		transfersyntax.JPEGLSLossless,
+		transfersyntax.RLELossless,
+	}
+	for _, ts := range compressedTargets {
+		// Clone obj so each sub-test starts fresh.
+		clone := NewEmptyDCMObj()
+		clone.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+		clone.SetExplicitVR(true)
+		clone.SetBigEndian(false)
+		clone.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.88.11")
+		clone.Write(tags.SOPInstanceUID, "1.2.3.4.5")
+		clone.Write(tags.PatientID, "P-001")
+
+		if err := clone.ChangeTransferSyntax(ts); err != nil {
+			t.Errorf("ChangeTransferSyntax(no-pixel-data, %s) error = %v, want nil", ts.Name, err)
+			continue
+		}
+		if got := clone.GetTransferSyntax(); got == nil || got.UID != ts.UID {
+			t.Errorf("after ChangeTransferSyntax(%s): TS = %v, want %s", ts.Name, got, ts.UID)
+		}
+	}
+
+	// Converting between TSes with different tag encodings (EVLE → ILE) still
+	// requires pixel data when both sides are "image" TSes, but for a
+	// no-pixel-data object the same-encoding check applies (both are LE).
+	// EVLE → ILE changes implicit/explicit VR so it MUST still fail (we cannot
+	// re-encode VR names without the data dictionary at this level).
+	isCrossEncodingErr := false
+	crossEncObj := NewEmptyDCMObj()
+	crossEncObj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	crossEncObj.SetExplicitVR(true)
+	crossEncObj.SetBigEndian(false)
+	crossEncObj.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.88.11")
+	if err := crossEncObj.ChangeTransferSyntax(transfersyntax.ImplicitVRLittleEndian); err != nil {
+		isCrossEncodingErr = true
+	}
+	if !isCrossEncodingErr {
+		t.Error("ChangeTransferSyntax(EVLE→ILE, no pixel data) should fail for cross-encoding conversion")
+	}
+}

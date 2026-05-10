@@ -1,8 +1,11 @@
 package services
 
 import (
+	"bufio"
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"testing"
@@ -891,5 +894,126 @@ func TestSCP_CGetStoreSubop(t *testing.T) {
 	}
 	if status != dicomstatus.Success {
 		t.Fatalf("C-GET final status = 0x%04X, want Success (0x0000)", status)
+	}
+}
+
+// cgetStoreSubopMockPDU is a minimal PDUService stub for cgetStoreSubop unit
+// tests. It captures the objects passed to Write(), returns a success C-STORE-RSP
+// from NextPDU(), and exposes accepted presentation contexts for TS lookup.
+type cgetStoreSubopMockPDU struct {
+	acceptedContexts []network.PresentationContextAccept
+	writtenCmd       media.DICOMObject
+	writtenData      media.DICOMObject
+}
+
+func (m *cgetStoreSubopMockPDU) Write(dco media.DICOMObject, itemType byte) error {
+	if itemType == network.PDVCommand {
+		m.writtenCmd = dco
+	} else {
+		m.writtenData = dco
+	}
+	return nil
+}
+
+func (m *cgetStoreSubopMockPDU) NextPDU() (media.DICOMObject, error) {
+	msgID := uint16(1)
+	if m.writtenCmd != nil {
+		msgID = m.writtenCmd.GetUint16(tags.MessageID)
+		if msgID == 0 {
+			msgID = 1
+		}
+	}
+	rsp := media.NewEmptyDCMObj()
+	rsp.Write(tags.CommandField, dicomcommand.CStoreResponse)
+	rsp.Write(tags.CommandDataSetType, dicomcommand.DataSetNone)
+	rsp.Write(tags.MessageIDBeingRespondedTo, msgID)
+	rsp.Write(tags.Status, dicomstatus.Success)
+	return rsp, nil
+}
+
+func (m *cgetStoreSubopMockPDU) GetAcceptedPresentationContexts() []network.PresentationContextAccept {
+	return m.acceptedContexts
+}
+
+func (m *cgetStoreSubopMockPDU) GetTransferSyntax(_ byte) *transfersyntax.TransferSyntax {
+	if len(m.acceptedContexts) > 0 {
+		return transfersyntax.GetTransferSyntaxFromUID(m.acceptedContexts[0].GetTrnSyntax().GetUID())
+	}
+	return nil
+}
+func (m *cgetStoreSubopMockPDU) GetPresentationContextID() byte               { return 1 }
+func (m *cgetStoreSubopMockPDU) SetTimeout(_ int)                             {}
+func (m *cgetStoreSubopMockPDU) Connect(_ context.Context, _, _ string) error { return nil }
+func (m *cgetStoreSubopMockPDU) ConnectTLS(_ context.Context, _, _ string, _ *tls.Config) error {
+	return nil
+}
+func (m *cgetStoreSubopMockPDU) Close() {}
+func (m *cgetStoreSubopMockPDU) GetAAssociationRQ() network.AssociationRequest {
+	return network.NewAssociationRequest()
+}
+func (m *cgetStoreSubopMockPDU) GetCalledAE() string                                             { return "SCP" }
+func (m *cgetStoreSubopMockPDU) GetCallingAE() string                                            { return "SCU" }
+func (m *cgetStoreSubopMockPDU) GetRemoteAddress() string                                        { return "127.0.0.1:104" }
+func (m *cgetStoreSubopMockPDU) SetCalledAE(_ string)                                            {}
+func (m *cgetStoreSubopMockPDU) SetCallingAE(_ string)                                           {}
+func (m *cgetStoreSubopMockPDU) SetConn(_ *bufio.ReadWriter)                                     {}
+func (m *cgetStoreSubopMockPDU) SetNetConn(_ net.Conn)                                           {}
+func (m *cgetStoreSubopMockPDU) AddPresContexts(_ network.PresentationContext)                   {}
+func (m *cgetStoreSubopMockPDU) SetOnAssociationRequest(_ func(network.AssociationRequest) bool) {}
+func (m *cgetStoreSubopMockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))                         {}
+
+// TestCGetStoreSubop_TranscodesToNegotiatedTS verifies that cgetStoreSubop
+// transcodes the file to the transfer syntax negotiated with the SCU. When the
+// SCP stores a file in ELE but the SCU only accepted ILE, the pixel data must
+// be re-encoded before it is sent back.
+func TestCGetStoreSubop_TranscodesToNegotiatedTS(t *testing.T) {
+	const samplePath = "../samples/test.dcm"
+	if _, err := os.Stat(samplePath); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+	media.InitDict()
+
+	original, err := media.NewDCMObjFromFile(samplePath)
+	if err != nil {
+		t.Fatalf("load test.dcm: %v", err)
+	}
+	fileTS := original.GetTransferSyntax()
+	if fileTS == nil {
+		t.Skip("test.dcm has no transfer syntax; skipping")
+	}
+
+	// Choose a target TS different from the file's native TS.
+	targetTS := transfersyntax.ImplicitVRLittleEndian
+	if fileTS.UID == transfersyntax.ImplicitVRLittleEndian.UID {
+		targetTS = transfersyntax.ExplicitVRLittleEndian
+	}
+
+	sopUID := original.GetString(tags.SOPClassUID)
+
+	pc := network.NewPresentationContextAccept()
+	pc.SetResult(0)
+	pc.SetPresentationContextID(1)
+	pc.SetAbstractSyntax(sopUID)
+	pc.SetTransferSyntax(targetTS.UID)
+
+	mock := &cgetStoreSubopMockPDU{
+		acceptedContexts: []network.PresentationContextAccept{pc},
+	}
+
+	s := &scp{}
+	if err := s.cgetStoreSubop(context.Background(), mock, samplePath); err != nil {
+		t.Fatalf("cgetStoreSubop: %v", err)
+	}
+
+	if mock.writtenData == nil {
+		t.Fatal("no data object written to PDU")
+	}
+	gotTS := mock.writtenData.GetTransferSyntax()
+	if gotTS == nil || gotTS.UID != targetTS.UID {
+		gotUID := "<nil>"
+		if gotTS != nil {
+			gotUID = gotTS.UID
+		}
+		t.Errorf("written data TS = %q, want %q (%s)", gotUID, targetTS.UID, targetTS.Description)
 	}
 }

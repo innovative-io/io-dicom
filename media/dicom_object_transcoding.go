@@ -129,7 +129,35 @@ func (obj *dicomObject) ChangeTransferSyntaxContext(ctx context.Context, outTS *
 		obj.TransferSyntax = outTS
 		return nil
 	}
+	// No pixel data element found. For non-image SOP classes and any object
+	// without pixel data, the tag encoding (explicit vs implicit VR, endianness)
+	// is the only thing that differs between transfer syntaxes. When both the
+	// source and target TS use the same tag encoding, we can just update the TS
+	// header without re-encoding any bytes — the resulting PDV will be identical.
+	// This is always safe for moves within the "explicit VR little endian" family
+	// (EVLE, JPEG Lossless, JPEG 2000, RLE, etc.) which share the same wire format
+	// for all non-pixel-data elements.
+	srcExplicit, srcBig := tsTagEncoding(obj.TransferSyntax.UID)
+	dstExplicit, dstBig := tsTagEncoding(outTS.UID)
+	if srcExplicit == dstExplicit && srcBig == dstBig {
+		obj.TransferSyntax = outTS
+		return nil
+	}
 	return fmt.Errorf("pixel data (7FE0,0010) not found: cannot convert from %s to %s", obj.TransferSyntax.UID, outTS.UID)
+}
+
+// tsTagEncoding returns the tag-level wire encoding properties for the given
+// transfer syntax UID. All DICOM transfer syntaxes except the two below use
+// explicit VR little-endian encoding for non-pixel-data elements.
+func tsTagEncoding(uid string) (explicitVR, bigEndian bool) {
+	switch uid {
+	case "1.2.840.10008.1.2": // Implicit VR Little Endian
+		return false, false
+	case "1.2.840.10008.1.2.2": // Explicit VR Big Endian (Retired)
+		return true, true
+	default:
+		return true, false
+	}
 }
 
 func (obj *dicomObject) beginEncapsulatedPixelData(index int) int {

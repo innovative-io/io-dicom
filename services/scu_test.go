@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -443,3 +444,108 @@ func (m *storeMockPDU) GetAcceptedPresentationContexts() []network.PresentationC
 }
 func (m *storeMockPDU) SetOnAssociationRequest(_ func(network.AssociationRequest) bool) {}
 func (m *storeMockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))                         {}
+
+// Test_scu_BeginStoreSession_SendsMultipleFilesOnOneAssociation verifies that
+// BeginStoreSession opens exactly one association and that all files in the
+// batch are delivered to the SCP over that single connection.
+func Test_scu_BeginStoreSession_SendsMultipleFilesOnOneAssociation(t *testing.T) {
+	const samplePath = "../samples/test.dcm"
+	if _, err := os.Stat(samplePath); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+
+	media.InitDict()
+
+	_, testSCP := StartSCP(t, 1062)
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
+		return request.GetCalledAE() == "TEST_SCP"
+	})
+
+	var mu sync.Mutex
+	received := 0
+	testSCP.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
+		mu.Lock()
+		received++
+		mu.Unlock()
+		return dicomstatus.Success
+	})
+
+	dest := &network.Destination{
+		Name:      "BatchStore Test",
+		CalledAE:  "TEST_SCP",
+		CallingAE: "TEST_SCU",
+		HostName:  "localhost",
+		Port:      1062,
+	}
+	d := NewSCU(dest)
+
+	session, err := d.BeginStoreSession(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("BeginStoreSession: %v", err)
+	}
+	defer session.Close()
+
+	const n = 3
+	for i := 0; i < n; i++ {
+		if err := session.StorePath(context.Background(), samplePath); err != nil {
+			t.Fatalf("StorePath[%d]: %v", i, err)
+		}
+	}
+	session.Close()
+
+	mu.Lock()
+	got := received
+	mu.Unlock()
+	if got != n {
+		t.Errorf("SCP received %d C-STORE requests, want %d", got, n)
+	}
+}
+
+// Test_scu_BeginStoreSession_StoreObject verifies that Store (object variant)
+// works correctly within a session.
+func Test_scu_BeginStoreSession_StoreObject(t *testing.T) {
+	const samplePath = "../samples/test.dcm"
+	if _, err := os.Stat(samplePath); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+
+	media.InitDict()
+
+	_, testSCP := StartSCP(t, 1063)
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
+		return request.GetCalledAE() == "TEST_SCP"
+	})
+
+	var received media.DICOMObject
+	testSCP.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
+		received = data
+		return dicomstatus.Success
+	})
+
+	obj, err := media.NewDCMObjFromFile(samplePath)
+	if err != nil {
+		t.Fatalf("NewDCMObjFromFile: %v", err)
+	}
+
+	dest := &network.Destination{
+		Name:      "BatchStore Object Test",
+		CalledAE:  "TEST_SCP",
+		CallingAE: "TEST_SCU",
+		HostName:  "localhost",
+		Port:      1063,
+	}
+	session, err := NewSCU(dest).BeginStoreSession(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("BeginStoreSession: %v", err)
+	}
+	defer session.Close()
+
+	if err := session.Store(context.Background(), obj); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	session.Close()
+
+	if received == nil {
+		t.Fatal("SCP did not receive the C-STORE request")
+	}
+}

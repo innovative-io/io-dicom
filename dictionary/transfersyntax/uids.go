@@ -7,23 +7,45 @@ type TransferSyntax struct {
 	Type        string
 }
 
+// supportedTransferSyntaxes lists every transfer syntax this implementation
+// can encode and decode. The ORDER matters: GetSupportedTransferSyntaxUIDs
+// returns UIDs in this order, which is used as the preference list when
+// proposing storage presentation contexts in a C-GET SCU association request.
+// The remote SCP (selectPreferredTransferSyntax) accepts the first TS from
+// this list that it supports, so placing lossless-compressed formats before
+// uncompressed ones means the SCP will deliver files in their native compressed
+// format (e.g., JPEG Lossless) without transcoding, rather than always
+// inflating to ILE. ILE is placed last as the universal legacy fallback.
+//
+// Preference order: lossless compressed → uncompressed explicit → lossy compressed
+// → video/audio → ILE (legacy implicit, last resort).
 var supportedTransferSyntaxes = []*TransferSyntax{
-	ImplicitVRLittleEndian,
+	JPEGLosslessSV1,
+	JPEGLossless,
+	JPEG2000Lossless,
+	HTJ2KLossless,
+	HTJ2KLosslessRPCL,
+	JPEGLSLossless,
+	RLELossless,
+	JPEGXLLossless,
 	ExplicitVRLittleEndian,
 	EncapsulatedUncompressedExplicitVRLittleEndian,
 	DeflatedExplicitVRLittleEndian,
 	DeflatedImageFrameCompression,
-	RLELossless,
-	JPEGLossless,
-	JPEGLosslessSV1,
 	JPEGBaseline8Bit,
 	JPEGExtended12Bit,
-	JPEGLSLossless,
 	JPEGLSNearLossless,
-	JPEG2000Lossless,
 	JPEG2000,
+	HTJ2K,
+	JPEGXLJPEGRecompression,
+	JPEGXL,
 	JPEG2000MCLossless,
 	JPEG2000MC,
+	JPIPHTJ2KReferenced,
+	JPIPHTJ2KReferencedDeflate,
+	SMPTEST211020UncompressedProgressiveActiveVideo,
+	SMPTEST211020UncompressedInterlacedActiveVideo,
+	SMPTEST211030PCMDigitalAudio,
 	MPEG2MPML,
 	MPEG2MPMLF,
 	MPEG2MPHL,
@@ -40,17 +62,7 @@ var supportedTransferSyntaxes = []*TransferSyntax{
 	MPEG4HP42STEREOF,
 	HEVCMP51,
 	HEVCM10P51,
-	SMPTEST211020UncompressedProgressiveActiveVideo,
-	SMPTEST211020UncompressedInterlacedActiveVideo,
-	SMPTEST211030PCMDigitalAudio,
-	JPEGXLLossless,
-	JPEGXLJPEGRecompression,
-	JPEGXL,
-	HTJ2KLossless,
-	HTJ2KLosslessRPCL,
-	HTJ2K,
-	JPIPHTJ2KReferenced,
-	JPIPHTJ2KReferencedDeflate,
+	ImplicitVRLittleEndian,
 }
 
 func GetTransferSyntaxFromName(name string) *TransferSyntax {

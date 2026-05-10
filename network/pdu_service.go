@@ -653,8 +653,22 @@ func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
 func (pdu *pduService) interogateAAssociateAC() bool {
 	pdu.AcceptedPresentationContexts = nil
 
+	// Build a PCID → abstract-syntax map from the outgoing RQ so we can
+	// annotate accepted contexts with their SOP class UID. The A-ASSOCIATE-AC
+	// wire format omits abstract syntax per DICOM PS3.8 §9.3.3.2. Without this
+	// backfill, selectPresentationContextIDForAbstractSyntax always fails on the
+	// SCU side and pdu.Write() falls back to the default PCID for every message,
+	// making PCID selection fragile when more than one context is negotiated.
+	rqAbsSyntax := make(map[byte]string, len(pdu.AssocRQ.GetPresContexts()))
+	for _, rqPC := range pdu.AssocRQ.GetPresContexts() {
+		rqAbsSyntax[rqPC.GetPresentationContextID()] = rqPC.GetAbstractSyntax().GetUID()
+	}
+
 	for _, presContextAccept := range pdu.AssocAC.GetPresContextAccepts() {
 		if presContextAccept.GetResult() == 0 {
+			if absSyn, ok := rqAbsSyntax[presContextAccept.GetPresentationContextID()]; ok {
+				presContextAccept.SetAbstractSyntax(absSyn)
+			}
 			pdu.AcceptedPresentationContexts = append(pdu.AcceptedPresentationContexts, presContextAccept)
 		}
 	}

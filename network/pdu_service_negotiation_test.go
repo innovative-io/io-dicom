@@ -68,6 +68,73 @@ func TestSelectPreferredTransferSyntaxRejectsKnownButUnsupported(t *testing.T) {
 	}
 }
 
+// TestInterogateAAssociateACBackfillsAbstractSyntaxFromRQ verifies that
+// interogateAAssociateAC populates abstract syntax on accepted contexts by
+// cross-referencing the outgoing RQ. Without this backfill,
+// selectPresentationContextIDForAbstractSyntax can never match on the SCU side
+// and pdu.Write falls back to the default PCID for every message.
+func TestInterogateAAssociateACBackfillsAbstractSyntaxFromRQ(t *testing.T) {
+	pdu := NewPDUService().(*pduService)
+
+	// Two RQ presentation contexts with explicit abstract syntaxes.
+	pc1 := NewPresentationContext()
+	pc1.SetPresentationContextID(1)
+	pc1.SetAbstractSyntax(sopclass.StudyRootQueryRetrieveInformationModelGet.UID)
+	pc1.AddTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+	pdu.AssocRQ.AddPresContexts(pc1)
+
+	pc3 := NewPresentationContext()
+	pc3.SetPresentationContextID(3)
+	pc3.SetAbstractSyntax(sopclass.CTImageStorage.UID)
+	pc3.AddTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+	pdu.AssocRQ.AddPresContexts(pc3)
+
+	// AC carries only PCID, result, and TS — no abstract syntax (PS3.8 §9.3.3.2).
+	a1 := NewPresentationContextAccept()
+	a1.SetPresentationContextID(1)
+	a1.SetResult(0)
+	a1.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+	pdu.AssocAC.AddPresContextAccept(a1)
+
+	a3 := NewPresentationContextAccept()
+	a3.SetPresentationContextID(3)
+	a3.SetResult(0)
+	a3.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian.UID)
+	pdu.AssocAC.AddPresContextAccept(a3)
+
+	if ok := pdu.interogateAAssociateAC(); !ok {
+		t.Fatal("interogateAAssociateAC() = false, want true")
+	}
+
+	if len(pdu.AcceptedPresentationContexts) != 2 {
+		t.Fatalf("AcceptedPresentationContexts len = %d, want 2", len(pdu.AcceptedPresentationContexts))
+	}
+
+	wantUID := map[byte]string{
+		1: sopclass.StudyRootQueryRetrieveInformationModelGet.UID,
+		3: sopclass.CTImageStorage.UID,
+	}
+	for _, pc := range pdu.AcceptedPresentationContexts {
+		want, ok := wantUID[pc.GetPresentationContextID()]
+		if !ok {
+			t.Errorf("unexpected PCID %d in AcceptedPresentationContexts", pc.GetPresentationContextID())
+			continue
+		}
+		if got := pc.GetAbstractSyntax().GetUID(); got != want {
+			t.Errorf("PCID %d abstract syntax = %q, want %q", pc.GetPresentationContextID(), got, want)
+		}
+	}
+
+	// selectPresentationContextIDForAbstractSyntax must now work by SOP class UID.
+	pcid, ok := selectPresentationContextIDForAbstractSyntax(pdu.AcceptedPresentationContexts, sopclass.CTImageStorage.UID)
+	if !ok {
+		t.Fatal("selectPresentationContextIDForAbstractSyntax(CTImageStorage) ok=false after backfill, want true")
+	}
+	if pcid != 3 {
+		t.Fatalf("selectPresentationContextIDForAbstractSyntax(CTImageStorage) = %d, want 3", pcid)
+	}
+}
+
 func TestInterogateAAssociateACAcceptsBigEndianOnlyContext(t *testing.T) {
 	pdu := NewPDUService().(*pduService)
 	accepted := NewPresentationContextAccept()

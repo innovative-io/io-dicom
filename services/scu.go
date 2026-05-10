@@ -18,6 +18,19 @@ import (
 	"github.com/innovative-io/io-dicom/network/priority"
 )
 
+// StoreSession is a long-lived C-STORE session over a single DICOM association.
+// Open one with SCU.BeginStoreSession, call Store or StorePath for each
+// instance, then call Close when done. All objects are sent over the same TCP
+// connection, eliminating the per-file association overhead.
+type StoreSession interface {
+	// Store sends a DICOM object as a C-STORE-RQ sub-operation.
+	Store(ctx context.Context, obj media.DICOMObject) error
+	// StorePath loads a DICOM file from disk and sends it as a C-STORE-RQ.
+	StorePath(ctx context.Context, path string) error
+	// Close releases the underlying DICOM association (sends A-RELEASE-RQ).
+	Close()
+}
+
 // SCU - interface to a scu
 type SCU interface {
 	EchoSCU(ctx context.Context, timeout int) error
@@ -30,6 +43,11 @@ type SCU interface {
 	// requiring the object to be written to disk first. The object must contain
 	// a SOPClassUID tag.
 	StoreObjectSCU(ctx context.Context, obj media.DICOMObject, timeout int) error
+	// BeginStoreSession opens a single DICOM association to the remote SCP,
+	// proposing all known storage SOP classes, and returns a StoreSession that
+	// can be used to send multiple instances over that one connection. Call
+	// Close on the session when all instances have been sent.
+	BeginStoreSession(ctx context.Context, timeout int) (StoreSession, error)
 	SetOnCFindResult(f func(result media.DICOMObject))
 	SetOnCMoveResult(f func(result media.DICOMObject))
 	// SetOnCGetStore registers a callback invoked for each C-STORE sub-operation
@@ -284,6 +302,60 @@ func (d *scu) GetNegotiatedContexts() []network.PresentationContextAccept {
 	return d.negotiatedContexts
 }
 
+// storeSession holds an open DICOM association for batch C-STORE operations.
+type storeSession struct {
+	d   *scu
+	pdu network.PDUService
+}
+
+func (ss *storeSession) Store(ctx context.Context, obj media.DICOMObject) error {
+	if err := ss.d.writeStoreRQ(ctx, ss.pdu, obj); err != nil {
+		return err
+	}
+	status, err := dimse.CStoreReadRSP(ss.pdu)
+	if err != nil {
+		return err
+	}
+	if status != dicomstatus.Success {
+		return fmt.Errorf("scu: StoreSession: C-Store failed with status 0x%04X (%s)", status, dicomstatus.Description(status))
+	}
+	return nil
+}
+
+func (ss *storeSession) StorePath(ctx context.Context, path string) error {
+	obj, err := media.NewDCMObjFromFile(path)
+	if err != nil {
+		return err
+	}
+	return ss.Store(ctx, obj)
+}
+
+func (ss *storeSession) Close() {
+	ss.pdu.Close()
+}
+
+// BeginStoreSession opens a single DICOM association proposing all known
+// storage SOP classes and transfer syntaxes, and returns a StoreSession for
+// sending multiple instances over that one connection.
+func (d *scu) BeginStoreSession(ctx context.Context, timeout int) (StoreSession, error) {
+	pdu := network.NewPDUService()
+	storageTransferSyntaxes := transfersyntax.GetSupportedTransferSyntaxUIDs()
+	storageClasses := sopclass.GetStorageSOPClasses()
+	contexts := make([]associationPresentationContext, 0, len(storageClasses))
+	for _, storageClass := range storageClasses {
+		contexts = append(contexts, associationPresentationContext{
+			abstractSyntax:   storageClass.UID,
+			transferSyntaxes: storageTransferSyntaxes,
+		})
+	}
+	if err := d.openAssociationWithContexts(ctx, pdu, contexts, timeout); err != nil {
+		pdu.Close()
+		return nil, err
+	}
+	d.negotiatedContexts = pdu.GetAcceptedPresentationContexts()
+	return &storeSession{d: d, pdu: pdu}, nil
+}
+
 func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUService, contexts []associationPresentationContext, timeout int) error {
 	pdu.SetCallingAE(d.destination.CallingAE)
 	pdu.SetCalledAE(d.destination.CalledAE)
@@ -324,7 +396,21 @@ func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUSe
 }
 
 func (d *scu) writeStoreRQ(ctx context.Context, pdu network.PDUService, DDO media.DICOMObject) error {
-	PCID := pdu.GetPresentationContextID()
+	// Find the PCID for this object's SOP class. When multiple SOP classes are
+	// negotiated (e.g. in a batch store session) this picks the correct context
+	// rather than relying on the last-used PCID, ensuring the right transfer
+	// syntax is selected for transcoding.
+	var PCID byte
+	sopUID := DDO.GetString(tags.SOPClassUID)
+	for _, pc := range pdu.GetAcceptedPresentationContexts() {
+		if pc.GetAbstractSyntax().GetUID() == sopUID {
+			PCID = pc.GetPresentationContextID()
+			break
+		}
+	}
+	if PCID == 0 {
+		PCID = pdu.GetPresentationContextID()
+	}
 	if PCID == 0 {
 		return errors.New("scu: writeStoreRQ: no accepted presentation context")
 	}

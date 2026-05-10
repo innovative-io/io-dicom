@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
+	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/dimse"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
@@ -597,13 +598,32 @@ type cgetStoreRequest struct {
 	reply chan error
 }
 
-// cgetStoreSubop loads a DICOM file, sends it to the SCU as a C-STORE-RQ, and
-// reads back the C-STORE-RSP. Must be called from the PDU event loop goroutine.
-func (s *scp) cgetStoreSubop(pdu network.PDUService, path string) error {
+// cgetStoreSubop loads a DICOM file, transcodes it to the negotiated transfer
+// syntax for its SOP class, sends it to the SCU as a C-STORE-RQ, and reads
+// back the C-STORE-RSP. Must be called from the PDU event loop goroutine.
+func (s *scp) cgetStoreSubop(ctx context.Context, pdu network.PDUService, path string) error {
 	dco, err := media.NewDCMObjFromFile(path)
 	if err != nil {
 		return fmt.Errorf("scp: C-GET: load %q: %w", path, err)
 	}
+
+	// Find the transfer syntax negotiated for this SOP class and transcode if
+	// it differs from the file's native encoding. ChangeTransferSyntaxContext is
+	// a no-op when both UIDs are the same, so this is always safe to call.
+	sopUID := dco.GetString(tags.SOPClassUID)
+	var negotiatedTS *transfersyntax.TransferSyntax
+	for _, pc := range pdu.GetAcceptedPresentationContexts() {
+		if pc.GetAbstractSyntax().GetUID() == sopUID {
+			negotiatedTS = transfersyntax.GetTransferSyntaxFromUID(pc.GetTrnSyntax().GetUID())
+			break
+		}
+	}
+	if negotiatedTS != nil {
+		if err := dco.ChangeTransferSyntaxContext(ctx, negotiatedTS); err != nil {
+			return fmt.Errorf("scp: C-GET: transcode to %s: %w", negotiatedTS.Name, err)
+		}
+	}
+
 	if err := dimse.CStoreWriteRQ(pdu, dco, priority.Medium); err != nil {
 		return fmt.Errorf("scp: C-GET: C-STORE-RQ: %w", err)
 	}
@@ -673,7 +693,7 @@ func (s *scp) runCGetOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.
 		select {
 		case req := <-storeReqCh:
 			// Perform C-STORE sub-operation synchronously on the PDU event loop.
-			req.reply <- s.cgetStoreSubop(pdu, req.path)
+			req.reply <- s.cgetStoreSubop(ctx, pdu, req.path)
 
 		case progress := <-progressCh:
 			if err := state.applyProgress(progress.Remaining, progress.Completed, progress.Failed, progress.Warnings); err != nil {

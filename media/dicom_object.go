@@ -825,6 +825,47 @@ func decompressSingleFrame(ctx context.Context, tsUID string, compressed []byte,
 		transfersyntax.ExplicitVRLittleEndian.UID,
 		transfersyntax.ImplicitVRLittleEndian.UID:
 		if int(outLen) > len(compressed) {
+			// The fragment is smaller than the expected raw frame size. This
+			// occurs when a non-conformant C-GET SCP accepts an uncompressed
+			// transfer syntax during association negotiation but sends the
+			// image in its native compressed format without transcoding. Try
+			// to auto-detect the actual encoding from the byte signature.
+			if len(compressed) >= 2 {
+				b0, b1 := compressed[0], compressed[1]
+				switch {
+				case b0 == 0xFF && b1 == 0xD8:
+					// JPEG family (SOI marker). Check for JPEG-LS (SOF55 = 0xFF 0xF7).
+					if len(compressed) >= 4 && compressed[2] == 0xFF && compressed[3] == 0xF7 {
+						return jpegls.JLSdecodeContext(ctx, compressed, compLen, out)
+					}
+					// JPEG lossless / baseline / extended: dispatch by SOF precision.
+					prec := jpeg.SOFPrecision(compressed)
+					if prec == 0 {
+						// Fall back to bitsa heuristic when SOF is unreadable.
+						if bitsa == 8 {
+							return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
+						}
+						if bitsa <= 12 {
+							return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
+						}
+						return jpeg.DIJG16decodeContext(ctx, compressed, compLen, out, outLen)
+					}
+					switch {
+					case prec == 8:
+						return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
+					case prec <= 12:
+						return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
+					default:
+						return jpeg.DIJG16decodeContext(ctx, compressed, compLen, out, outLen)
+					}
+				case b0 == 0xFF && b1 == 0x4F:
+					// JPEG 2000 / HTJ2K codestream (SOC marker).
+					return jpeg2000.J2KdecodeContext(ctx, compressed, compLen, out)
+				case b0 == 0xFF && b1 == 0x0A:
+					// JPEG XL bare codestream.
+					return jpegxl.JXLdecodeContext(ctx, compressed, compLen, out)
+				}
+			}
 			return errors.New("encapsulated uncompressed frame too small")
 		}
 		copy(out, compressed[:outLen])
