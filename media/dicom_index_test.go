@@ -9,17 +9,17 @@ import (
 )
 
 // sampleFilesForIndex are relative paths to sample files used for index tests.
-// All exist in the samples/ directory checked in alongside the tests.
+// All exist in the testdata/ directory checked in alongside the tests.
 var sampleFilesForIndex = []string{
-	"../samples/jpeg8.dcm",
-	"../samples/test2.dcm",
-	"../samples/cornerstone-CTImage-explicit-le.dcm",
-	"../samples/cornerstone-CTImage-implicit-le.dcm",
-	"../samples/cornerstone-CTImage-big-endian-explicit.dcm",
-	"../samples/cornerstone-CTImage-jpeg2000.dcm",
-	"../samples/cornerstone-CTImage-jpegls-lossless.dcm",
-	"../samples/cornerstone-CTImage-rle-lossless.dcm",
-	"../samples/highdicom-ct_image.dcm",
+	"../testdata/jpeg8.dcm",
+	"../testdata/test2.dcm",
+	"../testdata/cornerstone-CTImage-explicit-le.dcm",
+	"../testdata/cornerstone-CTImage-implicit-le.dcm",
+	"../testdata/cornerstone-CTImage-big-endian-explicit.dcm",
+	"../testdata/cornerstone-CTImage-jpeg2000.dcm",
+	"../testdata/cornerstone-CTImage-jpegls-lossless.dcm",
+	"../testdata/cornerstone-CTImage-rle-lossless.dcm",
+	"../testdata/highdicom-ct_image.dcm",
 }
 
 // TestParseIndexFromFile_Smoke verifies basic success on well-known sample files.
@@ -153,7 +153,7 @@ func TestParseIndexFromBytes_TooSmall(t *testing.T) {
 // TestParseIndexFromBytes_FileBytesMatchFile verifies that ParseIndexFromBytes
 // and ParseIndexFromFile produce identical records for the same file.
 func TestParseIndexFromBytes_FileBytesMatchFile(t *testing.T) {
-	path := "../samples/jpeg8.dcm"
+	path := "../testdata/jpeg8.dcm"
 	if _, err := os.Stat(path); err != nil {
 		t.Skipf("sample fixtures unavailable: %v", err)
 	}

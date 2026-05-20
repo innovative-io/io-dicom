@@ -2,7 +2,7 @@
 
 This directory contains sample DICOM files used for testing, validation, and demonstration purposes in the io-dicom library.
 
-The `samples/` directory is intentionally ignored by git. Populate it locally with the generation and acquisition scripts before running sample-dependent tests or benchmarks.
+The `testdata/` directory is intentionally ignored by git. Populate it locally with the generation and acquisition scripts before running sample-dependent tests or benchmarks.
 
 ## Current Sample Collection
 
@@ -138,7 +138,7 @@ go run ./cmd/generate-sample-dicoms/main.go -output samples
 ## File Organization
 
 ```
-samples/
+testdata/
 ├── test.dcm                 # Core test files
 ├── test2.dcm
 ├── test2-2.dcm
@@ -172,7 +172,7 @@ import (
 )
 
 func TestDICOMParsing(t *testing.T) {
-    file, err := os.Open("samples/test.dcm")
+    file, err := os.Open("testdata/test.dcm")
     if err != nil {
         t.Fatal(err)
     }
@@ -192,9 +192,9 @@ func TestDICOMParsing(t *testing.T) {
 ```go
 func TestCodecSupport(t *testing.T) {
     tests := []string{
-        "samples/jpeg8.dcm",
-        "samples/jpeg2000.dcm",
-        "samples/rle_gray.dcm",
+        "testdata/jpeg8.dcm",
+        "testdata/jpeg2000.dcm",
+        "testdata/rle_gray.dcm",
     }
     
     for _, path := range tests {
@@ -216,7 +216,7 @@ Downloaded sample files are sourced from public projects with their own licensin
 When using these files:
 1. Respect the original license terms
 2. Maintain attribution to source projects
-3. Store files in `samples/` directory only
+3. Store files in `testdata/` directory only
 4. Add to `.gitignore` for large files (>50MB)
 
 ## Troubleshooting
@@ -224,7 +224,7 @@ When using these files:
 ### Script fails to download
 - Check internet connectivity
 - GitHub/alternate sources may be rate-limited or temporarily unavailable
-- Try manual download: `curl -L <url> -o samples/<filename>`
+- Try manual download: `curl -L <url> -o testdata/<filename>`
 
 ### Files are too large
 - Git may limit file sizes; consider running `.gitignore` rules

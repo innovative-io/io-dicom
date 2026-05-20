@@ -20,7 +20,6 @@ import (
 	"github.com/innovative-io/io-dicom/network/dicomcommand"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
 	"github.com/innovative-io/io-dicom/network/priority"
-	"github.com/innovative-io/io-dicom/utils"
 )
 
 // TestSCP_OnCEchoRequest verifies that a custom C-ECHO handler is invoked and
@@ -104,7 +103,7 @@ func TestSCP_OnCMoveRequest(t *testing.T) {
 	}
 	scu := NewSCU(dest)
 
-	status, err := scu.MoveSCU(context.Background(), "DEST_AE", utils.DefaultCMoveRequest("1.2.3.4"), 0)
+	status, err := scu.MoveSCU(context.Background(), "DEST_AE", media.DefaultCMoveRequest("1.2.3.4"), 0)
 	if err != nil {
 		t.Fatalf("MoveSCU: %v", err)
 	}
@@ -798,7 +797,7 @@ func writeCMoveRQWithMessageID(pdu network.PDUService, dataObj media.DICOMObject
 // back to the SCU over the same association when storeFile is called, and that
 // the final C-GET-RSP reports Success.
 func TestSCP_CGetStoreSubop(t *testing.T) {
-	const samplePath = "../samples/test2.dcm"
+	const samplePath = "../testdata/test2.dcm"
 	if _, err := os.Stat(samplePath); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
@@ -967,7 +966,7 @@ func (m *cgetStoreSubopMockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))        
 // SCP stores a file in ELE but the SCU only accepted ILE, the pixel data must
 // be re-encoded before it is sent back.
 func TestCGetStoreSubop_TranscodesToNegotiatedTS(t *testing.T) {
-	const samplePath = "../samples/test.dcm"
+	const samplePath = "../testdata/test.dcm"
 	if _, err := os.Stat(samplePath); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}

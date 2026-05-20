@@ -1,4 +1,4 @@
-package implementation
+package implclass
 
 import (
 	"reflect"

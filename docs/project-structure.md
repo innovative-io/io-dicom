@@ -21,17 +21,17 @@ This document defines package responsibilities and the intended dependency direc
   - Static DICOM dictionaries and UID/tag mappings.
 - `codecs/jpeg/`, `codecs/jpeg2000/`, `transcoder/`
   - Canonical pixel transcoding and codec integration packages.
-- `database/`
-  - Storage layer and sqlite integration.
-- `utils/`, `uuids/`, `clients/`, `implementation/`
+- `uuids/`, `version/`
   - Shared supporting modules.
-- `samples/`
+- `internal/implclass/`
+  - Implementation class UID and version metadata (internal; not part of the public API).
+- `testdata/`
   - Test fixtures and manual validation input files.
 
 ## Dependency Guidelines
 
 - Keep dependency flow one-way where possible:
-  - `cmd/*` -> `services`, `media`, `utils`
+  - `cmd/*` -> `services`, `media`
   - `services` -> `network`, `dimse`, `media`, `dictionary`
   - `media` -> `dictionary`, `codecs/*`, `transcoder`
 - Avoid introducing dependencies from low-level packages to CLI packages.
@@ -40,7 +40,7 @@ This document defines package responsibilities and the intended dependency direc
 ## Folder Hygiene
 
 - Add a `README.md` for each binary folder under `cmd/`.
-- Keep sample files in `samples/`; do not store generated runtime artifacts there.
+- Keep sample files in `testdata/`; do not store generated runtime artifacts there.
 - Prefer package-local tests (`*_test.go`) next to implementation files.
 
 ## Suggested Workflow For Future Reorganization

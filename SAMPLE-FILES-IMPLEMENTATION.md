@@ -98,7 +98,7 @@ bash scripts/acquire-sample-dicoms.sh
 import "os"
 
 func TestDICOMParsing(t *testing.T) {
-    file, _ := os.Open("samples/synthetic-ct.dcm")
+    file, _ := os.Open("testdata/synthetic-ct.dcm")
     defer file.Close()
     // Parse and validate DICOM file
 }
@@ -136,7 +136,7 @@ func TestDICOMParsing(t *testing.T) {
 
 ```
 io-dicom/
-├── samples/                      # Sample DICOM files
+├── testdata/                      # Sample DICOM files
 │   ├── test*.dcm               # Original test files
 │   ├── synthetic-*.dcm         # Generated synthetic files
 │   ├── rle_*.dcm

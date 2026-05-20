@@ -13,5 +13,5 @@ datastore
 .venv
 .build
 .local
-samples/
+testdata/
 bench/transcode/dcmtk_transcode_bench

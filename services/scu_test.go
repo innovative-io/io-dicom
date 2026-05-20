@@ -17,7 +17,6 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
-	"github.com/innovative-io/io-dicom/utils"
 )
 
 func Test_scu_EchoSCU(t *testing.T) {
@@ -126,7 +125,7 @@ func Test_scu_FindSCU(t *testing.T) {
 				},
 			},
 			args: args{
-				Query:   utils.DefaultCFindRequest(),
+				Query:   media.DefaultCFindRequest(),
 				timeout: 0,
 			},
 			wantErr: false,
@@ -153,7 +152,7 @@ func Test_scu_FindSCU(t *testing.T) {
 }
 
 func Test_scu_StoreSCU(t *testing.T) {
-	if _, err := os.Stat("../samples/test.dcm"); err != nil {
+	if _, err := os.Stat("../testdata/test.dcm"); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
 
@@ -196,7 +195,7 @@ func Test_scu_StoreSCU(t *testing.T) {
 				},
 			},
 			args: args{
-				FileName: "../samples/test.dcm",
+				FileName: "../testdata/test.dcm",
 				timeout:  0,
 			},
 			wantErr: false,
@@ -213,7 +212,7 @@ func Test_scu_StoreSCU(t *testing.T) {
 }
 
 func Test_scu_StoreObjectSCU(t *testing.T) {
-	if _, err := os.Stat("../samples/test.dcm"); err != nil {
+	if _, err := os.Stat("../testdata/test.dcm"); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
 
@@ -229,7 +228,7 @@ func Test_scu_StoreObjectSCU(t *testing.T) {
 		return dicomstatus.Success
 	})
 
-	obj, err := media.NewDCMObjFromFile("../samples/test.dcm")
+	obj, err := media.NewDCMObjFromFile("../testdata/test.dcm")
 	if err != nil {
 		t.Fatalf("NewDCMObjFromFile: %v", err)
 	}
@@ -295,7 +294,7 @@ func Test_scu_GetSCU(t *testing.T) {
 }
 
 func Test_scu_GetSCUReceivesStoreSuboperations(t *testing.T) {
-	const samplePath = "../samples/test2.dcm"
+	const samplePath = "../testdata/test2.dcm"
 	if _, err := os.Stat(samplePath); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
@@ -383,12 +382,12 @@ func StartSCP(t testing.TB, port int) (func(t testing.TB), SCP) {
 // from the file's native syntax (e.g. EVLE file sent to a peer that only
 // accepted ImplicitVRLittleEndian).
 func Test_scu_writeStoreRQ_TranscodesOnMismatch(t *testing.T) {
-	if _, err := os.Stat("../samples/test.dcm"); err != nil {
+	if _, err := os.Stat("../testdata/test.dcm"); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
 	media.InitDict()
 
-	DDO, err := media.NewDCMObjFromFile("../samples/test.dcm")
+	DDO, err := media.NewDCMObjFromFile("../testdata/test.dcm")
 	if err != nil {
 		t.Fatalf("load test.dcm: %v", err)
 	}
@@ -449,7 +448,7 @@ func (m *storeMockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))                 
 // BeginStoreSession opens exactly one association and that all files in the
 // batch are delivered to the SCP over that single connection.
 func Test_scu_BeginStoreSession_SendsMultipleFilesOnOneAssociation(t *testing.T) {
-	const samplePath = "../samples/test.dcm"
+	const samplePath = "../testdata/test.dcm"
 	if _, err := os.Stat(samplePath); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
@@ -504,7 +503,7 @@ func Test_scu_BeginStoreSession_SendsMultipleFilesOnOneAssociation(t *testing.T)
 // Test_scu_BeginStoreSession_StoreObject verifies that Store (object variant)
 // works correctly within a session.
 func Test_scu_BeginStoreSession_StoreObject(t *testing.T) {
-	const samplePath = "../samples/test.dcm"
+	const samplePath = "../testdata/test.dcm"
 	if _, err := os.Stat(samplePath); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}

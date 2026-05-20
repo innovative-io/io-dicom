@@ -15,13 +15,13 @@ test:
 	go test ./...
 
 test-tags:
-	./tools/test_codec_tags.sh
+	./scripts/test_codec_tags.sh
 
 deps-from-source:
-	./tools/build_codec_deps_from_source.sh
+	./scripts/build_codec_deps_from_source.sh
 
 build-native:
-	PREFIX="$$PWD/.local/codec-deps" WORK_DIR="$$PWD/.build/codec-deps" JOBS="8" ./tools/build_codec_deps_from_source.sh
+	PREFIX="$$PWD/.local/codec-deps" WORK_DIR="$$PWD/.build/codec-deps" JOBS="8" ./scripts/build_codec_deps_from_source.sh
 	. "$$PWD/.local/codec-deps/env.sh" && go build -tags '$(NATIVE_CODEC_TAGS)' ./... && make contract-check
 
 transfer-syntax-matrix:
@@ -30,5 +30,5 @@ transfer-syntax-matrix:
 contract-check:
 	make transfer-syntax-matrix
 	go test ./dictionary/transfersyntax ./media
-	./tools/test_codec_tags.sh
+	./scripts/test_codec_tags.sh
 	go test ./...

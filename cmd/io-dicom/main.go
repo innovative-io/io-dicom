@@ -21,7 +21,6 @@ import (
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
 	"github.com/innovative-io/io-dicom/services"
-	"github.com/innovative-io/io-dicom/utils"
 )
 
 var version string
@@ -109,7 +108,7 @@ func main() {
 		scp.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, queryLevel string, query media.DICOMObject, emit func(media.DICOMObject)) (services.CFindResult, error) {
 			query.DumpTags(os.Stdout)
 			for i := 0; i < 10; i++ {
-				emit(utils.GenerateCFindRequest())
+				emit(media.GenerateCFindRequest())
 			}
 			return services.CFindResult{Status: dicomstatus.Success}, nil
 		})
@@ -194,7 +193,7 @@ func main() {
 		slog.Info("CEcho was successful")
 	}
 	if *cfind {
-		request := utils.DefaultCFindRequest()
+		request := media.DefaultCFindRequest()
 		scu := services.NewSCU(destination)
 		scu.SetOnCFindResult(func(result media.DICOMObject) {
 			log.Printf("Found study %s\n", result.GetString(tags.StudyInstanceUID))
@@ -241,7 +240,7 @@ func main() {
 			log.Fatalln("studyuid is required for a C-Move")
 		}
 
-		request := utils.DefaultCMoveRequest(*studyUID)
+		request := media.DefaultCMoveRequest(*studyUID)
 
 		scu := services.NewSCU(destination)
 		_, err := scu.MoveSCU(context.Background(), *destinationAE, request, 0)

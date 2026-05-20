@@ -13,13 +13,13 @@ import (
 
 func TestNewDCMObjFromFile(t *testing.T) {
 	InitDict()
-	if _, err := os.Stat("../samples/test2.dcm"); err != nil {
+	if _, err := os.Stat("../testdata/test2.dcm"); err != nil {
 		t.Skipf("sample fixtures unavailable: %v", err)
 	}
-	if _, err := os.Stat("../samples/test2-2.dcm"); err != nil {
+	if _, err := os.Stat("../testdata/test2-2.dcm"); err != nil {
 		t.Skipf("sample fixtures unavailable: %v", err)
 	}
-	if _, err := os.Stat("../samples/test2-3.dcm"); err != nil {
+	if _, err := os.Stat("../testdata/test2-3.dcm"); err != nil {
 		t.Skipf("sample fixtures unavailable: %v", err)
 	}
 
@@ -34,19 +34,19 @@ func TestNewDCMObjFromFile(t *testing.T) {
 	}{
 		{
 			name:          "Should load DICOM file from bugged DICOM written by us",
-			args:          args{fileName: "../samples/test2-2.dcm"},
+			args:          args{fileName: "../testdata/test2-2.dcm"},
 			wantTagsCount: 116,
 			wantErr:       false,
 		},
 		{
 			name:          "Should load DICOM file from post bugged DICOM written by us",
-			args:          args{fileName: "../samples/test2-3.dcm"},
+			args:          args{fileName: "../testdata/test2-3.dcm"},
 			wantTagsCount: 116,
 			wantErr:       false,
 		},
 		{
 			name:          "Should load DICOM file",
-			args:          args{fileName: "../samples/test2.dcm"},
+			args:          args{fileName: "../testdata/test2.dcm"},
 			wantTagsCount: 116,
 			wantErr:       false,
 		},
@@ -67,10 +67,10 @@ func TestNewDCMObjFromFile(t *testing.T) {
 }
 
 func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
-	if _, err := os.Stat("../samples/test2.dcm"); err != nil {
+	if _, err := os.Stat("../testdata/test2.dcm"); err != nil {
 		t.Skipf("sample fixtures unavailable: %v", err)
 	}
-	if _, err := os.Stat("../samples/jpeg8.dcm"); err != nil {
+	if _, err := os.Stat("../testdata/jpeg8.dcm"); err != nil {
 		t.Skipf("sample fixtures unavailable: %v", err)
 	}
 
@@ -85,205 +85,205 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 	}{
 		{
 			name:     "Should change transfer syntax to ImplicitVRLittleEndian",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.ImplicitVRLittleEndian},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to ExplicitVRLittleEndian",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.ExplicitVRLittleEndian},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to EncapsulatedUncompressedExplicitVRLittleEndian",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to DeflatedImageFrameCompression",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.DeflatedImageFrameCompression},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to ExplicitVRBigEndian",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.ExplicitVRBigEndian},
 			wantErr:  true,
 		},
 		{
 			name:     "Should change transfer syntax to RLELossless",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.RLELossless},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEGLosslessSV1",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGLosslessSV1},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEGBaseline8Bit",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGBaseline8Bit},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEGExtended12Bit",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGExtended12Bit},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEGLSLossless",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGLSLossless},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEGLSNearLossless",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGLSNearLossless},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000Lossless",
-			fileName: "../samples/jpeg8.dcm",
+			fileName: "../testdata/jpeg8.dcm",
 			args:     args{transfersyntax.JPEG2000Lossless},
 			wantErr:  true,
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEG2000},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000MCLossless",
-			fileName: "../samples/jpeg8.dcm",
+			fileName: "../testdata/jpeg8.dcm",
 			args:     args{transfersyntax.JPEG2000MCLossless},
 			wantErr:  true,
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000MC",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEG2000MC},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2KLossless",
-			fileName: "../samples/jpeg8.dcm",
+			fileName: "../testdata/jpeg8.dcm",
 			args:     args{transfersyntax.HTJ2KLossless},
 			wantErr:  true,
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2KLosslessRPCL",
-			fileName: "../samples/jpeg8.dcm",
+			fileName: "../testdata/jpeg8.dcm",
 			args:     args{transfersyntax.HTJ2KLosslessRPCL},
 			wantErr:  true,
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2K",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.HTJ2K},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEGXLLossless",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGXLLossless},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEGXLJPEGRecompression",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGXLJPEGRecompression},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEGXL",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGXL},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to MPEG2MPML",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.MPEG2MPML},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to MPEG2MPMLF",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.MPEG2MPMLF},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to MPEG2MPHL",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.MPEG2MPHL},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to MPEG2MPHLF",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.MPEG2MPHLF},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to MPEG4HP41",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.MPEG4HP41},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to MPEG4HP41F",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.MPEG4HP41F},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to HEVCMP51",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.HEVCMP51},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to HEVCM10P51",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.HEVCM10P51},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to SMPTEST211020UncompressedProgressiveActiveVideo",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.SMPTEST211020UncompressedProgressiveActiveVideo},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to SMPTEST211020UncompressedInterlacedActiveVideo",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.SMPTEST211020UncompressedInterlacedActiveVideo},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to SMPTEST211030PCMDigitalAudio",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.SMPTEST211030PCMDigitalAudio},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPIPHTJ2KReferenced",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPIPHTJ2KReferenced},
 			wantErr:  false,
 		},
 		{
 			name:     "Should change transfer syntax to JPIPHTJ2KReferencedDeflate",
-			fileName: "../samples/test2.dcm",
+			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPIPHTJ2KReferencedDeflate},
 			wantErr:  false,
 		},

@@ -56,7 +56,7 @@ jobs:
           PREFIX: ${{ github.workspace }}/.local/codec-deps
           WORK_DIR: ${{ github.workspace }}/.build/codec-deps
           JOBS: 4
-        run: ./tools/build_codec_deps_from_source.sh
+        run: ./scripts/build_codec_deps_from_source.sh
 
       - name: Load codec dependency environment
         env:

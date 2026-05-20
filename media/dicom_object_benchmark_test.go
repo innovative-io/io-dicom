@@ -76,27 +76,27 @@ func benchmarkWriteToBytes(b *testing.B, fileName string) {
 }
 
 func BenchmarkNewDCMObjFromFile_Test2(b *testing.B) {
-	benchmarkNewDCMObjFromFile(b, "../samples/test2.dcm")
+	benchmarkNewDCMObjFromFile(b, "../testdata/test2.dcm")
 }
 
 func BenchmarkNewDCMObjFromBytes_Test2(b *testing.B) {
-	benchmarkNewDCMObjFromBytes(b, "../samples/test2.dcm")
+	benchmarkNewDCMObjFromBytes(b, "../testdata/test2.dcm")
 }
 
 func BenchmarkNewDCMObjFromFile_JPEG8(b *testing.B) {
-	benchmarkNewDCMObjFromFile(b, "../samples/jpeg8.dcm")
+	benchmarkNewDCMObjFromFile(b, "../testdata/jpeg8.dcm")
 }
 
 func BenchmarkNewDCMObjFromBytes_JPEG8(b *testing.B) {
-	benchmarkNewDCMObjFromBytes(b, "../samples/jpeg8.dcm")
+	benchmarkNewDCMObjFromBytes(b, "../testdata/jpeg8.dcm")
 }
 
 func BenchmarkWriteToBytes_Test2(b *testing.B) {
-	benchmarkWriteToBytes(b, "../samples/test2.dcm")
+	benchmarkWriteToBytes(b, "../testdata/test2.dcm")
 }
 
 func BenchmarkWriteToBytes_JPEG8(b *testing.B) {
-	benchmarkWriteToBytes(b, "../samples/jpeg8.dcm")
+	benchmarkWriteToBytes(b, "../testdata/jpeg8.dcm")
 }
 
 // --- ParseIndex benchmarks (fast index path) ---
@@ -141,17 +141,17 @@ func benchmarkParseIndexFromBytes(b *testing.B, fileName string) {
 }
 
 func BenchmarkParseIndexFromFile_Test2(b *testing.B) {
-	benchmarkParseIndexFromFile(b, "../samples/test2.dcm")
+	benchmarkParseIndexFromFile(b, "../testdata/test2.dcm")
 }
 
 func BenchmarkParseIndexFromFile_JPEG8(b *testing.B) {
-	benchmarkParseIndexFromFile(b, "../samples/jpeg8.dcm")
+	benchmarkParseIndexFromFile(b, "../testdata/jpeg8.dcm")
 }
 
 func BenchmarkParseIndexFromBytes_Test2(b *testing.B) {
-	benchmarkParseIndexFromBytes(b, "../samples/test2.dcm")
+	benchmarkParseIndexFromBytes(b, "../testdata/test2.dcm")
 }
 
 func BenchmarkParseIndexFromBytes_JPEG8(b *testing.B) {
-	benchmarkParseIndexFromBytes(b, "../samples/jpeg8.dcm")
+	benchmarkParseIndexFromBytes(b, "../testdata/jpeg8.dcm")
 }

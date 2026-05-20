@@ -7,7 +7,7 @@
 # Usage: ./scripts/generate-sample-dicoms.sh
 # 
 
-SAMPLES_DIR="samples"
+SAMPLES_DIR="testdata"
 GENERATOR_BIN="cmd/generate-sample-dicoms/main"
 
 echo "Generating synthetic DICOM files using io-dicom library..."

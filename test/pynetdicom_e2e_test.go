@@ -1,6 +1,6 @@
 //go:build e2e
 
-package e2e
+package test
 
 // Tests for io-dicom SCU functionality against a pynetdicom SCP.
 //
@@ -14,7 +14,7 @@ package e2e
 //
 // Run with:
 //
-//	go test -tags e2e -v ./e2e/... -run Pynetdicom
+//	go test -tags e2e -v ./test/... -run Pynetdicom
 
 import (
 	"bytes"

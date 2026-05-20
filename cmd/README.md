@@ -268,13 +268,13 @@ The script downloads, compiles, and installs all codec libraries under
 `$HOME/.local/codec-deps` (or a custom `PREFIX`):
 
 ```bash
-./tools/build_codec_deps_from_source.sh
+./scripts/build_codec_deps_from_source.sh
 ```
 
 Custom prefix or parallel jobs:
 
 ```bash
-PREFIX=$PWD/.local/codec-deps JOBS=8 ./tools/build_codec_deps_from_source.sh
+PREFIX=$PWD/.local/codec-deps JOBS=8 ./scripts/build_codec_deps_from_source.sh
 ```
 
 The script writes an `env.sh` file to the prefix directory that exports the

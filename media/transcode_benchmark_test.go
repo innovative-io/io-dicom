@@ -89,46 +89,46 @@ func benchmarkTranscodeRoundTrip(b *testing.B, relPath string, midTS, backTS *tr
 // --- test2.dcm (uncompressed explicit VR LE baseline) ---
 
 func BenchmarkTranscode_Test2_to_ImplicitVRLittleEndian(b *testing.B) {
-	benchmarkTranscode(b, "../samples/test2.dcm", transfersyntax.ImplicitVRLittleEndian)
+	benchmarkTranscode(b, "../testdata/test2.dcm", transfersyntax.ImplicitVRLittleEndian)
 }
 
 func BenchmarkTranscode_Test2_to_EncapsulatedUncompressedExplicitVRLittleEndian(b *testing.B) {
-	benchmarkTranscode(b, "../samples/test2.dcm", transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian)
+	benchmarkTranscode(b, "../testdata/test2.dcm", transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian)
 }
 
 func BenchmarkTranscode_Test2_to_RLELossless(b *testing.B) {
-	benchmarkTranscode(b, "../samples/test2.dcm", transfersyntax.RLELossless)
+	benchmarkTranscode(b, "../testdata/test2.dcm", transfersyntax.RLELossless)
 }
 
 func BenchmarkTranscode_Test2_to_JPEGBaseline8Bit(b *testing.B) {
-	benchmarkTranscode(b, "../samples/test2.dcm", transfersyntax.JPEGBaseline8Bit)
+	benchmarkTranscode(b, "../testdata/test2.dcm", transfersyntax.JPEGBaseline8Bit)
 }
 
 func BenchmarkTranscode_Test2_to_JPEGLosslessSV1(b *testing.B) {
-	benchmarkTranscode(b, "../samples/test2.dcm", transfersyntax.JPEGLosslessSV1)
+	benchmarkTranscode(b, "../testdata/test2.dcm", transfersyntax.JPEGLosslessSV1)
 }
 
 func BenchmarkTranscode_Test2_to_JPEG2000(b *testing.B) {
-	benchmarkTranscode(b, "../samples/test2.dcm", transfersyntax.JPEG2000)
+	benchmarkTranscode(b, "../testdata/test2.dcm", transfersyntax.JPEG2000)
 }
 
 func BenchmarkTranscode_Test2_to_DeflatedImageFrameCompression(b *testing.B) {
-	benchmarkTranscode(b, "../samples/test2.dcm", transfersyntax.DeflatedImageFrameCompression)
+	benchmarkTranscode(b, "../testdata/test2.dcm", transfersyntax.DeflatedImageFrameCompression)
 }
 
 func BenchmarkTranscode_Test2_roundtrip_ExplicitVR_via_RLE(b *testing.B) {
-	benchmarkTranscodeRoundTrip(b, "../samples/test2.dcm", transfersyntax.RLELossless, transfersyntax.ExplicitVRLittleEndian)
+	benchmarkTranscodeRoundTrip(b, "../testdata/test2.dcm", transfersyntax.RLELossless, transfersyntax.ExplicitVRLittleEndian)
 }
 
 // --- jpeg8.dcm (JPEG baseline compressed) → uncompressed ---
 // Skips when JPEG decode needs a native backend (e.g. 12-bit path without -tags libjpeg).
 
 func BenchmarkTranscode_JPEG8_to_ExplicitVRLittleEndian(b *testing.B) {
-	benchmarkTranscode(b, "../samples/jpeg8.dcm", transfersyntax.ExplicitVRLittleEndian)
+	benchmarkTranscode(b, "../testdata/jpeg8.dcm", transfersyntax.ExplicitVRLittleEndian)
 }
 
 // --- rle_gray.dcm (RLE lossless) → uncompressed ---
 
 func BenchmarkTranscode_RLEGray_to_ExplicitVRLittleEndian(b *testing.B) {
-	benchmarkTranscode(b, "../samples/rle_gray.dcm", transfersyntax.ExplicitVRLittleEndian)
+	benchmarkTranscode(b, "../testdata/rle_gray.dcm", transfersyntax.ExplicitVRLittleEndian)
 }

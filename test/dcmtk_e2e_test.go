@@ -1,6 +1,6 @@
 //go:build e2e
 
-package e2e
+package test
 
 import (
 	"bytes"
@@ -271,7 +271,7 @@ func sampleDICOMPath(t *testing.T) string {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	candidate := filepath.Join(filepath.Dir(thisFile), "..", "samples", "test.dcm")
+	candidate := filepath.Join(filepath.Dir(thisFile), "..", "testdata", "test.dcm")
 	if _, err := os.Stat(candidate); err != nil {
 		t.Fatalf("sample DICOM not found at %s (set IO_DICOM_SAMPLE_FILE to override): %v", candidate, err)
 	}

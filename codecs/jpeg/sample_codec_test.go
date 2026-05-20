@@ -15,7 +15,7 @@ func loadBytesFromFile(fileName string, t *testing.T) []byte {
 }
 
 func TestDIJG8decodeSample(t *testing.T) {
-	jpegData := loadBytesFromFile("../../samples/test8.jpg", t)
+	jpegData := loadBytesFromFile("../../testdata/test8.jpg", t)
 	outSize := 1576 * 1134 * 3
 	outData := make([]byte, outSize)
 
@@ -25,7 +25,7 @@ func TestDIJG8decodeSample(t *testing.T) {
 }
 
 func TestEIJG8encodeSample(t *testing.T) {
-	rawData := loadBytesFromFile("../../samples/test.raw", t)
+	rawData := loadBytesFromFile("../../testdata/test.raw", t)
 	var jpegData []byte
 	var jpegSize int
 
@@ -35,7 +35,7 @@ func TestEIJG8encodeSample(t *testing.T) {
 }
 
 func TestEIJG16encodeSample(t *testing.T) {
-	rawData := loadBytesFromFile("../../samples/test.raw", t)
+	rawData := loadBytesFromFile("../../testdata/test.raw", t)
 	var jpegData []byte
 	var jpegSize int
 

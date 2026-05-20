@@ -1,15 +1,10 @@
-package utils
+package media
 
 import (
 	"testing"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
-	"github.com/innovative-io/io-dicom/media"
 )
-
-func init() {
-	media.InitDict()
-}
 
 func TestDefaultCFindRequest(t *testing.T) {
 	obj := DefaultCFindRequest()

@@ -8,7 +8,7 @@ import (
 
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
-	"github.com/innovative-io/io-dicom/implementation"
+	implementation "github.com/innovative-io/io-dicom/internal/implclass"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )

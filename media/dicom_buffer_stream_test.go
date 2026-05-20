@@ -163,11 +163,11 @@ func TestMemoryStream_NewFromFile_Error(t *testing.T) {
 }
 
 func TestMemoryStream_NewFromFile_Success(t *testing.T) {
-	if _, err := os.Stat("../samples/test.dcm"); err != nil {
+	if _, err := os.Stat("../testdata/test.dcm"); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
 
-	buf, err := NewDICOMBufferFromFile("../samples/test.dcm")
+	buf, err := NewDICOMBufferFromFile("../testdata/test.dcm")
 	if err != nil {
 		t.Fatal(err)
 	}

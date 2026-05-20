@@ -1,16 +1,15 @@
-package utils
+package media
 
 import (
 	"time"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
-	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/uuids"
 )
 
 // DefaultCFindRequest - Creates a default C-Find request
-func DefaultCFindRequest() media.DICOMObject {
-	query := media.NewEmptyDCMObj()
+func DefaultCFindRequest() DICOMObject {
+	query := NewEmptyDCMObj()
 	query.Write(tags.StudyDate, "")
 	query.Write(tags.StudyTime, "")
 	query.Write(tags.AccessionNumber, "")
@@ -29,8 +28,8 @@ func DefaultCFindRequest() media.DICOMObject {
 }
 
 // DefaultCMoveRequest - Creates a default C-Move request
-func DefaultCMoveRequest(studyUID string) media.DICOMObject {
-	query := media.NewEmptyDCMObj()
+func DefaultCMoveRequest(studyUID string) DICOMObject {
+	query := NewEmptyDCMObj()
 	query.Write(tags.StudyDate, "")
 	query.Write(tags.StudyTime, "")
 	query.Write(tags.AccessionNumber, "")
@@ -46,9 +45,9 @@ func DefaultCMoveRequest(studyUID string) media.DICOMObject {
 }
 
 // GenerateCFindRequest - Generates C-Find request
-func GenerateCFindRequest() media.DICOMObject {
+func GenerateCFindRequest() DICOMObject {
 	studyUID := uuids.CreateStudyUID("FAKE^PATIENT", "123456789", "AC1234", time.Now().Format("20060102"))
-	query := media.NewEmptyDCMObj()
+	query := NewEmptyDCMObj()
 	query.Write(tags.StudyDate, time.Now())
 	query.Write(tags.StudyTime, time.Now())
 	query.Write(tags.AccessionNumber, "AC1234")

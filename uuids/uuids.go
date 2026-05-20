@@ -4,7 +4,7 @@ import (
 	"hash/fnv"
 	"strconv"
 
-	"github.com/innovative-io/io-dicom/implementation"
+	implementation "github.com/innovative-io/io-dicom/internal/implclass"
 )
 
 func hash32(text string) uint32 {

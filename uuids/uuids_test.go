@@ -3,7 +3,7 @@ package uuids
 import (
 	"testing"
 
-	"github.com/innovative-io/io-dicom/implementation"
+	implementation "github.com/innovative-io/io-dicom/internal/implclass"
 )
 
 func Test_hash32(t *testing.T) {

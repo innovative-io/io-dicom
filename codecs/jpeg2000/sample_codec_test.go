@@ -78,7 +78,7 @@ func TestJ2KdecodeSample(t *testing.T) {
 	if err := UseBackend("openjpeg"); err != nil {
 		t.Fatalf("expected openjpeg backend to be registered: %v", err)
 	}
-	jpegData := loadBytesFromFile("../../samples/test.j2k", t)
+	jpegData := loadBytesFromFile("../../testdata/test.j2k", t)
 	outSize := 1576 * 1134 * 3
 	outData := make([]byte, outSize)
 
@@ -100,7 +100,7 @@ func TestJ2KdecodeSampleSignedCT(t *testing.T) {
 		t.Fatalf("expected openjpeg backend to be registered: %v", err)
 	}
 
-	dcmData := loadBytesFromFile("../../samples/cornerstone-CTImage-jpeg2000-lossless.dcm", t)
+	dcmData := loadBytesFromFile("../../testdata/cornerstone-CTImage-jpeg2000-lossless.dcm", t)
 	j2kFrame := extractFirstDICOMEncapsulatedFrame(t, dcmData)
 
 	// 512x512, 1 sample, 16-bit (2 bytes/sample)
@@ -132,7 +132,7 @@ func TestJ2KencodeSample(t *testing.T) {
 			t.Fatalf("expected openjpeg backend to be registered: %v", err)
 		}
 	}
-	rawData := loadBytesFromFile("../../samples/test.raw", t)
+	rawData := loadBytesFromFile("../../testdata/test.raw", t)
 	var jpegData []byte
 	var jpegSize int
 

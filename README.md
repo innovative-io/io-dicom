@@ -22,10 +22,9 @@ Innovative IO DICOM Golang Library
 - `codecs/jpeg/`: JPEG codec implementation and pure-Go fallback behavior
 - `codecs/jpeg2000/`: JPEG2000 codec interface and pure-Go fallback behavior
 - `transcoder/`: RLE and transfer pixel data transcoding helpers
-- `database/`: sqlite-backed data access layer
 - `wado/`: DICOMweb server and client (WADO-RS, STOW-RS, QIDO-RS)
-- `utils/`, `uuids/`, `clients/`, `implementation/`: shared utilities and implementation metadata
-- `samples/`: local sample DICOM files used by tests and validation, populated on demand and ignored by git
+- `uuids/`, `version/`, `internal/implclass/`: shared utilities and implementation metadata
+- `testdata/`: local sample DICOM files used by tests and validation, populated on demand and ignored by git
 
 See `docs/project-structure.md` for package boundaries and maintenance conventions.
 
@@ -53,7 +52,7 @@ This is the hook used by `io-dicom-tools` so bridge-hosted library activity is s
 
 ## Sample DICOM Files
 
-The `samples/` directory contains local DICOM test files for validation and testing. It is ignored by git to keep the repository size down. See [DICOM-SAMPLES.md](DICOM-SAMPLES.md) for:
+The `testdata/` directory contains local DICOM test files for validation and testing. It is ignored by git to keep the repository size down. See [DICOM-SAMPLES.md](DICOM-SAMPLES.md) for:
 
 - **Bundled samples**: 17 repository-tracked baseline files covering JPEG, RLE, JPEG2000, raw pixel data, and encapsulated content
 - **Synthetic samples**: 4 generated DICOM files (CT, MR, Ultrasound, CR Color) built using the **io-dicom library**
@@ -72,7 +71,7 @@ Download additional public samples:
 bash scripts/acquire-sample-dicoms.sh
 ```
 
-Note: sample-dependent tests and benchmarks expect local files in `samples/`. After a fresh clone, populate the directory with the generator and/or acquisition scripts before running those paths.
+Note: sample-dependent tests and benchmarks expect local files in `testdata/`. After a fresh clone, populate the directory with the generator and/or acquisition scripts before running those paths.
 
 ## DICOM Standards Alignment
 
@@ -339,7 +338,7 @@ Applications that need request-scoped cancellation for transcode operations can 
 - Run all build-tagged codec backend tests locally:
 
 ```bash
-./tools/test_codec_tags.sh
+./scripts/test_codec_tags.sh
 ```
 
 - Run only the media native-backend representative roundtrip check for a specific tag:
@@ -368,7 +367,7 @@ make contract-check
   `$HOME/.local/codec-deps` by default):
 
 ```bash
-./tools/build_codec_deps_from_source.sh
+./scripts/build_codec_deps_from_source.sh
 ```
 
 - This produces a single shared-library directory at `$PREFIX/lib` and writes
@@ -386,7 +385,7 @@ source "$HOME/.local/codec-deps/env.sh"
 - For custom install location / parallelism:
 
 ```bash
-PREFIX=$PWD/.local/codec-deps JOBS=8 ./tools/build_codec_deps_from_source.sh
+PREFIX=$PWD/.local/codec-deps JOBS=8 ./scripts/build_codec_deps_from_source.sh
 ```
 
 - CI workflow is provided at `.github/workflows/codec-tagged-tests.yml` and
@@ -451,7 +450,7 @@ log.Println("CEcho was successful")
 
 ### Send C-Find Request
 ```golang
-request := utils.DefaultCFindRequest()
+request := media.DefaultCFindRequest()
 scu := services.NewSCU(destination)
 scu.SetOnCFindResult(func(result media.DICOMObject) {
   log.Printf("Found study %s\n", result.GetString(tags.StudyInstanceUID))
@@ -485,7 +484,7 @@ if err != nil {
 
 ### Send C-Move Request
 ```golang
-request := utils.DefaultCMoveRequest(studyUID)
+request := media.DefaultCMoveRequest(studyUID)
 
 scu := services.NewSCU(destination)
 _, err := scu.MoveSCU(destinationAE, request, 0)
@@ -496,7 +495,7 @@ if err != nil {
 
 ### Send C-Get Request
 ```golang
-request := utils.DefaultCMoveRequest(studyUID) // same Q/R identifier structure
+request := media.DefaultCMoveRequest(studyUID) // same Q/R identifier structure
 
 scu := services.NewSCU(destination)
 status, err := scu.GetSCU(request, 0)
@@ -569,7 +568,7 @@ scp.OnAssociationRequest(func(request network.AssociationRequest) bool {
 scp.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, queryLevel string, query media.DICOMObject, emit func(media.DICOMObject)) (services.CFindResult, error) {
   query.DumpTags()
   for i := 0; i < 10; i++ {
-    emit(utils.GenerateCFindRequest())
+    emit(media.GenerateCFindRequest())
   }
   return services.CFindResult{Status: dicomstatus.Success}, nil
 })

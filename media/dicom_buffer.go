@@ -9,7 +9,7 @@ import (
 	"os"
 
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
-	"github.com/innovative-io/io-dicom/implementation"
+	implementation "github.com/innovative-io/io-dicom/internal/implclass"
 )
 
 // DICOMBuffer is a DICOM-aware byte buffer that combines raw stream operations

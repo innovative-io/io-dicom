@@ -7,7 +7,7 @@
 # Usage: ./scripts/acquire-sample-dicoms.sh
 #
 
-SAMPLES_DIR="samples"
+SAMPLES_DIR="testdata"
 TEMP_DIR=$(mktemp -d)
 DOWNLOADED_COUNT=0
 SKIPPED_COUNT=0
