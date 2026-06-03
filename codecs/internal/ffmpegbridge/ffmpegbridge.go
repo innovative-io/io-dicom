@@ -1,3 +1,5 @@
+//go:build cgo && (ffmpeg || st2110)
+
 package ffmpegbridge
 
 /*

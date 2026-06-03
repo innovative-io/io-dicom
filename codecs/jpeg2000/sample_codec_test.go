@@ -63,7 +63,7 @@ func extractFirstDICOMEncapsulatedFrame(t *testing.T, dcmData []byte) []byte {
 	}
 	// If BOT is non-empty, next item is the frame; if BOT is empty, next is also the frame.
 	frame := readItem()
-	if frame == nil || len(frame) == 0 {
+	if len(frame) == 0 {
 		t.Fatal("could not read frame item from pixel data sequence")
 	}
 	return frame

@@ -1,3 +1,5 @@
+//go:build cgo && (ffmpeg || st2110)
+
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>

@@ -403,14 +403,6 @@ func (buf *DICOMBuffer) GetAllBytes() []byte {
 	return buf.GetData()
 }
 
-func (buf *DICOMBuffer) readString(length int) string {
-	temp, err := buf.Read(length)
-	if err != nil {
-		return ""
-	}
-	return string(temp)
-}
-
 // readVR reads the 2-byte VR field from the stream and returns an interned
 // string constant, avoiding the heap allocation that string() conversion
 // would otherwise cause on every explicit-VR tag.

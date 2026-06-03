@@ -1,11 +1,26 @@
-.PHONY: help test test-tags deps-from-source build-native install install-native transfer-syntax-matrix contract-check
+.PHONY: help test test-tags vet lint race fuzz deps-from-source build-native install install-native transfer-syntax-matrix contract-check
 
 NATIVE_CODEC_TAGS := libjpeg charls openjpeg libjxl openjph ffmpeg st2110
+
+# Run via `go run` so contributors and CI need no separate install step. Uses
+# @latest (intentionally not pinned) to track staticcheck releases and stay
+# compatible with the newest Go toolchain.
+STATICCHECK := go run honnef.co/go/tools/cmd/staticcheck@latest
+
+# Active fuzz time per target for `make fuzz`. The in-code seed corpus (the f.Add
+# inputs, including the empty-UID regression) always runs via `go test`. Note
+# testdata/ is gitignored, so Go's testdata/fuzz crasher corpus stays local and
+# untracked.
+FUZZTIME ?= 30s
 
 help:
 	@echo "Available targets:"
 	@echo "  make test               # Run go test ./..."
 	@echo "  make test-tags          # Run all tagged codec backend tests"
+	@echo "  make vet                # Run go vet ./..."
+	@echo "  make lint               # Run staticcheck ./..."
+	@echo "  make race               # Run go test -race ./..."
+	@echo "  make fuzz               # Run each fuzz target for FUZZTIME (default 30s)"
 	@echo "  make deps-from-source   # Download and compile codec dependencies from source"
 	@echo "  make build-native       # Build source deps, compile with native codec tags, run contract checks"
 	@echo "  make install            # Install io-dicom CLI (pure Go) to GOPATH/bin"
@@ -15,6 +30,20 @@ help:
 
 test:
 	go test ./...
+
+vet:
+	go vet ./...
+
+lint:
+	$(STATICCHECK) ./...
+
+race:
+	go test -race ./...
+
+fuzz:
+	go test -run=^$$ -fuzz=FuzzNewDCMObjFromBytes -fuzztime=$(FUZZTIME) ./media
+	go test -run=^$$ -fuzz=FuzzReadIncomingPDU -fuzztime=$(FUZZTIME) ./network
+	go test -run=^$$ -fuzz=FuzzPDataTFReadDynamic -fuzztime=$(FUZZTIME) ./network
 
 test-tags:
 	./scripts/test_codec_tags.sh
