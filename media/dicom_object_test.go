@@ -1278,3 +1278,89 @@ func TestDICOMObject_Clone_PreservesMetadata(t *testing.T) {
 		t.Error("Clone did not preserve ExplicitVR=true")
 	}
 }
+
+// ── ValidateFileWrite ─────────────────────────────────────────────────────────
+
+func validatableObj() media.DICOMObject {
+	obj := media.NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	obj.SetExplicitVR(true)
+	obj.WriteString(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.2")
+	obj.WriteString(tags.SOPInstanceUID, "1.2.3.4.5")
+	return obj
+}
+
+func TestValidateFileWrite_OK(t *testing.T) {
+	if err := media.ValidateFileWrite(validatableObj()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateFileWrite_MetaConsistency_OK(t *testing.T) {
+	obj := validatableObj()
+	obj.WriteString(tags.MediaStorageSOPClassUID, "1.2.840.10008.5.1.4.1.1.2")
+	obj.WriteString(tags.MediaStorageSOPInstanceUID, "1.2.3.4.5")
+	if err := media.ValidateFileWrite(obj); err != nil {
+		t.Fatalf("unexpected error with matching meta: %v", err)
+	}
+}
+
+func TestValidateFileWrite_MetaClassMismatch(t *testing.T) {
+	obj := validatableObj()
+	obj.WriteString(tags.MediaStorageSOPClassUID, "9.9.9.9")
+	if err := media.ValidateFileWrite(obj); err == nil {
+		t.Fatal("want error when MediaStorageSOPClassUID mismatches SOPClassUID")
+	}
+}
+
+func TestValidateFileWrite_MetaInstanceMismatch(t *testing.T) {
+	obj := validatableObj()
+	obj.WriteString(tags.MediaStorageSOPInstanceUID, "9.9.9.9")
+	if err := media.ValidateFileWrite(obj); err == nil {
+		t.Fatal("want error when MediaStorageSOPInstanceUID mismatches SOPInstanceUID")
+	}
+}
+
+// ── DICOMObject.Merge ─────────────────────────────────────────────────────────
+
+func TestDICOMObject_Merge_AddsMissingTags(t *testing.T) {
+	dst := media.NewEmptyDCMObj()
+	dst.WriteString(tags.PatientName, "Smith^John")
+
+	src := media.NewEmptyDCMObj()
+	src.WriteString(tags.PatientID, "12345")
+	src.WriteString(tags.PatientName, "OTHER^NAME") // already in dst — should not overwrite
+
+	dst.Merge(src)
+
+	if got := dst.GetString(tags.PatientID); got != "12345" {
+		t.Errorf("Merge: PatientID = %q, want %q", got, "12345")
+	}
+	// PatientName must remain unchanged (not overwritten by src).
+	if got := dst.GetString(tags.PatientName); got != "Smith^John" {
+		t.Errorf("Merge overwrote existing tag: PatientName = %q, want %q", got, "Smith^John")
+	}
+}
+
+func TestDICOMObject_Merge_Independent(t *testing.T) {
+	dst := media.NewEmptyDCMObj()
+	src := media.NewEmptyDCMObj()
+	src.WriteString(tags.PatientID, "ABC")
+
+	dst.Merge(src)
+
+	// Mutating src after merge must not affect dst.
+	src.WriteString(tags.PatientID, "CHANGED")
+	if got := dst.GetString(tags.PatientID); got != "ABC" {
+		t.Errorf("Merge: post-merge mutation of src affected dst: got %q", got)
+	}
+}
+
+func TestDICOMObject_Merge_NilSrc(t *testing.T) {
+	dst := media.NewEmptyDCMObj()
+	dst.WriteString(tags.PatientName, "Smith^John")
+	dst.Merge(nil) // must not panic
+	if got := dst.GetString(tags.PatientName); got != "Smith^John" {
+		t.Errorf("Merge(nil) changed dst: got %q", got)
+	}
+}

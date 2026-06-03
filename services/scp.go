@@ -36,6 +36,11 @@ type SCP interface {
 	// request. Return false to reject the echo (no response is sent).
 	OnCEchoRequest(f func(request network.AssociationRequest) bool)
 	OnRawPDU(f func(event network.RawPDUEvent))
+	// SetTimeout sets the per-connection network timeout in seconds applied to
+	// all associations accepted by this SCP. 0 means no timeout (default).
+	// Unlike WithTimeout (which configures the SCP at construction), this method
+	// may be called after construction but before Start.
+	SetTimeout(seconds int)
 }
 
 // CGetProgress reports incremental sub-operation counts sent back to a C-GET SCU during retrieval.
@@ -119,6 +124,7 @@ type scp struct {
 	cancelGrace  time.Duration
 	implClassUID string
 	implVersion  string
+	timeout      int
 }
 
 // SCPOption configures an SCP at construction time.
@@ -211,10 +217,15 @@ func normalizeServerTLSConfig(cfg *tls.Config) *tls.Config {
 }
 
 // newPDUService creates a PDUService, applying a per-SCP implementation class
-// override if one has been configured.
+// override and timeout if configured.
 func (s *scp) newPDUService() network.PDUService {
+	var opts []network.PDUServiceOption
 	if s.implClassUID != "" || s.implVersion != "" {
-		return network.NewPDUService(network.WithImplementationClass(s.implClassUID, s.implVersion))
+		opts = append(opts, network.WithImplementationClass(s.implClassUID, s.implVersion))
 	}
-	return network.NewPDUService()
+	pdu := network.NewPDUService(opts...)
+	if s.timeout > 0 {
+		pdu.SetTimeout(s.timeout)
+	}
+	return pdu
 }

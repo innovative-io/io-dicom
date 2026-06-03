@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,11 +55,26 @@ type Client interface {
 	SearchSeries(ctx context.Context, studyUID string, params url.Values) ([]map[string]interface{}, error)
 	// SearchInstances queries for matching instances via QIDO-RS.
 	SearchInstances(ctx context.Context, studyUID, seriesUID string, params url.Values) ([]map[string]interface{}, error)
+	// SearchStudiesObjects queries for matching studies and returns the results
+	// as DICOMObject values, converting the DICOMweb JSON representation.
+	SearchStudiesObjects(ctx context.Context, params url.Values) ([]media.DICOMObject, error)
+	// SearchSeriesObjects queries for matching series within a study and
+	// returns the results as DICOMObject values.
+	SearchSeriesObjects(ctx context.Context, studyUID string, params url.Values) ([]media.DICOMObject, error)
+	// SearchInstancesObjects queries for matching instances and returns the
+	// results as DICOMObject values.
+	SearchInstancesObjects(ctx context.Context, studyUID, seriesUID string, params url.Values) ([]media.DICOMObject, error)
 	// RetrieveFrames fetches the raw pixel data for specific frames of a DICOM
 	// instance via WADO-RS. frames is a 1-based list of frame numbers matching
 	// the DICOM standard. Each element of the returned slice is the uncompressed
 	// or compressed pixel data for the corresponding requested frame.
 	RetrieveFrames(ctx context.Context, studyUID, seriesUID, sopInstanceUID string, frames []int) ([][]byte, error)
+	// DeleteStudy removes a study and all its series and instances via WADO-RS.
+	DeleteStudy(ctx context.Context, studyUID string) error
+	// DeleteSeries removes a series and all its instances via WADO-RS.
+	DeleteSeries(ctx context.Context, studyUID, seriesUID string) error
+	// DeleteInstance removes a single instance via WADO-RS.
+	DeleteInstance(ctx context.Context, studyUID, seriesUID, sopInstanceUID string) error
 }
 
 type wadoClient struct {
@@ -190,6 +206,89 @@ func (c *wadoClient) SearchInstances(ctx context.Context, studyUID, seriesUID st
 	return c.searchJSON(ctx, u, params)
 }
 
+// ── Typed QIDO-RS search ──────────────────────────────────────────────────────
+
+func (c *wadoClient) SearchStudiesObjects(ctx context.Context, params url.Values) ([]media.DICOMObject, error) {
+	u := fmt.Sprintf("%s/qido/rs/studies", c.params.BaseURL)
+	return c.searchObjects(ctx, u, params)
+}
+
+func (c *wadoClient) SearchSeriesObjects(ctx context.Context, studyUID string, params url.Values) ([]media.DICOMObject, error) {
+	u := fmt.Sprintf("%s/qido/rs/studies/%s/series", c.params.BaseURL, studyUID)
+	return c.searchObjects(ctx, u, params)
+}
+
+func (c *wadoClient) SearchInstancesObjects(ctx context.Context, studyUID, seriesUID string, params url.Values) ([]media.DICOMObject, error) {
+	u := fmt.Sprintf("%s/qido/rs/studies/%s/series/%s/instances", c.params.BaseURL, studyUID, seriesUID)
+	return c.searchObjects(ctx, u, params)
+}
+
+// searchObjects fetches a QIDO-RS endpoint and converts each DICOMweb JSON
+// entry to a DICOMObject.
+func (c *wadoClient) searchObjects(ctx context.Context, rawURL string, params url.Values) ([]media.DICOMObject, error) {
+	rows, err := c.searchJSON(ctx, rawURL, params)
+	if err != nil {
+		return nil, err
+	}
+	objects := make([]media.DICOMObject, 0, len(rows))
+	for _, row := range rows {
+		objects = append(objects, qidoRowToObject(row))
+	}
+	return objects, nil
+}
+
+// qidoRowToObject converts a single DICOMweb JSON tag-map (as returned by
+// QIDO-RS) to a DICOMObject.  Each key is an 8-hex-digit group/element string;
+// each value is {"vr": "XX", "Value": [...]}.
+func qidoRowToObject(row map[string]interface{}) media.DICOMObject {
+	obj := media.NewEmptyDCMObj()
+	for key, rawTag := range row {
+		if len(key) != 8 {
+			continue
+		}
+		var grp, elem uint16
+		if n, err := strconv.ParseUint(key[:4], 16, 16); err == nil {
+			grp = uint16(n)
+		} else {
+			continue
+		}
+		if n, err := strconv.ParseUint(key[4:], 16, 16); err == nil {
+			elem = uint16(n)
+		} else {
+			continue
+		}
+		tagMap, ok := rawTag.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		vr, _ := tagMap["vr"].(string)
+		values, _ := tagMap["Value"].([]interface{})
+		var strVal string
+		if len(values) > 0 {
+			if s, ok := values[0].(string); ok {
+				strVal = s
+			} else if n, ok := jsonNumber(values[0]); ok {
+				strVal = fmt.Sprintf("%d", n)
+			}
+		}
+		obj.Add(media.NewStringTag(grp, elem, vr, strVal))
+	}
+	return obj
+}
+
+// jsonNumber coerces JSON numeric types (float64 from encoding/json) to int64.
+func jsonNumber(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int64(n), true
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	}
+	return 0, false
+}
+
 // RetrieveFrames fetches raw pixel data for the given 1-based frame numbers.
 func (c *wadoClient) RetrieveFrames(ctx context.Context, studyUID, seriesUID, sopInstanceUID string, frames []int) ([][]byte, error) {
 	if len(frames) == 0 {
@@ -206,6 +305,39 @@ func (c *wadoClient) RetrieveFrames(ctx context.Context, studyUID, seriesUID, so
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// ── WADO-RS delete ────────────────────────────────────────────────────────────
+
+func (c *wadoClient) DeleteStudy(ctx context.Context, studyUID string) error {
+	u := fmt.Sprintf("%s/wado/rs/studies/%s", c.params.BaseURL, studyUID)
+	resp, err := c.doRequest(ctx, http.MethodDelete, u, "", nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+func (c *wadoClient) DeleteSeries(ctx context.Context, studyUID, seriesUID string) error {
+	u := fmt.Sprintf("%s/wado/rs/studies/%s/series/%s", c.params.BaseURL, studyUID, seriesUID)
+	resp, err := c.doRequest(ctx, http.MethodDelete, u, "", nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+func (c *wadoClient) DeleteInstance(ctx context.Context, studyUID, seriesUID, sopInstanceUID string) error {
+	u := fmt.Sprintf("%s/wado/rs/studies/%s/series/%s/instances/%s",
+		c.params.BaseURL, studyUID, seriesUID, sopInstanceUID)
+	resp, err := c.doRequest(ctx, http.MethodDelete, u, "", nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
 
 // retrieveMultipartBytes fetches a WADO-RS URL and returns each part as raw bytes.
 // Used for frame retrieval where each part is pixel data, not a DICOM object.

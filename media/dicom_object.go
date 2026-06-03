@@ -82,6 +82,11 @@ type DICOMObject interface {
 	// Clone returns a deep copy of this DICOMObject. The returned object has
 	// independent tag data; mutations to either object do not affect the other.
 	Clone() DICOMObject
+	// Merge copies tags from src into this object. Tags already present in the
+	// receiver are left unchanged; only tags absent from the receiver are added.
+	// To overwrite existing tags call obj.DelTag first or use Clone + Merge on
+	// a fresh object.
+	Merge(src DICOMObject)
 	GetTransferSyntax() *transfersyntax.TransferSyntax
 	SetTransferSyntax(ts *transfersyntax.TransferSyntax)
 	TagCount() int
@@ -495,11 +500,20 @@ func ValidateFileWrite(obj DICOMObject) error {
 	if transfersyntax.GetTransferSyntaxFromUID(obj.GetTransferSyntax().UID) == nil {
 		return fmt.Errorf("media: unsupported TransferSyntaxUID %q for DICOM file output", obj.GetTransferSyntax().UID)
 	}
-	if strings.TrimSpace(obj.GetString(tags.SOPClassUID)) == "" {
+	sopClass := strings.TrimSpace(obj.GetString(tags.SOPClassUID))
+	if sopClass == "" {
 		return errors.New("media: SOPClassUID is required for DICOM file output")
 	}
-	if strings.TrimSpace(obj.GetString(tags.SOPInstanceUID)) == "" {
+	sopInstance := strings.TrimSpace(obj.GetString(tags.SOPInstanceUID))
+	if sopInstance == "" {
 		return errors.New("media: SOPInstanceUID is required for DICOM file output")
+	}
+	// Validate group-0002 meta consistency when meta tags are present.
+	if msClass := strings.TrimSpace(obj.GetString(tags.MediaStorageSOPClassUID)); msClass != "" && msClass != sopClass {
+		return fmt.Errorf("media: MediaStorageSOPClassUID (0002,0002) %q does not match SOPClassUID %q", msClass, sopClass)
+	}
+	if msInstance := strings.TrimSpace(obj.GetString(tags.MediaStorageSOPInstanceUID)); msInstance != "" && msInstance != sopInstance {
+		return fmt.Errorf("media: MediaStorageSOPInstanceUID (0002,0003) %q does not match SOPInstanceUID %q", msInstance, sopInstance)
 	}
 	return nil
 }
@@ -630,6 +644,29 @@ func (obj *dicomObject) Clone() DICOMObject {
 		cloned.Tags[i] = &cp
 	}
 	return cloned
+}
+
+// Merge copies tags from src that are not already present in obj.
+// Tags already present in the receiver (matched by group+element) are left
+// unchanged. Each added tag's data is deep-copied so the two objects remain
+// independent after the merge.
+func (obj *dicomObject) Merge(src DICOMObject) {
+	if src == nil {
+		return
+	}
+	obj.ensureTagIndex()
+	for _, t := range src.GetTags() {
+		k := tagKey(t.Group, t.Element)
+		if _, exists := obj.tagIndex[k]; exists {
+			continue
+		}
+		cp := *t
+		if t.Data != nil {
+			cp.Data = make([]byte, len(t.Data))
+			copy(cp.Data, t.Data)
+		}
+		obj.Add(&cp)
+	}
 }
 
 func (obj *dicomObject) GetTransferSyntax() *transfersyntax.TransferSyntax {

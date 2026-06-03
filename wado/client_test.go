@@ -245,6 +245,96 @@ func TestClient_UnreachableServer(t *testing.T) {
 	}
 }
 
+// ── Delete via Client ─────────────────────────────────────────────────────────
+
+func startServerForDelete(t *testing.T) (wado.Client, *mockStore) {
+	t.Helper()
+	store := newMockStore()
+	srv := wado.NewServer(wado.ServerParams{Store: store})
+	h := srv.Handler()
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+	return wado.NewClient(wado.ClientParams{BaseURL: ts.URL}), store
+}
+
+func TestClient_DeleteStudy_OK(t *testing.T) {
+	client, store := startServerForDelete(t)
+	store.studies["1.2.3"] = []media.DICOMObject{}
+	if err := client.DeleteStudy(context.Background(), "1.2.3"); err != nil {
+		t.Fatalf("DeleteStudy error: %v", err)
+	}
+}
+
+func TestClient_DeleteStudy_NotFound(t *testing.T) {
+	client, _ := startServerForDelete(t)
+	if err := client.DeleteStudy(context.Background(), "9.9.9"); err == nil {
+		t.Fatal("want error for missing study")
+	}
+}
+
+func TestClient_DeleteSeries_OK(t *testing.T) {
+	client, store := startServerForDelete(t)
+	store.studies["1.2.3"] = []media.DICOMObject{}
+	if err := client.DeleteSeries(context.Background(), "1.2.3", "1.2.3.1"); err != nil {
+		t.Fatalf("DeleteSeries error: %v", err)
+	}
+}
+
+func TestClient_DeleteInstance_OK(t *testing.T) {
+	client, store := startServerForDelete(t)
+	store.studies["1.2.3"] = []media.DICOMObject{}
+	if err := client.DeleteInstance(context.Background(), "1.2.3", "1.2.3.1", "1.2.3.1.1"); err != nil {
+		t.Fatalf("DeleteInstance error: %v", err)
+	}
+}
+
 // ensure http and httptest imports are referenced
 var _ = http.StatusOK
 var _ *httptest.Server
+
+// ── Typed QIDO-RS search ──────────────────────────────────────────────────────
+
+func TestClient_SearchStudiesObjects_OK(t *testing.T) {
+	client, store := startServerForDelete(t) // reuse helper (starts full server)
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOMFromClient(t)}
+	objs, err := client.SearchStudiesObjects(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("SearchStudiesObjects error: %v", err)
+	}
+	if len(objs) == 0 {
+		t.Fatal("want at least one object, got none")
+	}
+}
+
+func TestClient_SearchSeriesObjects_OK(t *testing.T) {
+	client, store := startServerForDelete(t)
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOMFromClient(t)}
+	objs, err := client.SearchSeriesObjects(context.Background(), "1.2.3", nil)
+	if err != nil {
+		t.Fatalf("SearchSeriesObjects error: %v", err)
+	}
+	if len(objs) == 0 {
+		t.Fatal("want at least one object, got none")
+	}
+}
+
+func TestClient_SearchInstancesObjects_OK(t *testing.T) {
+	client, store := startServerForDelete(t)
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOMFromClient(t)}
+	objs, err := client.SearchInstancesObjects(context.Background(), "1.2.3", "1.2.3.1", nil)
+	if err != nil {
+		t.Fatalf("SearchInstancesObjects error: %v", err)
+	}
+	if len(objs) == 0 {
+		t.Fatal("want at least one object, got none")
+	}
+}
+
+func loadSampleDICOMFromClient(t *testing.T) media.DICOMObject {
+	t.Helper()
+	obj, err := media.NewDCMObjFromFile("../testdata/test.dcm")
+	if err != nil {
+		t.Skipf("sample DICOM unavailable: %v", err)
+	}
+	return obj
+}

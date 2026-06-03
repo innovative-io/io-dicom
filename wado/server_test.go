@@ -69,6 +69,22 @@ func (m *mockStore) SearchInstances(_ context.Context, studyUID, _ string, _ url
 	return objs, nil
 }
 
+func (m *mockStore) DeleteStudy(_ context.Context, studyUID string) error {
+	if _, ok := m.studies[studyUID]; !ok {
+		return fmt.Errorf("study %q not found", studyUID)
+	}
+	delete(m.studies, studyUID)
+	return nil
+}
+
+func (m *mockStore) DeleteSeries(_ context.Context, studyUID, _ string) error {
+	return m.DeleteStudy(context.Background(), studyUID)
+}
+
+func (m *mockStore) DeleteInstance(_ context.Context, studyUID, _, _ string) error {
+	return m.DeleteStudy(context.Background(), studyUID)
+}
+
 // ── test helpers ──────────────────────────────────────────────────────────────
 
 func loadSampleDICOM(t *testing.T) media.DICOMObject {
@@ -289,6 +305,50 @@ func TestSearchInstances_Empty(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/qido/rs/studies/1.2.3/series/1.2.3.1/instances", nil))
 	// Per DICOM PS3.18 §10.6.3.3, an empty result set must return 204 No Content.
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", rec.Code)
+	}
+}
+
+// ── Delete handlers ───────────────────────────────────────────────────────────
+
+func TestDeleteStudy_OK(t *testing.T) {
+	h, store := newTestHandler(t)
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "/wado/rs/studies/1.2.3", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", rec.Code)
+	}
+	if _, exists := store.studies["1.2.3"]; exists {
+		t.Error("study still in store after delete")
+	}
+}
+
+func TestDeleteStudy_NotFound(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "/wado/rs/studies/9.9.9", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", rec.Code)
+	}
+}
+
+func TestDeleteSeries_OK(t *testing.T) {
+	h, store := newTestHandler(t)
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "/wado/rs/studies/1.2.3/series/1.2.3.1", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d", rec.Code)
+	}
+}
+
+func TestDeleteInstance_OK(t *testing.T) {
+	h, store := newTestHandler(t)
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "/wado/rs/studies/1.2.3/series/1.2.3.1/instances/1.2.3.1.1", nil))
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("want 204, got %d", rec.Code)
 	}

@@ -597,3 +597,11 @@ func (s *scp) OnRawPDU(f func(event network.RawPDUEvent)) {
 	defer s.mu.Unlock()
 	s.onRawPDU = f
 }
+
+func (s *scp) SetTimeout(seconds int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if seconds >= 0 {
+		s.timeout = seconds
+	}
+}

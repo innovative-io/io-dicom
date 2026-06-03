@@ -37,6 +37,12 @@ type Store interface {
 	SearchSeries(ctx context.Context, studyUID string, query url.Values) ([]media.DICOMObject, error)
 	// SearchInstances returns instances matching the query parameters.
 	SearchInstances(ctx context.Context, studyUID, seriesUID string, query url.Values) ([]media.DICOMObject, error)
+	// DeleteStudy removes all instances belonging to a study.
+	DeleteStudy(ctx context.Context, studyUID string) error
+	// DeleteSeries removes all instances belonging to a series.
+	DeleteSeries(ctx context.Context, studyUID, seriesUID string) error
+	// DeleteInstance removes a single DICOM instance.
+	DeleteInstance(ctx context.Context, studyUID, seriesUID, sopInstanceUID string) error
 }
 
 // ServerParams configures a WADO server.
@@ -148,6 +154,11 @@ func (s *wadoServer) buildMux() *http.ServeMux {
 	mux.HandleFunc("GET /qido/rs/studies", s.searchStudies)
 	mux.HandleFunc("GET /qido/rs/studies/{studyUID}/series", s.searchSeries)
 	mux.HandleFunc("GET /qido/rs/studies/{studyUID}/series/{seriesUID}/instances", s.searchInstances)
+
+	// WADO-RS delete
+	mux.HandleFunc("DELETE /wado/rs/studies/{studyUID}", s.deleteStudy)
+	mux.HandleFunc("DELETE /wado/rs/studies/{studyUID}/series/{seriesUID}", s.deleteSeries)
+	mux.HandleFunc("DELETE /wado/rs/studies/{studyUID}/series/{seriesUID}/instances/{sopInstanceUID}", s.deleteInstance)
 
 	return mux
 }
@@ -445,6 +456,34 @@ func parseFrameList(s string) ([]int, error) {
 func httpError(w http.ResponseWriter, err error, code int) {
 	slog.Error("WADO error", "err", err)
 	http.Error(w, err.Error(), code)
+}
+
+// ── WADO-RS delete handlers ───────────────────────────────────────────────────
+
+func (s *wadoServer) deleteStudy(w http.ResponseWriter, r *http.Request) {
+	if err := s.params.Store.DeleteStudy(r.Context(), r.PathValue("studyUID")); err != nil {
+		httpError(w, err, http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *wadoServer) deleteSeries(w http.ResponseWriter, r *http.Request) {
+	if err := s.params.Store.DeleteSeries(r.Context(),
+		r.PathValue("studyUID"), r.PathValue("seriesUID")); err != nil {
+		httpError(w, err, http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *wadoServer) deleteInstance(w http.ResponseWriter, r *http.Request) {
+	if err := s.params.Store.DeleteInstance(r.Context(),
+		r.PathValue("studyUID"), r.PathValue("seriesUID"), r.PathValue("sopInstanceUID")); err != nil {
+		httpError(w, err, http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // limitedReadAll reads at most 64 MiB from r to prevent memory exhaustion.

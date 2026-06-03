@@ -1067,3 +1067,45 @@ func containsString(data []byte, s string) bool {
 	}
 	return false
 }
+
+// TestSCP_WithTimeout verifies that SetTimeout is accepted without error and
+// that the SCP remains functional (a C-ECHO succeeds over the timed connection).
+func TestSCP_WithTimeout(t *testing.T) {
+	const port = 1067
+	_, testSCP := StartSCP(t, port)
+	testSCP.SetTimeout(30)
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool { return true })
+
+	dest := &network.Destination{
+		Name:      "Timeout SCP Test",
+		CalledAE:  "TEST_SCP",
+		CallingAE: "TEST_SCU",
+		HostName:  "localhost",
+		Port:      port,
+	}
+	scu := NewSCU(dest)
+	if err := scu.EchoSCU(context.Background()); err != nil {
+		t.Fatalf("EchoSCU with timeout SCP: %v", err)
+	}
+}
+
+// TestSCP_SetTimeout verifies that SetTimeout (called post-construction) is
+// accepted and that the SCP remains functional.
+func TestSCP_SetTimeout(t *testing.T) {
+	const port = 1068
+	_, testSCP := StartSCP(t, port)
+	testSCP.SetTimeout(30)
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool { return true })
+
+	dest := &network.Destination{
+		Name:      "SetTimeout SCP Test",
+		CalledAE:  "TEST_SCP",
+		CallingAE: "TEST_SCU",
+		HostName:  "localhost",
+		Port:      port,
+	}
+	scu := NewSCU(dest)
+	if err := scu.EchoSCU(context.Background()); err != nil {
+		t.Fatalf("EchoSCU with SetTimeout SCP: %v", err)
+	}
+}
