@@ -80,12 +80,17 @@ func GetTransferSyntaxFromUID(uid string) *TransferSyntax {
 			return ts
 		}
 	}
-	// Retry without a trailing byte to tolerate a UID that still carries an
-	// odd-length null/space pad byte the caller did not trim. Guard len > 0:
-	// an empty UID (e.g. from malformed/truncated file meta) must not slice to
-	// a negative bound.
-	if len(uid) > 0 {
-		trimmed := uid[:len(uid)-1]
+	// Retry without the trailing byte to recover from a known class of malformed
+	// UIDs: encoders that padded an odd-length UID with an extra character
+	// instead of trimming it. This deliberately handles non-standard padding too
+	// — testdata/test2-2.dcm carries "1.2.840.10008.1.2.10" (a stray '0' digit)
+	// that must resolve to "1.2.840.10008.1.2.1". A value is only returned when
+	// the trimmed string exactly matches a registered transfer syntax, so an
+	// unknown UID falls through to nil rather than being silently rewritten.
+	// Guard len > 0 so an empty UID (malformed or truncated file meta) is never
+	// sliced to a negative bound.
+	if n := len(uid); n > 0 {
+		trimmed := uid[:n-1]
 		for _, ts := range transferSyntaxes {
 			if ts.UID == trimmed {
 				return ts

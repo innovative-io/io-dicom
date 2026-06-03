@@ -39,8 +39,8 @@ func FuzzNewDCMObjFromBytes(f *testing.F) {
 		}
 		// Exercise read accessors on whatever was parsed to surface latent
 		// panics in tag/index handling.
-		_ = obj.TagCount()
-		for i := 0; i < obj.TagCount(); i++ {
+		n := obj.TagCount()
+		for i := 0; i < n; i++ {
 			tag := obj.GetTagAt(i)
 			if tag == nil {
 				continue

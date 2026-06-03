@@ -2,11 +2,15 @@
 
 NATIVE_CODEC_TAGS := libjpeg charls openjpeg libjxl openjph ffmpeg st2110
 
-# Pinned via go run so contributors and CI need no separate install step.
+# Run via `go run` so contributors and CI need no separate install step. Uses
+# @latest (intentionally not pinned) to track staticcheck releases and stay
+# compatible with the newest Go toolchain.
 STATICCHECK := go run honnef.co/go/tools/cmd/staticcheck@latest
 
-# Active fuzz time per target for `make fuzz`. The committed seed corpus
-# (including regression crashers under testdata/fuzz) always runs via `go test`.
+# Active fuzz time per target for `make fuzz`. The in-code seed corpus (the f.Add
+# inputs, including the empty-UID regression) always runs via `go test`. Note
+# testdata/ is gitignored, so Go's testdata/fuzz crasher corpus stays local and
+# untracked.
 FUZZTIME ?= 30s
 
 help:
