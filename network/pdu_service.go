@@ -922,10 +922,3 @@ func (pdu *pduService) parseRawVRIntoDCM(DCO media.DICOMObject) bool {
 	pdu.Pdata.Buffer.SetPosition(0)
 	return pdu.Pdata.Buffer.ReadObj(DCO) == nil
 }
-
-func (pdu *pduService) readPDU() error {
-	if pdu.pdulength < 4 {
-		return fmt.Errorf("pdu: malformed PDU length %d (minimum is 4)", pdu.pdulength)
-	}
-	return pdu.buf.ReadFully(pdu.readWriter, int(pdu.pdulength)-4)
-}
