@@ -544,37 +544,37 @@ func (s *scp) OnCStoreRequest(f func(ctx context.Context, request network.Associ
 	s.onCStoreRequest = f
 }
 
-func (s *scp) OnNEventReportRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+func (s *scp) OnNEventReportRequest(f NServiceHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onNEventReportRequest = f
 }
 
-func (s *scp) OnNGetRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+func (s *scp) OnNGetRequest(f NServiceHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onNGetRequest = f
 }
 
-func (s *scp) OnNSetRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+func (s *scp) OnNSetRequest(f NServiceHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onNSetRequest = f
 }
 
-func (s *scp) OnNActionRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+func (s *scp) OnNActionRequest(f NServiceHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onNActionRequest = f
 }
 
-func (s *scp) OnNCreateRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+func (s *scp) OnNCreateRequest(f NServiceHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onNCreateRequest = f
 }
 
-func (s *scp) OnNDeleteRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)) {
+func (s *scp) OnNDeleteRequest(f NServiceHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onNDeleteRequest = f

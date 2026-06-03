@@ -12,6 +12,17 @@ import (
 	"github.com/innovative-io/io-dicom/network"
 )
 
+// NServiceHandler is the common callback signature for the DICOM normalized
+// (N-) services: N-EVENT-REPORT, N-GET, N-SET, N-ACTION, N-CREATE, and
+// N-DELETE. It receives the request command object and any request dataset, and
+// returns the DIMSE status plus an optional response dataset.
+//
+// It is deliberately a type alias rather than a defined type: this keeps the
+// exported SCP interface method signatures byte-for-byte identical to the
+// previous func(...) types, so external implementations of SCP and any
+// type-identity checks continue to satisfy the interface without change.
+type NServiceHandler = func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
+
 // SCP - Interface to scp
 type SCP interface {
 	// Start begins accepting connections and blocks until the listener is
@@ -24,12 +35,12 @@ type SCP interface {
 	OnCGetRequest(f CGetHandler)
 	OnCMoveRequest(f CMoveHandler)
 	OnCStoreRequest(f func(ctx context.Context, request network.AssociationRequest, data media.DICOMObject) uint16)
-	OnNEventReportRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
-	OnNGetRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
-	OnNSetRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
-	OnNActionRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
-	OnNCreateRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
-	OnNDeleteRequest(f func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject))
+	OnNEventReportRequest(f NServiceHandler)
+	OnNGetRequest(f NServiceHandler)
+	OnNSetRequest(f NServiceHandler)
+	OnNActionRequest(f NServiceHandler)
+	OnNCreateRequest(f NServiceHandler)
+	OnNDeleteRequest(f NServiceHandler)
 	// OnCCancelRequest registers an optional callback invoked for incoming
 	// C-CANCEL-RQ message IDs.
 	OnCCancelRequest(f func(request network.AssociationRequest, messageID uint16))
@@ -103,12 +114,12 @@ type scp struct {
 	listener              net.Listener
 	wg                    sync.WaitGroup
 	mu                    sync.RWMutex
-	onNEventReportRequest func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
-	onNGetRequest         func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
-	onNSetRequest         func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
-	onNActionRequest      func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
-	onNCreateRequest      func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
-	onNDeleteRequest      func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
+	onNEventReportRequest NServiceHandler
+	onNGetRequest         NServiceHandler
+	onNSetRequest         NServiceHandler
+	onNActionRequest      NServiceHandler
+	onNCreateRequest      NServiceHandler
+	onNDeleteRequest      NServiceHandler
 
 	onAssociationRequest func(request network.AssociationRequest) bool
 	onCFindRequest       CFindHandler
