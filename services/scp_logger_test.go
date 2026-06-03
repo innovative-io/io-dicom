@@ -74,4 +74,9 @@ func TestSCP_WithLogger_RoutesAndCorrelates(t *testing.T) {
 	if !strings.Contains(out, "A-ASSOCIATE-AC") {
 		t.Errorf("A-ASSOCIATE-AC lines leaked to the default logger instead of the injected one:\n%s", out)
 	}
+	// Presentation-context-accept encode traces must also use the propagated
+	// connection logger rather than slog.Default().
+	if !strings.Contains(out, "accepted transfer syntax") {
+		t.Errorf("presentation-context accept lines leaked to the default logger instead of the injected one:\n%s", out)
+	}
 }

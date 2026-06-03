@@ -36,6 +36,7 @@ type presentationContextAccept struct {
 	Reserved4             byte
 	AbsSyntax             uidItem
 	TrnSyntax             uidItem
+	logger                *slog.Logger
 }
 
 // NewPresentationContextAccept creates a PresentationContextAccept
@@ -114,8 +115,9 @@ func (pc *presentationContextAccept) Write(rw *bufio.ReadWriter) (err error) {
 		tsName = transferSyntax.Description
 	}
 
-	slog.Debug("accepted abstract syntax", "uid", pc.GetAbstractSyntax().GetUID(), "description", sopName)
-	slog.Debug("accepted transfer syntax", "uid", pc.GetTrnSyntax().GetUID(), "description", tsName)
+	pcLog := loggerOrDefault(pc.logger)
+	pcLog.Debug("accepted abstract syntax", "uid", pc.GetAbstractSyntax().GetUID(), "description", sopName)
+	pcLog.Debug("accepted transfer syntax", "uid", pc.GetTrnSyntax().GetUID(), "description", tsName)
 
 	if err = bd.Send(rw); err == nil {
 		return pc.TrnSyntax.Write(rw)

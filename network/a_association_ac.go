@@ -153,6 +153,12 @@ func (aaac *associationAccept) Write(rw *bufio.ReadWriter) error {
 		return err
 	}
 	for _, presContextAccept := range aaac.PresContextAccepts {
+		// Propagate the connection logger so the context's encode traces carry
+		// the same per-association correlation attributes rather than falling
+		// back to slog.Default().
+		if pc, ok := presContextAccept.(*presentationContextAccept); ok {
+			pc.logger = aaac.logger
+		}
 		if err := presContextAccept.Write(rw); err != nil {
 			return err
 		}
