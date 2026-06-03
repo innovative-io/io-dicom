@@ -103,6 +103,35 @@ func (s *scp) pollCommand(conn net.Conn, pdu network.PDUService) (media.DICOMObj
 	return dco, nil
 }
 
+// handleNRequest services one DICOM normalized (N-) request: it reads the
+// optional request dataset, dispatches to handler (or replies
+// FailureSOPClassNotSupported when none is registered), and writes the response
+// identified by responseCmd. label is the human-readable service name used in
+// log messages (e.g. "N-Get"). It returns true when the caller must terminate
+// the association because an unrecoverable read/write error was logged.
+func (s *scp) handleNRequest(ctx context.Context, pdu network.PDUService, dco media.DICOMObject, label string, responseCmd uint16, handler NServiceHandler) (stop bool) {
+	var nData media.DICOMObject
+	if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
+		d, err := pdu.NextPDU()
+		if err != nil {
+			pdu.Logger().Error(label+" failed to read request dataset", "error", err)
+			return true
+		}
+		nData = d
+	}
+
+	status := dicomstatus.FailureSOPClassNotSupported
+	resp := media.NewEmptyDCMObj()
+	if handler != nil {
+		status, resp = handler(ctx, pdu.GetAAssociationRQ(), dco, nData)
+	}
+	if err := dimse.NWriteRSP(pdu, dco, responseCmd, status, resp); err != nil {
+		pdu.Logger().Error(label+" failed to write response", "error", err)
+		return true
+	}
+	return false
+}
+
 func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 	rw := bufio.NewReadWriter(
 		bufio.NewReaderSize(conn, s.bufSize),
@@ -315,134 +344,50 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			}
 
 		case dicomcommand.NEventReportRequest:
-			var nData media.DICOMObject
-			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
-				nData, err = pdu.NextPDU()
-				if err != nil {
-					pdu.Logger().Error("N-Event-Report failed to read request dataset", "error", err)
-					return
-				}
-			}
 			s.mu.RLock()
 			h := s.onNEventReportRequest
 			s.mu.RUnlock()
-			status := dicomstatus.FailureSOPClassNotSupported
-			resp := media.NewEmptyDCMObj()
-			if h != nil {
-				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
-			}
-			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NEventReportResponse, status, resp); err != nil {
-				pdu.Logger().Error("N-Event-Report failed to write response", "error", err)
+			if s.handleNRequest(ctx, pdu, dco, "N-Event-Report", dicomcommand.NEventReportResponse, h) {
 				return
 			}
 
 		case dicomcommand.NGetRequest:
-			var nData media.DICOMObject
-			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
-				nData, err = pdu.NextPDU()
-				if err != nil {
-					pdu.Logger().Error("N-Get failed to read request dataset", "error", err)
-					return
-				}
-			}
 			s.mu.RLock()
 			h := s.onNGetRequest
 			s.mu.RUnlock()
-			status := dicomstatus.FailureSOPClassNotSupported
-			resp := media.NewEmptyDCMObj()
-			if h != nil {
-				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
-			}
-			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NGetResponse, status, resp); err != nil {
-				pdu.Logger().Error("N-Get failed to write response", "error", err)
+			if s.handleNRequest(ctx, pdu, dco, "N-Get", dicomcommand.NGetResponse, h) {
 				return
 			}
 
 		case dicomcommand.NSetRequest:
-			var nData media.DICOMObject
-			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
-				nData, err = pdu.NextPDU()
-				if err != nil {
-					pdu.Logger().Error("N-Set failed to read request dataset", "error", err)
-					return
-				}
-			}
 			s.mu.RLock()
 			h := s.onNSetRequest
 			s.mu.RUnlock()
-			status := dicomstatus.FailureSOPClassNotSupported
-			resp := media.NewEmptyDCMObj()
-			if h != nil {
-				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
-			}
-			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NSetResponse, status, resp); err != nil {
-				pdu.Logger().Error("N-Set failed to write response", "error", err)
+			if s.handleNRequest(ctx, pdu, dco, "N-Set", dicomcommand.NSetResponse, h) {
 				return
 			}
 
 		case dicomcommand.NActionRequest:
-			var nData media.DICOMObject
-			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
-				nData, err = pdu.NextPDU()
-				if err != nil {
-					pdu.Logger().Error("N-Action failed to read request dataset", "error", err)
-					return
-				}
-			}
 			s.mu.RLock()
 			h := s.onNActionRequest
 			s.mu.RUnlock()
-			status := dicomstatus.FailureSOPClassNotSupported
-			resp := media.NewEmptyDCMObj()
-			if h != nil {
-				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
-			}
-			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NActionResponse, status, resp); err != nil {
-				pdu.Logger().Error("N-Action failed to write response", "error", err)
+			if s.handleNRequest(ctx, pdu, dco, "N-Action", dicomcommand.NActionResponse, h) {
 				return
 			}
 
 		case dicomcommand.NCreateRequest:
-			var nData media.DICOMObject
-			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
-				nData, err = pdu.NextPDU()
-				if err != nil {
-					pdu.Logger().Error("N-Create failed to read request dataset", "error", err)
-					return
-				}
-			}
 			s.mu.RLock()
 			h := s.onNCreateRequest
 			s.mu.RUnlock()
-			status := dicomstatus.FailureSOPClassNotSupported
-			resp := media.NewEmptyDCMObj()
-			if h != nil {
-				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
-			}
-			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NCreateResponse, status, resp); err != nil {
-				pdu.Logger().Error("N-Create failed to write response", "error", err)
+			if s.handleNRequest(ctx, pdu, dco, "N-Create", dicomcommand.NCreateResponse, h) {
 				return
 			}
 
 		case dicomcommand.NDeleteRequest:
-			var nData media.DICOMObject
-			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
-				nData, err = pdu.NextPDU()
-				if err != nil {
-					pdu.Logger().Error("N-Delete failed to read request dataset", "error", err)
-					return
-				}
-			}
 			s.mu.RLock()
 			h := s.onNDeleteRequest
 			s.mu.RUnlock()
-			status := dicomstatus.FailureSOPClassNotSupported
-			resp := media.NewEmptyDCMObj()
-			if h != nil {
-				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
-			}
-			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NDeleteResponse, status, resp); err != nil {
-				pdu.Logger().Error("N-Delete failed to write response", "error", err)
+			if s.handleNRequest(ctx, pdu, dco, "N-Delete", dicomcommand.NDeleteResponse, h) {
 				return
 			}
 
