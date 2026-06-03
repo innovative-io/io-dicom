@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/innovative-io/io-dicom/dictionary"
 )
 
 // tagPool recycles DICOMTag allocations in the read hot path.
@@ -145,15 +143,15 @@ func (tag *DICOMTag) WriteSeq(group uint16, element uint16, seq DICOMObject) {
 		buf.Write([]byte{0x00}, 1)
 	}
 	if tag.Length > 0 {
-		buf.SetPosition(0)
-		data, _ := buf.ReadSlice(int(tag.Length))
-		tag.Data = data
+		tag.Data = make([]byte, tag.Length)
+		copy(tag.Data, buf.data)
 	}
 }
 
 // ReadSeq - reads a dicom sequence
 func (tag *DICOMTag) ReadSeq(ExplicitVR bool) DICOMObject {
 	seq := NewEmptyDCMObj()
+	seq.SetExplicitVR(ExplicitVR)
 	// Wrap tag.Data directly instead of copying it into a fresh stream.
 	// len(tag.Data) == tag.Length for all tags produced by ReadTag.
 	// The backing array stays alive as long as any sub-tag holds a Data
@@ -164,10 +162,6 @@ func (tag *DICOMTag) ReadSeq(ExplicitVR bool) DICOMObject {
 		temptag, err := buf.ReadTag(ExplicitVR)
 		if err != nil {
 			break // position does not advance on error; continuing would loop forever
-		}
-
-		if !ExplicitVR {
-			temptag.VR = dictionary.GetDictionaryVR(tag.Group, tag.Element)
 		}
 		seq.Add(temptag)
 	}

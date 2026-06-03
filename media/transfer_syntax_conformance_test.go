@@ -31,8 +31,8 @@ func TestSupportedTransferSyntaxesHaveMediaLayerCoverage(t *testing.T) {
 	compressSection := sourceSection(t, tsSrc, "func compress(", "func uncompress(")
 	// uncompress delegates to codecs.DecompressFrame; check coverage there.
 	uncompressSection := string(dispatchSource)
-	parseSection := sourceSection(t, src, "func parseDICOMBuffer(", "func (obj *dicomObject) WriteToBytes()")
-	writeSection := sourceSection(t, src, "func (obj *dicomObject) WriteToBytes()", "func (obj *dicomObject) DumpTags()")
+	parseSection := sourceSection(t, src, "func parseDICOMBuffer(", "func (obj *dicomObject) encodeToBytes()")
+	writeSection := sourceSection(t, src, "func (obj *dicomObject) encodeToBytes()", "func (obj *dicomObject) DumpTags()")
 
 	type nativeDatasetExpectation struct {
 		transferSyntax    *transfersyntax.TransferSyntax

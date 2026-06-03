@@ -1,6 +1,7 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -449,11 +450,23 @@ func (obj *dicomObject) Add(tag *DICOMTag) {
 	}
 }
 
-func (obj *dicomObject) WriteToBytes() []byte {
-	if err := ValidateFileWrite(obj); err != nil {
-		return nil
+// upsertTag overwrites the existing tag with the same group+element key in
+// place, or calls Add when no such tag exists yet. This ensures that repeated
+// Write calls for the same tag do not accumulate duplicate entries.
+func (obj *dicomObject) upsertTag(newTag *DICOMTag) {
+	obj.ensureTagIndex()
+	k := tagKey(newTag.Group, newTag.Element)
+	if existing, ok := obj.tagIndex[k]; ok {
+		existing.Data = newTag.Data
+		existing.Length = newTag.Length
+		existing.VR = newTag.VR
+		existing.BigEndian = newTag.BigEndian
+		return
 	}
+	obj.Add(newTag)
+}
 
+func (obj *dicomObject) encodeToBytes() []byte {
 	// Pre-size the output buffer by summing the actual data length of every tag
 	// (plus a worst-case 12-byte explicit VR header) and adding meta overhead.
 	// This avoids the repeated doubling reallocations that start from 4096 bytes.
@@ -468,12 +481,15 @@ func (obj *dicomObject) WriteToBytes() []byte {
 	}
 	buf := NewDICOMBufferWithCapacity(estimatedSize)
 
-	if obj.TransferSyntax.UID == transfersyntax.ExplicitVRBigEndian.UID {
-		buf.SetBigEndian(true)
-	}
 	SOPClassUID := obj.GetString(tags.SOPClassUID)
 	SOPInstanceUID := obj.GetString(tags.SOPInstanceUID)
 	buf.WriteMeta(SOPClassUID, SOPInstanceUID, obj.TransferSyntax.UID)
+	// File Meta Information is always little-endian per DICOM PS3.10 §10.1.
+	// The big-endian flag must only be set after WriteMeta so the dataset
+	// (not the meta header) is written in the correct byte order.
+	if obj.TransferSyntax.UID == transfersyntax.ExplicitVRBigEndian.UID {
+		buf.SetBigEndian(true)
+	}
 	if obj.TransferSyntax.UID == transfersyntax.DeflatedExplicitVRLittleEndian.UID {
 		rawDataset := NewDICOMBuffer()
 		rawDataset.WriteObj(obj)
@@ -486,8 +502,14 @@ func (obj *dicomObject) WriteToBytes() []byte {
 	} else {
 		buf.WriteObj(obj)
 	}
-	buf.SetPosition(0)
 	return buf.GetAllBytes()
+}
+
+func (obj *dicomObject) WriteToBytes() []byte {
+	if err := ValidateFileWrite(obj); err != nil {
+		return nil
+	}
+	return obj.encodeToBytes()
 }
 
 func ValidateFileWrite(obj DICOMObject) error {
@@ -520,11 +542,10 @@ func ValidateFileWrite(obj DICOMObject) error {
 
 // Wrote - Write a DICOM Object to a DICOM File
 func (obj *dicomObject) WriteToFile(fileName string) error {
-	data := obj.WriteToBytes()
-	if data == nil {
-		return ValidateFileWrite(obj)
+	if err := ValidateFileWrite(obj); err != nil {
+		return err
 	}
-	return os.WriteFile(fileName, data, 0o600)
+	return os.WriteFile(fileName, obj.encodeToBytes(), 0o600)
 }
 
 // DateRange represents a DICOM date range query value (e.g. for C-FIND).
@@ -533,7 +554,7 @@ type DateRange struct{ Start, End time.Time }
 func (obj *dicomObject) Write(tag *tags.Tag, value any) {
 	switch v := value.(type) {
 	case string:
-		obj.Add(NewStringTag(tag.Group, tag.Element, tag.VR, v))
+		obj.upsertTag(NewStringTag(tag.Group, tag.Element, tag.VR, v))
 	case uint16:
 		c := make([]byte, 2)
 		if obj.BigEndian {
@@ -543,7 +564,7 @@ func (obj *dicomObject) Write(tag *tags.Tag, value any) {
 		}
 		t := &DICOMTag{Group: tag.Group, Element: tag.Element, Length: 2, VR: tag.VR, Data: c, BigEndian: obj.BigEndian}
 		FillTag(t)
-		obj.Add(t)
+		obj.upsertTag(t)
 	case uint32:
 		c := make([]byte, 4)
 		if obj.BigEndian {
@@ -553,7 +574,7 @@ func (obj *dicomObject) Write(tag *tags.Tag, value any) {
 		}
 		t := &DICOMTag{Group: tag.Group, Element: tag.Element, Length: 4, VR: tag.VR, Data: c, BigEndian: obj.BigEndian}
 		FillTag(t)
-		obj.Add(t)
+		obj.upsertTag(t)
 	case int:
 		// Untyped integer constants box as int; dispatch to the correct width via VR.
 		switch tag.VR {
@@ -570,7 +591,7 @@ func (obj *dicomObject) Write(tag *tags.Tag, value any) {
 		default: // "DA"
 			s = v.Format("20060102")
 		}
-		obj.Add(NewStringTag(tag.Group, tag.Element, tag.VR, s))
+		obj.upsertTag(NewStringTag(tag.Group, tag.Element, tag.VR, s))
 	case float32:
 		c := make([]byte, 4)
 		if obj.BigEndian {
@@ -580,7 +601,7 @@ func (obj *dicomObject) Write(tag *tags.Tag, value any) {
 		}
 		t := &DICOMTag{Group: tag.Group, Element: tag.Element, Length: 4, VR: tag.VR, Data: c, BigEndian: obj.BigEndian}
 		FillTag(t)
-		obj.Add(t)
+		obj.upsertTag(t)
 	case float64:
 		c := make([]byte, 8)
 		if obj.BigEndian {
@@ -590,9 +611,9 @@ func (obj *dicomObject) Write(tag *tags.Tag, value any) {
 		}
 		t := &DICOMTag{Group: tag.Group, Element: tag.Element, Length: 8, VR: tag.VR, Data: c, BigEndian: obj.BigEndian}
 		FillTag(t)
-		obj.Add(t)
+		obj.upsertTag(t)
 	case DateRange:
-		obj.Add(NewStringTag(tag.Group, tag.Element, tag.VR,
+		obj.upsertTag(NewStringTag(tag.Group, tag.Element, tag.VR,
 			fmt.Sprintf("%s-%s", v.Start.Format("20060102"), v.End.Format("20060102"))))
 	}
 }
@@ -689,17 +710,7 @@ func parseBasicOffsetTable(data []byte) []uint32 {
 }
 
 func joinFragments(fragments [][]byte) []byte {
-	total := 0
-	for _, frag := range fragments {
-		total += len(frag)
-	}
-	out := make([]byte, total)
-	pos := 0
-	for _, frag := range fragments {
-		copy(out[pos:], frag)
-		pos += len(frag)
-	}
-	return out
+	return bytes.Join(fragments, nil)
 }
 
 func frameFragmentRangeByBOT(offsets []uint32, frame int, fragmentPayloadSizes []int) (int, int, bool) {
@@ -806,6 +817,58 @@ func readPixelMeta(tagList []*DICOMTag) (pm pixelMeta, pixelIdx int) {
 	return
 }
 
+// compressedFrameBytes returns the raw encoded bytes for frameIndex from the
+// encapsulated pixel data sequence whose parent tag is at obj.Tags[pixelTagIdx].
+// It is the shared implementation for GetPixelData and GetDecompressedFrame.
+func (obj *dicomObject) compressedFrameBytes(pixelTagIdx int, frames uint32, frameIndex int) ([]byte, error) {
+	if pixelTagIdx+1 >= len(obj.Tags) {
+		return nil, errors.New("missing basic offset table")
+	}
+	botItem := obj.GetTagAt(pixelTagIdx + 1)
+	if botItem == nil || botItem.Group != 0xFFFE || botItem.Element != 0xE000 {
+		return nil, errors.New("invalid encapsulated pixel data layout")
+	}
+
+	var fragments [][]byte
+	var payloadSizes []int
+	for tagIdx := pixelTagIdx + 2; tagIdx < len(obj.Tags); tagIdx++ {
+		t := obj.GetTagAt(tagIdx)
+		if t == nil {
+			continue
+		}
+		if t.Group == 0xFFFE && t.Element == 0xE0DD {
+			break
+		}
+		if t.Group == 0xFFFE && t.Element == 0xE000 {
+			fragments = append(fragments, t.Data)
+			payloadSizes = append(payloadSizes, len(t.Data))
+		}
+	}
+
+	if len(fragments) == 0 {
+		return nil, fmt.Errorf("frame %d out of range", frameIndex)
+	}
+	if frames <= 1 {
+		return joinFragments(fragments), nil
+	}
+	if len(fragments) == int(frames) {
+		out := make([]byte, len(fragments[frameIndex]))
+		copy(out, fragments[frameIndex])
+		return out, nil
+	}
+	botOffsets := parseBasicOffsetTable(botItem.Data)
+	if len(botOffsets) >= int(frames) {
+		start, end, ok := frameFragmentRangeByBOT(botOffsets[:frames], frameIndex, payloadSizes)
+		if ok {
+			return joinFragments(fragments[start:end]), nil
+		}
+	}
+	if frameIndex == 0 {
+		return joinFragments(fragments), nil
+	}
+	return nil, fmt.Errorf("frame %d out of range", frameIndex)
+}
+
 func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 	if !transfersyntax.SupportedTransferSyntax(obj.TransferSyntax.UID) {
 		return nil, fmt.Errorf("unsupported transfer syntax %s", obj.TransferSyntax.Name)
@@ -839,58 +902,7 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 	}
 
 	if tag.Length == 0xFFFFFFFF {
-		if i+1 >= len(obj.Tags) {
-			return nil, errors.New("missing basic offset table")
-		}
-
-		botItem := obj.GetTagAt(i + 1)
-		if botItem == nil || botItem.Group != 0xFFFE || botItem.Element != 0xE000 {
-			return nil, errors.New("invalid encapsulated pixel data layout")
-		}
-
-		fragments := make([][]byte, 0)
-		fragmentPayloadSizes := make([]int, 0)
-		for tagIdx := i + 2; tagIdx < len(obj.Tags); tagIdx++ {
-			t := obj.GetTagAt(tagIdx)
-			if t == nil {
-				continue
-			}
-			if t.Group == 0xFFFE && t.Element == 0xE0DD {
-				break
-			}
-			if t.Group == 0xFFFE && t.Element == 0xE000 {
-				fragments = append(fragments, t.Data)
-				fragmentPayloadSizes = append(fragmentPayloadSizes, len(t.Data))
-			}
-		}
-
-		if len(fragments) == 0 {
-			return nil, fmt.Errorf("frame %d out of range", frame)
-		}
-
-		if frames <= 1 {
-			return joinFragments(fragments), nil
-		}
-
-		if len(fragments) == int(frames) {
-			out := make([]byte, len(fragments[frame]))
-			copy(out, fragments[frame])
-			return out, nil
-		}
-
-		botOffsets := parseBasicOffsetTable(botItem.Data)
-		if len(botOffsets) >= int(frames) {
-			start, end, ok := frameFragmentRangeByBOT(botOffsets[:frames], frame, fragmentPayloadSizes)
-			if ok {
-				return joinFragments(fragments[start:end]), nil
-			}
-		}
-
-		if frame == 0 {
-			return joinFragments(fragments), nil
-		}
-
-		return nil, fmt.Errorf("frame %d out of range", frame)
+		return obj.compressedFrameBytes(i, frames, frame)
 	}
 
 	// Uncompressed path: total pixel data must fit within the allocation cap.
@@ -983,51 +995,9 @@ func (obj *dicomObject) GetDecompressedFrame(ctx context.Context, frameIndex int
 
 	if tag.Length == 0xFFFFFFFF {
 		// Encapsulated (compressed): extract fragment bytes then decompress.
-		if i+1 >= len(obj.Tags) {
-			return nil, errors.New("missing basic offset table")
-		}
-		botItem := obj.GetTagAt(i + 1)
-		if botItem == nil || botItem.Group != 0xFFFE || botItem.Element != 0xE000 {
-			return nil, errors.New("invalid encapsulated pixel data layout")
-		}
-		fragments := make([][]byte, 0)
-		fragmentPayloadSizes := make([]int, 0)
-		for tagIdx := i + 2; tagIdx < len(obj.Tags); tagIdx++ {
-			t := obj.GetTagAt(tagIdx)
-			if t == nil {
-				continue
-			}
-			if t.Group == 0xFFFE && t.Element == 0xE0DD {
-				break
-			}
-			if t.Group == 0xFFFE && t.Element == 0xE000 {
-				fragments = append(fragments, t.Data)
-				fragmentPayloadSizes = append(fragmentPayloadSizes, len(t.Data))
-			}
-		}
-		if len(fragments) == 0 {
-			return nil, fmt.Errorf("frame %d out of range", frameIndex)
-		}
-		var compressedFrame []byte
-		if frames <= 1 {
-			compressedFrame = joinFragments(fragments)
-		} else if len(fragments) == int(frames) {
-			compressedFrame = fragments[frameIndex]
-		} else {
-			botOffsets := parseBasicOffsetTable(botItem.Data)
-			if len(botOffsets) >= int(frames) {
-				start, end, ok := frameFragmentRangeByBOT(botOffsets[:frames], frameIndex, fragmentPayloadSizes)
-				if ok {
-					compressedFrame = joinFragments(fragments[start:end])
-				}
-			}
-			if compressedFrame == nil {
-				if frameIndex == 0 {
-					compressedFrame = joinFragments(fragments)
-				} else {
-					return nil, fmt.Errorf("frame %d out of range", frameIndex)
-				}
-			}
+		compressedFrame, err := obj.compressedFrameBytes(i, frames, frameIndex)
+		if err != nil {
+			return nil, err
 		}
 		out := make([]byte, frameSize)
 		if err := decompressSingleFrame(ctx, obj.TransferSyntax.UID, compressedFrame, bitsa, photoInt, out); err != nil {
