@@ -15,8 +15,12 @@ import (
 // NServiceHandler is the common callback signature for the DICOM normalized
 // (N-) services: N-EVENT-REPORT, N-GET, N-SET, N-ACTION, N-CREATE, and
 // N-DELETE. It receives the request command object and any request dataset, and
-// returns the DIMSE status plus an optional response dataset. It is a type alias
-// so existing code passing plain function literals continues to compile.
+// returns the DIMSE status plus an optional response dataset.
+//
+// It is deliberately a type alias rather than a defined type: this keeps the
+// exported SCP interface method signatures byte-for-byte identical to the
+// previous func(...) types, so external implementations of SCP and any
+// type-identity checks continue to satisfy the interface without change.
 type NServiceHandler = func(ctx context.Context, request network.AssociationRequest, command media.DICOMObject, data media.DICOMObject) (status uint16, responseData media.DICOMObject)
 
 // SCP - Interface to scp
