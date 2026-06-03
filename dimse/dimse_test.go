@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"testing"
 
@@ -72,6 +73,8 @@ func (m *mockPDU) SetNetConn(_ net.Conn)                                        
 func (m *mockPDU) AddPresContexts(_ network.PresentationContext)                   {}
 func (m *mockPDU) SetOnAssociationRequest(_ func(network.AssociationRequest) bool) {}
 func (m *mockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))                         {}
+func (m *mockPDU) SetLogger(_ *slog.Logger)                                        {}
+func (m *mockPDU) Logger() *slog.Logger                                            { return slog.Default() }
 func (m *mockPDU) GetAcceptedPresentationContexts() []network.PresentationContextAccept {
 	return nil
 }

@@ -81,6 +81,7 @@ type associationReject struct {
 	Result    byte
 	Source    byte
 	Reason    byte
+	logger    *slog.Logger
 }
 
 // NewAssociationReject creates an association reject
@@ -113,7 +114,7 @@ func (aarj *associationReject) Size() uint32 {
 func (aarj *associationReject) Write(rw *bufio.ReadWriter) error {
 	bd := media.NewDICOMBuffer()
 
-	slog.Info("ASSOC-RJ:", "Reason", aarj.GetReason())
+	loggerOrDefault(aarj.logger).Warn("association rejected", "reason", aarj.GetReason())
 
 	bd.SetBigEndian(true)
 	aarj.Size()

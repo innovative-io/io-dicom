@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
@@ -17,6 +18,14 @@ import (
 	"github.com/innovative-io/io-dicom/network/dicomcommand"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
 )
+
+// assocCounter assigns each accepted association a process-unique, monotonically
+// increasing id used to correlate its log lines.
+var assocCounter atomic.Uint64
+
+func nextAssocID() uint64 {
+	return assocCounter.Add(1)
+}
 
 func abortAssociation(rw *bufio.ReadWriter, conn net.Conn) {
 	if rw != nil {
@@ -58,7 +67,7 @@ func (s *scp) consumeCanceled(messageID uint16) bool {
 	return ok
 }
 
-func (s *scp) handleCancelCommand(assocRQ network.AssociationRequest, dco media.DICOMObject) uint16 {
+func (s *scp) handleCancelCommand(log *slog.Logger, assocRQ network.AssociationRequest, dco media.DICOMObject) uint16 {
 	messageID := dco.GetUint16(tags.MessageIDBeingRespondedTo)
 	s.markCanceled(messageID)
 
@@ -69,7 +78,7 @@ func (s *scp) handleCancelCommand(assocRQ network.AssociationRequest, dco media.
 		cancelHandler(assocRQ, messageID)
 	}
 
-	slog.Info("scp: C-CANCEL received", "message_id_being_responded_to", messageID)
+	log.Info("C-CANCEL received", "message_id_being_responded_to", messageID)
 	return messageID
 }
 
@@ -104,6 +113,15 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 	pdu.SetConn(rw)
 	pdu.SetNetConn(conn)
 
+	// Per-association logger: tag every line with a process-unique id and the
+	// peer address from the outset, then enrich with the negotiated AE titles
+	// once the association is established.
+	connLog := s.logger.With(
+		"assoc_id", nextAssocID(),
+		"remote_addr", conn.RemoteAddr().String(),
+	)
+	pdu.SetLogger(connLog)
+
 	s.mu.RLock()
 	assocHandler := s.onAssociationRequest
 	onRawPDU := s.onRawPDU
@@ -115,6 +133,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 
 	defer conn.Close()
 	queuedCommands := make([]media.DICOMObject, 0, 1)
+	negotiated := false
 
 	for {
 		var (
@@ -129,14 +148,19 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			dco, err = pdu.NextPDU()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					slog.Debug("scp: connection closed (EOF)", "ADDRESS", conn.RemoteAddr())
+					pdu.Logger().Debug("connection closed (EOF)")
 				} else if !errors.Is(err, network.ErrAssociationReleased) &&
 					!errors.Is(err, network.ErrAssociationAborted) &&
 					!errors.Is(err, network.ErrAssociationRejected) {
-					slog.Error("scp: network error", "ERROR", err)
+					pdu.Logger().Error("network error", "error", err)
 				}
 				return
 			}
+		}
+		if !negotiated {
+			negotiated = true
+			connLog = connLog.With("calling_ae", pdu.GetCallingAE(), "called_ae", pdu.GetCalledAE())
+			pdu.SetLogger(connLog)
 		}
 		if dco == nil {
 			continue
@@ -146,7 +170,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 		case dicomcommand.CStoreRequest:
 			ddo, err := pdu.NextPDU()
 			if err != nil {
-				slog.Error("scp: C-Store failed to read request", "ERROR", err.Error())
+				pdu.Logger().Error("C-Store failed to read request", "error", err)
 				return
 			}
 
@@ -155,9 +179,9 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			s.mu.RUnlock()
 
 			if storeHandler == nil {
-				slog.Warn("scp: OnCStoreRequest not registered")
+				pdu.Logger().Warn("OnCStoreRequest not registered")
 				if err := dimse.CStoreWriteRSP(pdu, dco, dicomstatus.FailureProcessingFailure); err != nil {
-					slog.Error("scp: C-Store failed to write error response", "ERROR", err.Error())
+					pdu.Logger().Error("C-Store failed to write error response", "error", err)
 					return
 				}
 				continue
@@ -165,26 +189,26 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 
 			status := storeHandler(ctx, pdu.GetAAssociationRQ(), ddo)
 			if err := dimse.CStoreWriteRSP(pdu, dco, status); err != nil {
-				slog.Error("scp: C-Store failed to write response", "ERROR", err.Error())
+				pdu.Logger().Error("C-Store failed to write response", "error", err)
 				return
 			}
 
 		case dicomcommand.CFindRequest:
 			ddo, err := pdu.NextPDU()
 			if err != nil {
-				slog.Error("scp: C-Find failed to read request", "ERROR", err.Error())
+				pdu.Logger().Error("C-Find failed to read request", "error", err)
 				return
 			}
 			if !isValidCFindQueryRetrieveLevel(ddo.GetString(tags.QueryRetrieveLevel)) {
 				if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), dicomstatus.FailureIdentifierDoesNotMatchSOPClass); err != nil {
-					slog.Error("scp: C-Find failed to write invalid-identifier response", "ERROR", err.Error())
+					pdu.Logger().Error("C-Find failed to write invalid-identifier response", "error", err)
 					return
 				}
 				continue
 			}
 			if s.consumeCanceled(dco.GetUint16(tags.MessageID)) {
 				if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), dicomstatus.Cancel); err != nil {
-					slog.Error("scp: C-Find failed to write cancel response", "ERROR", err.Error())
+					pdu.Logger().Error("C-Find failed to write cancel response", "error", err)
 					return
 				}
 				continue
@@ -195,9 +219,9 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			s.mu.RUnlock()
 
 			if findHandler == nil {
-				slog.Warn("scp: OnCFindRequest not registered")
+				pdu.Logger().Warn("OnCFindRequest not registered")
 				if err := dimse.CFindWriteRSP(pdu, dco, media.NewEmptyDCMObj(), dicomstatus.FailureProcessingFailure); err != nil {
-					slog.Error("scp: C-Find failed to write error response", "ERROR", err.Error())
+					pdu.Logger().Error("C-Find failed to write error response", "error", err)
 					return
 				}
 				continue
@@ -205,26 +229,26 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 
 			queryLevel := ddo.GetString(tags.QueryRetrieveLevel)
 			if err := s.runCFindOperation(rw, conn, pdu, &queuedCommands, dco, pdu.GetAAssociationRQ(), queryLevel, ddo, findHandler); err != nil {
-				slog.Error("scp: C-Find operation failed", "ERROR", err.Error())
+				pdu.Logger().Error("C-Find operation failed", "error", err)
 				return
 			}
 
 		case dicomcommand.CGetRequest:
 			ddo, err := pdu.NextPDU()
 			if err != nil {
-				slog.Error("scp: C-Get failed to read request", "ERROR", err.Error())
+				pdu.Logger().Error("C-Get failed to read request", "error", err)
 				return
 			}
 			if !isValidQueryRetrieveLevel(ddo.GetString(tags.QueryRetrieveLevel)) {
 				if err := dimse.CGetWriteRSP(pdu, dco, dicomstatus.FailureIdentifierDoesNotMatchSOPClass, 0, 0, 0, 0); err != nil {
-					slog.Error("scp: C-Get failed to write invalid-identifier response", "ERROR", err.Error())
+					pdu.Logger().Error("C-Get failed to write invalid-identifier response", "error", err)
 					return
 				}
 				continue
 			}
 			if s.consumeCanceled(dco.GetUint16(tags.MessageID)) {
 				if err := dimse.CGetWriteRSP(pdu, dco, dicomstatus.Cancel, 0, 0, 0, 0); err != nil {
-					slog.Error("scp: C-Get failed to write cancel response", "ERROR", err.Error())
+					pdu.Logger().Error("C-Get failed to write cancel response", "error", err)
 					return
 				}
 				continue
@@ -235,9 +259,9 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			s.mu.RUnlock()
 
 			if getHandler == nil {
-				slog.Warn("scp: OnCGetRequest not registered")
+				pdu.Logger().Warn("OnCGetRequest not registered")
 				if err := dimse.CGetWriteRSP(pdu, dco, dicomstatus.FailureSOPClassNotSupported, 0, 0, 0, 0); err != nil {
-					slog.Error("scp: C-Get failed to write error response", "ERROR", err.Error())
+					pdu.Logger().Error("C-Get failed to write error response", "error", err)
 					return
 				}
 				continue
@@ -245,26 +269,26 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 
 			getLevel := ddo.GetString(tags.QueryRetrieveLevel)
 			if err := s.runCGetOperation(rw, conn, pdu, &queuedCommands, dco, pdu.GetAAssociationRQ(), getLevel, ddo, getHandler); err != nil {
-				slog.Error("scp: C-Get operation failed", "ERROR", err.Error())
+				pdu.Logger().Error("C-Get operation failed", "error", err)
 				return
 			}
 
 		case dicomcommand.CMoveRequest:
 			ddo, err := pdu.NextPDU()
 			if err != nil {
-				slog.Error("scp: C-Move failed to read request", "ERROR", err.Error())
+				pdu.Logger().Error("C-Move failed to read request", "error", err)
 				return
 			}
 			if !isValidQueryRetrieveLevel(ddo.GetString(tags.QueryRetrieveLevel)) {
 				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.FailureIdentifierDoesNotMatchSOPClass, 0, 0, 0, 0); err != nil {
-					slog.Error("scp: C-Move failed to write invalid-identifier response", "ERROR", err.Error())
+					pdu.Logger().Error("C-Move failed to write invalid-identifier response", "error", err)
 					return
 				}
 				continue
 			}
 			if s.consumeCanceled(dco.GetUint16(tags.MessageID)) {
 				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.Cancel, 0, 0, 0, 0); err != nil {
-					slog.Error("scp: C-Move failed to write cancel response", "ERROR", err.Error())
+					pdu.Logger().Error("C-Move failed to write cancel response", "error", err)
 					return
 				}
 				continue
@@ -275,9 +299,9 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			s.mu.RUnlock()
 
 			if moveHandler == nil {
-				slog.Warn("scp: OnCMoveRequest not registered")
+				pdu.Logger().Warn("OnCMoveRequest not registered")
 				if err := dimse.CMoveWriteRSP(pdu, dco, dicomstatus.FailureProcessingFailure, 0, 0, 0, 0); err != nil {
-					slog.Error("scp: C-Move failed to write error response", "ERROR", err.Error())
+					pdu.Logger().Error("C-Move failed to write error response", "error", err)
 					return
 				}
 				continue
@@ -286,7 +310,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			moveLevel := ddo.GetString(tags.QueryRetrieveLevel)
 			moveDestAE := dco.GetString(tags.MoveDestination)
 			if err := s.runCMoveOperation(rw, conn, pdu, &queuedCommands, dco, pdu.GetAAssociationRQ(), moveDestAE, moveLevel, ddo, moveHandler); err != nil {
-				slog.Error("scp: C-Move operation failed", "ERROR", err.Error())
+				pdu.Logger().Error("C-Move operation failed", "error", err)
 				return
 			}
 
@@ -295,7 +319,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
-					slog.Error("scp: N-Event-Report failed to read request dataset", "ERROR", err.Error())
+					pdu.Logger().Error("N-Event-Report failed to read request dataset", "error", err)
 					return
 				}
 			}
@@ -308,7 +332,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
 			}
 			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NEventReportResponse, status, resp); err != nil {
-				slog.Error("scp: N-Event-Report failed to write response", "ERROR", err.Error())
+				pdu.Logger().Error("N-Event-Report failed to write response", "error", err)
 				return
 			}
 
@@ -317,7 +341,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
-					slog.Error("scp: N-Get failed to read request dataset", "ERROR", err.Error())
+					pdu.Logger().Error("N-Get failed to read request dataset", "error", err)
 					return
 				}
 			}
@@ -330,7 +354,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
 			}
 			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NGetResponse, status, resp); err != nil {
-				slog.Error("scp: N-Get failed to write response", "ERROR", err.Error())
+				pdu.Logger().Error("N-Get failed to write response", "error", err)
 				return
 			}
 
@@ -339,7 +363,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
-					slog.Error("scp: N-Set failed to read request dataset", "ERROR", err.Error())
+					pdu.Logger().Error("N-Set failed to read request dataset", "error", err)
 					return
 				}
 			}
@@ -352,7 +376,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
 			}
 			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NSetResponse, status, resp); err != nil {
-				slog.Error("scp: N-Set failed to write response", "ERROR", err.Error())
+				pdu.Logger().Error("N-Set failed to write response", "error", err)
 				return
 			}
 
@@ -361,7 +385,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
-					slog.Error("scp: N-Action failed to read request dataset", "ERROR", err.Error())
+					pdu.Logger().Error("N-Action failed to read request dataset", "error", err)
 					return
 				}
 			}
@@ -374,7 +398,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
 			}
 			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NActionResponse, status, resp); err != nil {
-				slog.Error("scp: N-Action failed to write response", "ERROR", err.Error())
+				pdu.Logger().Error("N-Action failed to write response", "error", err)
 				return
 			}
 
@@ -383,7 +407,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
-					slog.Error("scp: N-Create failed to read request dataset", "ERROR", err.Error())
+					pdu.Logger().Error("N-Create failed to read request dataset", "error", err)
 					return
 				}
 			}
@@ -396,7 +420,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
 			}
 			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NCreateResponse, status, resp); err != nil {
-				slog.Error("scp: N-Create failed to write response", "ERROR", err.Error())
+				pdu.Logger().Error("N-Create failed to write response", "error", err)
 				return
 			}
 
@@ -405,7 +429,7 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			if dco.GetUint16(tags.CommandDataSetType) != dicomcommand.DataSetNone {
 				nData, err = pdu.NextPDU()
 				if err != nil {
-					slog.Error("scp: N-Delete failed to read request dataset", "ERROR", err.Error())
+					pdu.Logger().Error("N-Delete failed to read request dataset", "error", err)
 					return
 				}
 			}
@@ -418,13 +442,13 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 				status, resp = h(ctx, pdu.GetAAssociationRQ(), dco, nData)
 			}
 			if err := dimse.NWriteRSP(pdu, dco, dicomcommand.NDeleteResponse, status, resp); err != nil {
-				slog.Error("scp: N-Delete failed to write response", "ERROR", err.Error())
+				pdu.Logger().Error("N-Delete failed to write response", "error", err)
 				return
 			}
 
 		case dicomcommand.CCancelRequest:
 			// C-CANCEL-RQ applies to in-progress C-FIND/C-MOVE/C-GET operations.
-			s.handleCancelCommand(pdu.GetAAssociationRQ(), dco)
+			s.handleCancelCommand(pdu.Logger(), pdu.GetAAssociationRQ(), dco)
 
 		case dicomcommand.CEchoRequest:
 			s.mu.RLock()
@@ -432,16 +456,16 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			s.mu.RUnlock()
 
 			if echoHandler != nil && !echoHandler(pdu.GetAAssociationRQ()) {
-				slog.Warn("scp: C-Echo rejected by handler")
+				pdu.Logger().Warn("C-Echo rejected by handler")
 				return
 			}
 			if err := dimse.CEchoWriteRSP(pdu, dco); err != nil {
-				slog.Error("scp: C-Echo failed to write response", "ERROR", err.Error())
+				pdu.Logger().Error("C-Echo failed to write response", "error", err)
 				return
 			}
 
 		default:
-			slog.Warn("scp: command not implemented, skipping", "COMMAND", command)
+			pdu.Logger().Warn("command not implemented, skipping", "command", command)
 		}
 	}
 }

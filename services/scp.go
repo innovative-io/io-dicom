@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/tls"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -126,6 +127,7 @@ type scp struct {
 	implVersion     string
 	timeout         int
 	maxAssociations int
+	logger          *slog.Logger
 }
 
 // SCPOption configures an SCP at construction time.
@@ -164,6 +166,18 @@ func WithCancelGraceWindow(d time.Duration) SCPOption {
 	}
 }
 
+// WithLogger sets the structured logger for the SCP. Each accepted association
+// derives a child logger carrying correlation attributes (assoc_id, remote_addr,
+// and the negotiated AE titles), so log lines from concurrent associations can
+// be told apart. Defaults to slog.Default() when unset.
+func WithLogger(logger *slog.Logger) SCPOption {
+	return func(s *scp) {
+		if logger != nil {
+			s.logger = logger
+		}
+	}
+}
+
 // WithMaxAssociations bounds the number of associations the SCP will service
 // concurrently. Connections accepted beyond the limit block in the accept loop
 // (applying TCP backpressure) until an in-flight association completes, rather
@@ -193,6 +207,7 @@ func NewSCP(port int, opts ...SCPOption) SCP {
 		bufSize:            scpBufSize,
 		cancelPoll:         cancelPollWindow,
 		cancelGrace:        cancelGraceWindow,
+		logger:             slog.Default(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -210,6 +225,7 @@ func NewSCPWithTLS(port int, cfg *tls.Config, opts ...SCPOption) SCP {
 		bufSize:            scpBufSize,
 		cancelPoll:         cancelPollWindow,
 		cancelGrace:        cancelGraceWindow,
+		logger:             slog.Default(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -229,15 +245,26 @@ func normalizeServerTLSConfig(cfg *tls.Config) *tls.Config {
 }
 
 // newPDUService creates a PDUService, applying a per-SCP implementation class
-// override and timeout if configured.
+// override and timeout if configured. The configuration fields are read under
+// the mutex because they can be mutated concurrently (e.g. SetTimeout) while
+// the accept loop is spawning connection handlers.
 func (s *scp) newPDUService() network.PDUService {
+	s.mu.RLock()
+	implClassUID, implVersion := s.implClassUID, s.implVersion
+	logger := s.logger
+	timeout := s.timeout
+	s.mu.RUnlock()
+
 	var opts []network.PDUServiceOption
-	if s.implClassUID != "" || s.implVersion != "" {
-		opts = append(opts, network.WithImplementationClass(s.implClassUID, s.implVersion))
+	if implClassUID != "" || implVersion != "" {
+		opts = append(opts, network.WithImplementationClass(implClassUID, implVersion))
+	}
+	if logger != nil {
+		opts = append(opts, network.WithLogger(logger))
 	}
 	pdu := network.NewPDUService(opts...)
-	if s.timeout > 0 {
-		pdu.SetTimeout(s.timeout)
+	if timeout > 0 {
+		pdu.SetTimeout(timeout)
 	}
 	return pdu
 }

@@ -70,6 +70,10 @@ type SCU interface {
 	// SetTimeout sets the per-connection network timeout in seconds applied to
 	// all associations opened by this SCU. 0 means no timeout (default).
 	SetTimeout(seconds int)
+	// SetLogger sets the structured logger used for this SCU's PDU-level events.
+	// A nil logger resets to slog.Default(). By default the library logs through
+	// slog.Default().
+	SetLogger(logger *slog.Logger)
 	// GetNegotiatedContexts returns the presentation contexts accepted by the
 	// remote SCP after the most recent successful association. Returns nil if no
 	// association has been made yet.
@@ -87,6 +91,7 @@ type scu struct {
 	negotiatedContexts []network.PresentationContextAccept
 	implClassUID       string
 	implVersion        string
+	logger             *slog.Logger
 }
 
 type associationPresentationContext struct {
@@ -110,11 +115,21 @@ func NewSCU(destination *network.Destination, opts ...SCUOption) SCU {
 	d := &scu{
 		destination: destination,
 		priority:    priority.Medium,
+		logger:      slog.Default(),
 	}
 	for _, opt := range opts {
 		opt(d)
 	}
 	return d
+}
+
+// SetLogger sets the structured logger for this SCU. A nil logger resets to
+// slog.Default().
+func (d *scu) SetLogger(logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	d.logger = logger
 }
 
 // newPDUService creates a PDUService, applying a per-SCU implementation class
@@ -123,6 +138,9 @@ func (d *scu) newPDUService() network.PDUService {
 	var opts []network.PDUServiceOption
 	if d.implClassUID != "" || d.implVersion != "" {
 		opts = append(opts, network.WithImplementationClass(d.implClassUID, d.implVersion))
+	}
+	if d.logger != nil {
+		opts = append(opts, network.WithLogger(d.logger))
 	}
 	pdu := network.NewPDUService(opts...)
 	if d.timeout > 0 {
@@ -137,14 +155,14 @@ func (d *scu) EchoSCU(ctx context.Context) error {
 	if err := d.openAssociation(ctx, pdu, sopclass.Verification.UID, []string{}); err != nil {
 		return err
 	}
-	slog.Info("Sending Echo Request")
+	d.logger.Debug("sending C-ECHO request")
 	if err := dimse.CEchoWriteRQ(pdu); err != nil {
 		return err
 	}
 	if err := dimse.CEchoReadRSP(pdu); err != nil {
 		return err
 	}
-	slog.Info("Received Echo Response", "status", "Success")
+	d.logger.Debug("received C-ECHO response", "status", "success")
 	return nil
 }
 
@@ -441,10 +459,10 @@ func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUSe
 
 	var err error
 	if d.destination.IsTLS {
-		slog.Info("Requesting Association", "host", d.destination.HostName, "port", d.destination.Port, "calledAE", d.destination.CalledAE, "callingAE", d.destination.CallingAE, "tls", true)
+		d.logger.Debug("requesting association", "host", d.destination.HostName, "port", d.destination.Port, "called_ae", d.destination.CalledAE, "calling_ae", d.destination.CallingAE, "tls", true)
 		err = pdu.ConnectTLS(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port), d.destination.TLSConfig)
 	} else {
-		slog.Info("Requesting Association", "host", d.destination.HostName, "port", d.destination.Port, "calledAE", d.destination.CalledAE, "callingAE", d.destination.CallingAE)
+		d.logger.Debug("requesting association", "host", d.destination.HostName, "port", d.destination.Port, "called_ae", d.destination.CalledAE, "calling_ae", d.destination.CallingAE)
 		err = pdu.Connect(ctx, d.destination.HostName, strconv.Itoa(d.destination.Port))
 	}
 	if err == nil {

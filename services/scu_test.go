@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -433,6 +434,8 @@ func (m *storeMockPDU) GetAcceptedPresentationContexts() []network.PresentationC
 }
 func (m *storeMockPDU) SetOnAssociationRequest(_ func(network.AssociationRequest) bool) {}
 func (m *storeMockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))                         {}
+func (m *storeMockPDU) SetLogger(_ *slog.Logger)                                        {}
+func (m *storeMockPDU) Logger() *slog.Logger                                            { return slog.Default() }
 
 // Test_scu_BeginStoreSession_SendsMultipleFilesOnOneAssociation verifies that
 // BeginStoreSession opens exactly one association and that all files in the

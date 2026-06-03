@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"strconv"
@@ -953,6 +954,8 @@ func (m *cgetStoreSubopMockPDU) SetNetConn(_ net.Conn)                          
 func (m *cgetStoreSubopMockPDU) AddPresContexts(_ network.PresentationContext)                   {}
 func (m *cgetStoreSubopMockPDU) SetOnAssociationRequest(_ func(network.AssociationRequest) bool) {}
 func (m *cgetStoreSubopMockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))                         {}
+func (m *cgetStoreSubopMockPDU) SetLogger(_ *slog.Logger)                                        {}
+func (m *cgetStoreSubopMockPDU) Logger() *slog.Logger                                            { return slog.Default() }
 
 // TestCGetStoreSubop_TranscodesToNegotiatedTS verifies that cgetStoreSubop
 // transcodes the file to the transfer syntax negotiated with the SCU. When the

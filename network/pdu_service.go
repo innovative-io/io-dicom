@@ -76,6 +76,13 @@ type PDUService interface {
 	SetOnAssociationRequest(f func(request AssociationRequest) bool)
 	SetOnRawPDU(f func(event RawPDUEvent))
 	Write(DCO media.DICOMObject, ItemType byte) error
+	// SetLogger sets the structured logger used for this connection's PDU-level
+	// events. Passing a logger derived with per-association attributes (e.g.
+	// slog.With("assoc_id", ...)) tags every line so logs from concurrent
+	// associations can be correlated. A nil logger restores slog.Default().
+	SetLogger(logger *slog.Logger)
+	// Logger returns the logger configured for this connection, never nil.
+	Logger() *slog.Logger
 }
 
 // PDUServiceOption configures a PDUService at construction time.
@@ -88,6 +95,15 @@ func WithImplementationClass(uid, version string) PDUServiceOption {
 	return func(p *pduService) {
 		p.implClassUID = uid
 		p.implVersion = version
+	}
+}
+
+// WithLogger sets the structured logger used for PDU-level events on this
+// connection. By default the library logs through slog.Default(). Pass a logger
+// derived with per-association attributes to correlate concurrent associations.
+func WithLogger(logger *slog.Logger) PDUServiceOption {
+	return func(p *pduService) {
+		p.SetLogger(logger)
 	}
 }
 
@@ -110,6 +126,7 @@ type pduService struct {
 	onRawPDU                     func(event RawPDUEvent)
 	implClassUID                 string
 	implVersion                  string
+	logger                       *slog.Logger
 }
 
 // NewPDUService creates a PDUService. Pass PDUServiceOption values to
@@ -124,10 +141,44 @@ func NewPDUService(opts ...PDUServiceOption) PDUService {
 		ReleaseRP: NewReleaseResponse(),
 		AbortRQ:   NewAbortRequest(),
 	}
+	p.SetLogger(nil)
 	for _, opt := range opts {
 		opt(p)
 	}
 	return p
+}
+
+// SetLogger sets the connection logger and propagates it to the association
+// sub-structures so their PDU-encoding traces share the same correlation
+// attributes. A nil logger resets to slog.Default().
+func (pdu *pduService) SetLogger(logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	pdu.logger = logger
+	pdu.AssocRQ.logger = logger
+	pdu.AssocAC.logger = logger
+	if aarj, ok := pdu.AssocRJ.(*associationReject); ok {
+		aarj.logger = logger
+	}
+}
+
+// Logger returns the connection logger, never nil.
+func (pdu *pduService) Logger() *slog.Logger {
+	if pdu.logger == nil {
+		return slog.Default()
+	}
+	return pdu.logger
+}
+
+// loggerOrDefault returns l, or slog.Default() when l is nil. Used by the
+// association sub-structures, which may be exercised standalone (e.g. in tests)
+// before a pduService propagates its connection logger to them.
+func loggerOrDefault(l *slog.Logger) *slog.Logger {
+	if l == nil {
+		return slog.Default()
+	}
+	return l
 }
 
 const maxPduLength uint32 = 16384
@@ -262,12 +313,12 @@ func (pdu *pduService) Connect(ctx context.Context, IP string, Port string) erro
 		defer cancel()
 	}
 
-	slog.Debug("pduservice::Connect", "host", IP, "port", Port)
+	pdu.logger.Debug("dialing", "host", IP, "port", Port)
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", IP+":"+Port)
 	if err != nil {
 		return fmt.Errorf("pduservice::Connect: %w", err)
 	}
-	slog.Debug("pduservice::Connect: TCP connected", "host", IP, "port", Port)
+	pdu.logger.Debug("tcp connected", "host", IP, "port", Port)
 	return pdu.finishConnect(conn)
 }
 
@@ -283,12 +334,12 @@ func (pdu *pduService) ConnectTLS(ctx context.Context, IP string, Port string, c
 		defer cancel()
 	}
 
-	slog.Debug("pduservice::ConnectTLS", "host", IP, "port", Port)
+	pdu.logger.Debug("dialing (tls)", "host", IP, "port", Port)
 	conn, err := (&tls.Dialer{Config: normalizeClientTLSConfig(cfg)}).DialContext(ctx, "tcp", IP+":"+Port)
 	if err != nil {
 		return fmt.Errorf("pduservice::ConnectTLS - %w", err)
 	}
-	slog.Debug("pduservice::ConnectTLS: TCP connected", "host", IP, "port", Port)
+	pdu.logger.Debug("tcp connected (tls)", "host", IP, "port", Port)
 	return pdu.finishConnect(conn)
 }
 
@@ -322,14 +373,14 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 	pdu.AssocRQ.SetImplementationClassUID(scuUID)
 	pdu.AssocRQ.SetImplementationVersionName(scuVer)
 
-	slog.Debug("pduservice::finishConnect: sending A-ASSOCIATE-RQ", "callingAE", pdu.AssocRQ.GetCallingAE(), "calledAE", pdu.AssocRQ.GetCalledAE())
+	pdu.logger.Debug("sending A-ASSOCIATE-RQ", "calling_ae", pdu.AssocRQ.GetCallingAE(), "called_ae", pdu.AssocRQ.GetCalledAE())
 	if err := pdu.writeEncodedPDU(byte(pdutype.AssociationRequest), func(rw *bufio.ReadWriter) error {
 		return pdu.AssocRQ.Write(rw)
 	}); err != nil {
 		return err
 	}
 
-	slog.Debug("pduservice::finishConnect: waiting for A-ASSOCIATE response")
+	pdu.logger.Debug("waiting for A-ASSOCIATE response")
 	itemType, rawData, err := pdu.readIncomingPDU()
 	if err != nil {
 		return err
@@ -352,7 +403,7 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 		if theirMaxPDU == 0 {
 			theirMaxStr = "unlimited"
 		}
-		slog.Info("Association Accepted", "maxSendPDV", maxSendPDV-6, "theirMaxPDU", theirMaxStr)
+		pdu.logger.Info("association accepted", "max_send_pdv", maxSendPDV-6, "their_max_pdu", theirMaxStr)
 		for _, pc := range pdu.AcceptedPresentationContexts {
 			pcID := pc.GetPresentationContextID()
 			sopDesc := ""
@@ -372,7 +423,7 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 			} else {
 				tsDesc = pc.GetTrnSyntax().GetUID()
 			}
-			slog.Info("Accepted Context", "id", pcID, "sopClass", sopDesc, "transferSyntax", tsDesc)
+			pdu.logger.Debug("presentation context accepted", "pcid", pcID, "sop_class", sopDesc, "transfer_syntax", tsDesc)
 		}
 		return nil
 	case pdutype.AssociationReject:
@@ -395,11 +446,11 @@ func (pdu *pduService) Close() error {
 		return nil
 	}
 
-	slog.Info("Releasing Association")
+	pdu.logger.Debug("releasing association")
 	if err := pdu.writeEncodedPDU(byte(pdutype.AssociationReleaseRequest), func(rw *bufio.ReadWriter) error {
 		return pdu.ReleaseRQ.Write(rw)
 	}); err != nil {
-		slog.Warn("pduservice::Close - failed to send A-RELEASE-RQ, sending A-ABORT", "error", err)
+		pdu.logger.Warn("failed to send A-RELEASE-RQ; sending A-ABORT", "error", err)
 		_ = pdu.writeEncodedPDU(byte(pdutype.AssociationAbortRequest), func(rw *bufio.ReadWriter) error {
 			return pdu.AbortRQ.Write(rw)
 		})
@@ -413,7 +464,7 @@ func (pdu *pduService) Close() error {
 
 	itemType, rawData, err := pdu.readIncomingPDU()
 	if err != nil {
-		slog.Warn("pduservice::Close - timeout waiting for A-RELEASE-RP, sending A-ABORT", "error", err)
+		pdu.logger.Warn("timeout waiting for A-RELEASE-RP; sending A-ABORT", "error", err)
 		_ = pdu.writeEncodedPDU(byte(pdutype.AssociationAbortRequest), func(rw *bufio.ReadWriter) error {
 			return pdu.AbortRQ.Write(rw)
 		})
@@ -423,7 +474,7 @@ func (pdu *pduService) Close() error {
 
 	pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 	if int(itemType) != pdutype.AssociationReleaseResponse {
-		slog.Warn("pduservice::Close - unexpected PDU waiting for A-RELEASE-RP", "type", itemType)
+		pdu.logger.Warn("unexpected PDU waiting for A-RELEASE-RP", "pdu_type", itemType)
 	}
 
 	pdu.closeConn()
@@ -492,7 +543,7 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 				return DCO, nil
 			}
 		case pdutype.AssociationReleaseRequest:
-			slog.Info("ASSOC-R-RQ:", "CallingAE", pdu.AssocRQ.GetCallingAE(), "CalledAE", pdu.AssocRQ.GetCalledAE())
+			pdu.logger.Debug("A-RELEASE-RQ received")
 			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 			pdu.buf.SetPosition(1)
 			pdu.ReleaseRQ.ReadDynamic(pdu.buf)
@@ -503,11 +554,11 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 			}
 			return nil, ErrAssociationReleased
 		case pdutype.AssociationReleaseResponse:
-			slog.Info("ASSOC-R-RP:", "CallingAE", pdu.AssocRQ.GetCallingAE(), "CalledAE", pdu.AssocRQ.GetCalledAE())
+			pdu.logger.Debug("A-RELEASE-RP received")
 			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 			return nil, ErrAssociationReleased
 		case pdutype.AssociationAbortRequest:
-			slog.Info("ASSOC-ABORT-RQ:", "CallingAE", pdu.AssocRQ.GetCallingAE(), "CalledAE", pdu.AssocRQ.GetCalledAE())
+			pdu.logger.Info("A-ABORT received")
 			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 			return nil, ErrAssociationAborted
 		default:
@@ -697,9 +748,9 @@ func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
 		sopClassUID := DCO.GetString(tags.AffectedSOPClassUID)
 		sopClass := sopclass.GetSOPClassFromUID(sopClassUID)
 		if sopClass != nil {
-			slog.Debug("PDU-Service: SOP Class", "UID", sopClass.UID, "Description", sopClass.Description, "CalledAE", pdu.GetCalledAE())
+			pdu.logger.Debug("negotiating SOP class", "uid", sopClass.UID, "description", sopClass.Description)
 		} else {
-			slog.Debug("PDU-Service: SOP Class", "UID", sopClassUID, "Description", "Unknown SOP Class", "CalledAE", pdu.GetCalledAE())
+			pdu.logger.Debug("negotiating SOP class", "uid", sopClassUID, "description", "Unknown SOP Class")
 		}
 	}
 
@@ -762,7 +813,7 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 	}
 
 	if pdu.OnAssociationRequest == nil || !pdu.OnAssociationRequest(pdu.AssocRQ) {
-		slog.Warn("pdu: rejecting association - rejected by application handler", "CalledAE", pdu.AssocRQ.GetCalledAE(), "CallingAE", pdu.AssocRQ.GetCallingAE())
+		pdu.logger.Warn("rejecting association: rejected by application handler")
 		// Result=1 (permanent), Source=1 (UL-service-user), Reason=7 (called AE not recognised)
 		// per DICOM PS3.8 Table 9-21.
 		pdu.AssocRJ.Set(1, 1, 7)
@@ -777,16 +828,17 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 
 	pdu.AcceptedPresentationContexts = nil
 	pdu.AssocAC = newAssociationAccept()
+	pdu.AssocAC.logger = pdu.logger
 	pdu.AssocAC.SetCalledAE(pdu.AssocRQ.GetCalledAE())
 	pdu.AssocAC.SetCallingAE(pdu.AssocRQ.GetCallingAE())
 	pdu.AssocAC.SetAppContext(pdu.AssocRQ.GetAppContext())
 
-	slog.Info("ASSOC-RQ:", "CallingAE", pdu.AssocRQ.GetCallingAE(), "CalledAE", pdu.AssocRQ.GetCalledAE())
-	slog.Debug("ASSOC-RQ:", "ImpClass", pdu.AssocRQ.GetImplementationClass().GetUID())
-	slog.Debug("ASSOC-RQ:", "MaxPDULength", pdu.AssocRQ.GetMaxSubLength())
+	pdu.logger.Debug("association request received", "calling_ae", pdu.AssocRQ.GetCallingAE(), "called_ae", pdu.AssocRQ.GetCalledAE())
+	pdu.logger.Debug("association request impl class", "impl_class", pdu.AssocRQ.GetImplementationClass().GetUID())
+	pdu.logger.Debug("association request max PDU length", "max_pdu_length", pdu.AssocRQ.GetMaxSubLength())
 
 	for presIndex, PresContext := range pdu.AssocRQ.GetPresContexts() {
-		slog.Debug("ASSOC-RQ: PresentationContext", "Index", presIndex)
+		pdu.logger.Debug("proposed presentation context", "index", presIndex)
 
 		sopClass := sopclass.GetSOPClassFromUID(PresContext.GetAbstractSyntax().GetUID())
 		sopUID := PresContext.GetAbstractSyntax().GetUID()
@@ -795,14 +847,14 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 			sopUID = sopClass.UID
 			sopDescription = sopClass.Description
 		}
-		slog.Debug("ASSOC-RQ: \tAbstractContext", "UID", sopUID, "Description", sopDescription)
+		pdu.logger.Debug("proposed abstract syntax", "uid", sopUID, "description", sopDescription)
 		for _, TransferSyn := range PresContext.GetTransferSyntaxes() {
 			tsName := ""
 			transferSyntax := transfersyntax.GetTransferSyntaxFromUID(TransferSyn.GetUID())
 			if transferSyntax != nil {
 				tsName = transferSyntax.Description
 			}
-			slog.Debug("ASSOC-RQ: \tTransferSyntax:", "UID", TransferSyn.GetUID(), "Description", tsName)
+			pdu.logger.Debug("proposed transfer syntax", "uid", TransferSyn.GetUID(), "description", tsName)
 		}
 
 		PresContextAccept := NewPresentationContextAccept()
@@ -845,7 +897,7 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 		})
 	}
 
-	slog.Warn("pdu: rejecting association - no presentation contexts could be negotiated", "CalledAE", pdu.AssocRQ.GetCalledAE(), "CallingAE", pdu.AssocRQ.GetCallingAE())
+	pdu.logger.Warn("rejecting association: no presentation contexts negotiated")
 	return pdu.writeEncodedPDU(byte(pdutype.AssociationReject), func(rw *bufio.ReadWriter) error {
 		return pdu.AssocRJ.Write(rw)
 	})
@@ -859,7 +911,7 @@ func (pdu *pduService) parseDCMIntoRaw(DCO media.DICOMObject) bool {
 func (pdu *pduService) parseRawVRIntoDCM(DCO media.DICOMObject) bool {
 	TrnSyntax := pdu.GetTransferSyntax(pdu.Pdata.PresentationContextID)
 	if TrnSyntax == nil {
-		slog.Error("pdu: no transfer syntax for presentation context", "PCID", pdu.Pdata.PresentationContextID)
+		pdu.logger.Error("no transfer syntax for presentation context", "pcid", pdu.Pdata.PresentationContextID)
 		return false
 	}
 	DCO.SetTransferSyntax(TrnSyntax)
