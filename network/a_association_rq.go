@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"log/slog"
-	"strconv"
 
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
@@ -57,6 +56,7 @@ type associationRequest struct {
 	PeerCertificates []*x509.Certificate
 	RemoteAddress    string
 	CorrelationID    string
+	logger           *slog.Logger
 }
 
 // NewAssociationRequest returns a new AssociationRequest with default settings.
@@ -180,11 +180,12 @@ func (aarq *associationRequest) Size() uint32 {
 func (aarq *associationRequest) Write(rw *bufio.ReadWriter) error {
 	bd := media.NewDICOMBuffer()
 
-	slog.Debug("====================== BEGIN A-ASSOCIATE-RQ ======================")
-	slog.Debug("ASSOC-RQ:", "CallingAE", aarq.GetCallingAE(), "CalledAE", aarq.GetCalledAE())
-	slog.Debug("ASSOC-RQ: OurImpClass", "UID", aarq.GetUserInformation().GetImplementationClass().GetUID())
-	slog.Debug("ASSOC-RQ: OurImpVersion", "name", aarq.GetUserInformation().GetImplementationVersion().GetUID())
-	slog.Debug("ASSOC-RQ:", "MaxPDULength", aarq.GetUserInformation().GetMaxSubLength().GetMaximumLength())
+	aaLog := loggerOrDefault(aarq.logger)
+	aaLog.Debug("encoding A-ASSOCIATE-RQ",
+		"calling_ae", aarq.GetCallingAE(), "called_ae", aarq.GetCalledAE(),
+		"impl_class", aarq.GetUserInformation().GetImplementationClass().GetUID(),
+		"impl_version", aarq.GetUserInformation().GetImplementationVersion().GetUID(),
+		"max_pdu_length", aarq.GetUserInformation().GetMaxSubLength().GetMaximumLength())
 
 	bd.SetBigEndian(true)
 	aarq.Size()
@@ -201,21 +202,23 @@ func (aarq *associationRequest) Write(rw *bufio.ReadWriter) error {
 		return err
 	}
 
-	slog.Debug("ASSOC-RQ: AppContext", "UID", aarq.AppContext.GetUID(), "Description", sopclass.GetSOPClassFromUID(aarq.AppContext.GetUID()).Description)
+	aaLog.Debug("application context", "uid", aarq.AppContext.GetUID(), "description", sopclass.GetSOPClassFromUID(aarq.AppContext.GetUID()).Description)
 	if err := aarq.AppContext.Write(rw); err != nil {
 		return err
 	}
 	for presIndex, presContext := range aarq.PresContexts {
-		slog.Debug("ASSOC-RQ: PresentationContext", "Index", presIndex+1, "ID", presContext.GetPresentationContextID(), "status", "Proposed")
-		slog.Debug("ASSOC-RQ:   AbstractSyntax:", "UID", presContext.GetAbstractSyntax().GetUID(), "Description", sopclass.GetSOPClassFromUID(presContext.GetAbstractSyntax().GetUID()).Description)
+		aaLog.Debug("proposed presentation context",
+			"index", presIndex+1, "pcid", presContext.GetPresentationContextID(),
+			"abstract_syntax", presContext.GetAbstractSyntax().GetUID(),
+			"abstract_syntax_description", sopclass.GetSOPClassFromUID(presContext.GetAbstractSyntax().GetUID()).Description)
 		for _, transSyntax := range presContext.GetTransferSyntaxes() {
-			slog.Debug("ASSOC-RQ:   TransferSyntax:", "UID", transSyntax.GetUID(), "Description", transfersyntax.GetTransferSyntaxFromUID(transSyntax.GetUID()).Description)
+			aaLog.Debug("proposed transfer syntax",
+				"uid", transSyntax.GetUID(), "description", transfersyntax.GetTransferSyntaxFromUID(transSyntax.GetUID()).Description)
 		}
 		if err := presContext.Write(rw); err != nil {
 			return err
 		}
 	}
-	slog.Debug("======================= END A-ASSOCIATE-RQ =======================")
 	return aarq.UserInfo.Write(rw)
 }
 
@@ -252,7 +255,7 @@ func (aarq *associationRequest) Read(buf *media.DICOMBuffer) (err error) {
 			aarq.UserInfo.ReadDynamic(buf)
 			return nil
 		default:
-			slog.Error("aarq::ReadDynamic, unknown Item " + strconv.Itoa(int(TempByte)))
+			loggerOrDefault(aarq.logger).Error("unknown A-ASSOCIATE-RQ item", "item_type", TempByte)
 			Count = -1
 		}
 	}

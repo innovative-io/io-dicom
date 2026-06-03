@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"log/slog"
 	"net"
 	"os"
@@ -26,8 +25,16 @@ import (
 
 var version string
 
+// fatal logs msg at error level with the given structured attributes and exits
+// the process with a non-zero status. It replaces log.Fatal* so the CLI emits
+// the same structured slog output as the rest of the library.
+func fatal(msg string, args ...any) {
+	slog.Error(msg, args...)
+	os.Exit(1)
+}
+
 func main() {
-	log.Printf("Starting io-dicom %s\n\n", version)
+	slog.Info("starting io-dicom", "version", version)
 
 	hostName := flag.String("host", "localhost", "Destination host name or IP")
 	calledAE := flag.String("calledae", "DICOM_SCP", "AE of the destination")
@@ -69,27 +76,27 @@ func main() {
 
 	if *startSCP {
 		if *datastore == "" {
-			log.Fatalln("datastore is required for scp")
+			fatal("datastore is required for scp")
 		}
 
 		if *calledAE == "" {
-			log.Fatalln("calledae is required for scp")
+			fatal("calledae is required for scp")
 		}
 
 		var scp services.SCP
 		if *tlsEnabled {
 			if *tlsCert == "" || *tlsKey == "" {
-				log.Fatalln("-tlscert and -tlskey are required when -scp -tls is set")
+				fatal("-tlscert and -tlskey are required when -scp -tls is set")
 			}
 			cert, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
 			if err != nil {
-				log.Fatalf("failed to load TLS certificate: %v", err)
+				fatal("failed to load TLS certificate", "error", err)
 			}
 			tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
 			if *tlsCA != "" {
 				pool, err := loadCertPool(*tlsCA)
 				if err != nil {
-					log.Fatalf("failed to load CA certificate: %v", err)
+					fatal("failed to load CA certificate", "error", err)
 				}
 				tlsCfg.ClientCAs = pool
 				tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
@@ -118,7 +125,7 @@ func main() {
 		})
 
 		scp.OnCStoreRequest(func(ctx context.Context, request network.AssociationRequest, data media.DICOMObject) uint16 {
-			log.Printf("INFO, C-Store received %s", data.GetString(tags.SOPInstanceUID))
+			slog.Info("C-Store received", "sop_instance_uid", data.GetString(tags.SOPInstanceUID))
 			directory := filepath.Join(*datastore, data.GetString(tags.PatientID), data.GetString(tags.StudyInstanceUID), data.GetString(tags.SeriesInstanceUID))
 			os.MkdirAll(directory, 0755)
 
@@ -126,7 +133,7 @@ func main() {
 
 			err := data.WriteToFile(path)
 			if err != nil {
-				log.Printf("ERROR: There was an error saving %s : %s", path, err.Error())
+				slog.Error("failed to save instance", "path", path, "error", err)
 			}
 			return dicomstatus.Success
 		})
@@ -140,13 +147,13 @@ func main() {
 			var healthErr error
 			healthListener, healthErr = startTCPHealthListener(ctx, *healthPort, &wg)
 			if healthErr != nil {
-				log.Fatalf("failed to start TCP health listener on port %d: %v", *healthPort, healthErr)
+				fatal("failed to start TCP health listener", "port", *healthPort, "error", healthErr)
 			}
 			defer healthListener.Close()
 		}
 
 		if err := scp.Start(ctx); err != nil {
-			log.Fatal(err)
+			fatal("scp failed", "error", err)
 		}
 		wg.Wait()
 		return
@@ -168,14 +175,14 @@ func main() {
 		if *tlsCA != "" {
 			pool, err := loadCertPool(*tlsCA)
 			if err != nil {
-				log.Fatalf("failed to load CA certificate: %v", err)
+				fatal("failed to load CA certificate", "error", err)
 			}
 			tlsCfg.RootCAs = pool
 		}
 		if *tlsCert != "" && *tlsKey != "" {
 			cert, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
 			if err != nil {
-				log.Fatalf("failed to load client TLS certificate: %v", err)
+				fatal("failed to load client TLS certificate", "error", err)
 			}
 			tlsCfg.Certificates = []tls.Certificate{cert}
 		}
@@ -187,25 +194,24 @@ func main() {
 		scu := services.NewSCU(destination)
 		err := scu.EchoSCU(context.Background())
 		if err != nil {
-			log.Fatalln(err)
+			fatal("C-Echo failed", "error", err)
 		}
-		slog.Info("CEcho was successful")
+		slog.Info("C-Echo successful")
 	}
 	if *cfind {
 		request := dimse.DefaultCFindRequest()
 		scu := services.NewSCU(destination)
 		scu.SetOnCFindResult(func(result media.DICOMObject) {
-			log.Printf("Found study %s\n", result.GetString(tags.StudyInstanceUID))
+			slog.Info("found study", "study_instance_uid", result.GetString(tags.StudyInstanceUID))
 			result.DumpTags(os.Stdout)
 		})
 
 		count, status, err := scu.FindSCU(context.Background(), request)
 		if err != nil {
-			log.Fatalln(err)
+			fatal("C-Find failed", "error", err)
 		}
 
-		log.Println("CFind was successful")
-		log.Printf("Found %d results with status %d\n\n", count, status)
+		slog.Info("C-Find successful", "results", count, "status", status)
 		return
 	}
 	if *cmwl {
@@ -217,26 +223,25 @@ func main() {
 		request.Write(tags.RequestedProcedureID, "")
 		scu := services.NewSCU(destination)
 		scu.SetOnCFindResult(func(result media.DICOMObject) {
-			log.Printf("Worklist item: patient=%s accession=%s\n",
-				result.GetString(tags.PatientID), result.GetString(tags.AccessionNumber))
+			slog.Info("worklist item",
+				"patient_id", result.GetString(tags.PatientID), "accession_number", result.GetString(tags.AccessionNumber))
 			result.DumpTags(os.Stdout)
 		})
 
 		count, status, err := scu.WorklistSCU(context.Background(), request)
 		if err != nil {
-			log.Fatalln(err)
+			fatal("MWL query failed", "error", err)
 		}
 
-		log.Println("MWL query was successful")
-		log.Printf("Found %d worklist items with status %d\n\n", count, status)
+		slog.Info("MWL query successful", "items", count, "status", status)
 		return
 	}
 	if *cmove {
 		if *destinationAE == "" {
-			log.Fatalln("destinationae is required for a C-Move")
+			fatal("destinationae is required for a C-Move")
 		}
 		if *studyUID == "" {
-			log.Fatalln("studyuid is required for a C-Move")
+			fatal("studyuid is required for a C-Move")
 		}
 
 		request := dimse.DefaultCMoveRequest(*studyUID)
@@ -244,30 +249,30 @@ func main() {
 		scu := services.NewSCU(destination)
 		_, err := scu.MoveSCU(context.Background(), *destinationAE, request)
 		if err != nil {
-			log.Fatalln(err)
+			fatal("C-Move failed", "error", err)
 		}
-		log.Println("CMove was successful")
+		slog.Info("C-Move successful")
 		return
 	}
 	if *cstore {
 		if *fileName == "" {
-			log.Fatalln("file is required for a C-Store")
+			fatal("file is required for a C-Store")
 		}
 		scu := services.NewSCU(destination)
 		err := scu.StoreSCU(context.Background(), *fileName)
 		if err != nil {
-			log.Fatalln(err)
+			fatal("C-Store failed", "error", err)
 		}
-		log.Printf("CStore of %s was successful", *fileName)
+		slog.Info("C-Store successful", "file", *fileName)
 		return
 	}
 	if *dump {
 		if *fileName == "" {
-			log.Fatalln("file is required for a dump")
+			fatal("file is required for a dump")
 		}
 		obj, err := media.NewDCMObjFromFile(*fileName)
 		if err != nil {
-			log.Fatal(err)
+			fatal("failed to read DICOM file", "error", err)
 		}
 		obj.DumpTags(os.Stdout)
 		return
@@ -294,19 +299,19 @@ func startTCPHealthListener(ctx context.Context, port int, wg *sync.WaitGroup) (
 		return nil, err
 	}
 
-	log.Printf("INFO: TCP health listener started on port %d", port)
+	slog.Info("TCP health listener started", "port", port)
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer log.Printf("INFO: TCP health listener stopped on port %d", port)
+		defer slog.Info("TCP health listener stopped", "port", port)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
 				if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
 					return
 				}
-				log.Printf("WARN: TCP health listener accept failed on port %d: %v", port, err)
+				slog.Warn("TCP health listener accept failed", "port", port, "error", err)
 				continue
 			}
 			_ = conn.Close()

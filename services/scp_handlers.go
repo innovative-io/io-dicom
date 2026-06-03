@@ -196,7 +196,7 @@ func (s *scp) runSubopLoop(
 			}
 
 			if dco.GetUint16(tags.CommandField) == dicomcommand.CCancelRequest {
-				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
+				cancelMessageID := s.handleCancelCommand(pdu.Logger(), assocRQ, dco)
 				if cancelMessageID == messageID {
 					canceled = true
 					if cancelDeadline.IsZero() {
@@ -296,7 +296,7 @@ func (s *scp) runCFindOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network
 			}
 
 			if dco.GetUint16(tags.CommandField) == dicomcommand.CCancelRequest {
-				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
+				cancelMessageID := s.handleCancelCommand(pdu.Logger(), assocRQ, dco)
 				if cancelMessageID == messageID {
 					canceled = true
 					if cancelDeadline.IsZero() {
@@ -471,7 +471,7 @@ func (s *scp) runCGetOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.
 				continue
 			}
 			if dco.GetUint16(tags.CommandField) == dicomcommand.CCancelRequest {
-				cancelMessageID := s.handleCancelCommand(assocRQ, dco)
+				cancelMessageID := s.handleCancelCommand(pdu.Logger(), assocRQ, dco)
 				if cancelMessageID == messageID {
 					canceled = true
 					if cancelDeadline.IsZero() {

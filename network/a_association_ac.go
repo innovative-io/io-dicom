@@ -43,6 +43,7 @@ type associationAccept struct {
 	AppContext         UIDItem
 	PresContextAccepts []PresentationContextAccept
 	UserInfo           *userInformation
+	logger             *slog.Logger
 }
 
 func newAssociationAccept() *associationAccept {
@@ -125,11 +126,13 @@ func (aaac *associationAccept) Size() uint32 {
 func (aaac *associationAccept) Write(rw *bufio.ReadWriter) error {
 	bd := media.NewDICOMBuffer()
 
-	slog.Info("ASSOC-AC:", "CallingAE", aaac.GetCallingAE(), "CalledAE", aaac.GetCalledAE())
-	slog.Info("ASSOC-AC:", "ImpClass", aaac.UserInfo.GetImplementationClass().GetUID())
-	slog.Info("ASSOC-AC:", "ImpVersion", aaac.UserInfo.GetImplementationVersion().GetUID())
-	slog.Info("ASSOC-AC:", "MaxPDULength", aaac.GetMaxSubLength())
-	slog.Info("ASSOC-AC:", "MaxOpsInvoked", aaac.UserInfo.AsyncOpWindow.GetMaxNumberOperationsInvoked(), "MaxOpsPerformed", aaac.UserInfo.AsyncOpWindow.GetMaxNumberOperationsPerformed())
+	loggerOrDefault(aaac.logger).Debug("encoding A-ASSOCIATE-AC",
+		"calling_ae", aaac.GetCallingAE(), "called_ae", aaac.GetCalledAE(),
+		"impl_class", aaac.UserInfo.GetImplementationClass().GetUID(),
+		"impl_version", aaac.UserInfo.GetImplementationVersion().GetUID(),
+		"max_pdu_length", aaac.GetMaxSubLength(),
+		"max_ops_invoked", aaac.UserInfo.AsyncOpWindow.GetMaxNumberOperationsInvoked(),
+		"max_ops_performed", aaac.UserInfo.AsyncOpWindow.GetMaxNumberOperationsPerformed())
 
 	bd.SetBigEndian(true)
 	aaac.Size()
@@ -208,19 +211,22 @@ func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 		}
 	}
 
-	slog.Debug("====================== BEGIN A-ASSOCIATE-AC ======================")
-	slog.Debug("ASSOC-AC:", "CallingAE", aaac.GetCallingAE(), "CalledAE", aaac.GetCalledAE())
-	slog.Debug("ASSOC-AC: OurImpClass", "UID", implementation.GetImplementationClassUID())
-	slog.Debug("ASSOC-AC: OurImpVersion", "name", implementation.GetImplementationVersion())
-	slog.Debug("ASSOC-AC: TheirImpClass", "UID", aaac.UserInfo.GetImplementationClass().GetUID())
-	slog.Debug("ASSOC-AC: TheirImpVersion", "name", aaac.UserInfo.GetImplementationVersion().GetUID())
-	slog.Debug("ASSOC-AC: AppContext", "UID", aaac.AppContext.GetUID(), "Description", sopclass.GetSOPClassFromUID(aaac.AppContext.GetUID()).Description)
-	slog.Debug("ASSOC-AC:", "OurMaxPDULength", maxPduLength, "TheirMaxPDULength", aaac.GetMaxSubLength())
+	aaLog := loggerOrDefault(aaac.logger)
+	aaLog.Debug("decoded A-ASSOCIATE-AC",
+		"calling_ae", aaac.GetCallingAE(), "called_ae", aaac.GetCalledAE(),
+		"our_impl_class", implementation.GetImplementationClassUID(),
+		"our_impl_version", implementation.GetImplementationVersion(),
+		"their_impl_class", aaac.UserInfo.GetImplementationClass().GetUID(),
+		"their_impl_version", aaac.UserInfo.GetImplementationVersion().GetUID(),
+		"app_context", aaac.AppContext.GetUID(),
+		"app_context_description", sopclass.GetSOPClassFromUID(aaac.AppContext.GetUID()).Description,
+		"our_max_pdu_length", maxPduLength, "their_max_pdu_length", aaac.GetMaxSubLength())
 	for presIndex, presContextAccept := range aaac.PresContextAccepts {
-		slog.Debug("ASSOC-AC: AcceptedContext", "Index", presIndex+1, "ID", presContextAccept.GetPresentationContextID(), "status", "Accepted")
-		slog.Debug("ASSOC-AC:   TransferSyntax:", "UID", presContextAccept.GetTrnSyntax().GetUID(), "Description", transfersyntax.GetTransferSyntaxFromUID(presContextAccept.GetTrnSyntax().GetUID()).Description)
+		aaLog.Debug("accepted presentation context",
+			"index", presIndex+1, "pcid", presContextAccept.GetPresentationContextID(),
+			"transfer_syntax", presContextAccept.GetTrnSyntax().GetUID(),
+			"transfer_syntax_description", transfersyntax.GetTransferSyntaxFromUID(presContextAccept.GetTrnSyntax().GetUID()).Description)
 	}
-	slog.Debug("======================= END A-ASSOCIATE-AC =======================")
 	if Count == 0 {
 		return nil
 	}

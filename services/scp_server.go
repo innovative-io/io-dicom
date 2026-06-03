@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"time"
 )
@@ -65,10 +64,10 @@ func (s *scp) Start(ctx context.Context) error {
 			if errors.Is(err, net.ErrClosed) {
 				return nil
 			}
-			slog.Error("scp: accept failed", "ERROR", err)
+			s.logger.Error("accept failed", "error", err)
 			return err
 		}
-		slog.Info("scp: new connection", "ADDRESS", conn.RemoteAddr())
+		s.logger.Debug("new connection", "remote_addr", conn.RemoteAddr().String())
 		s.wg.Add(1)
 		go func(c net.Conn) {
 			defer s.wg.Done()

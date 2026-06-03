@@ -114,8 +114,8 @@ func (pc *presentationContextAccept) Write(rw *bufio.ReadWriter) (err error) {
 		tsName = transferSyntax.Description
 	}
 
-	slog.Debug("ASSOC-AC:   Accepted AbstractContext:", "UID", pc.GetAbstractSyntax().GetUID(), "Description", sopName)
-	slog.Debug("ASSOC-AC:   Accepted TransferSyntax:", "UID", pc.GetTrnSyntax().GetUID(), "Description", tsName)
+	slog.Debug("accepted abstract syntax", "uid", pc.GetAbstractSyntax().GetUID(), "description", sopName)
+	slog.Debug("accepted transfer syntax", "uid", pc.GetTrnSyntax().GetUID(), "description", tsName)
 
 	if err = bd.Send(rw); err == nil {
 		return pc.TrnSyntax.Write(rw)
