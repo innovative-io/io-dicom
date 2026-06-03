@@ -80,11 +80,16 @@ func GetTransferSyntaxFromUID(uid string) *TransferSyntax {
 			return ts
 		}
 	}
-	// Extra loop to fix old bug
-	uid = string([]rune(uid)[:len(uid)-1])
-	for _, ts := range transferSyntaxes {
-		if ts.UID == uid {
-			return ts
+	// Retry without a trailing byte to tolerate a UID that still carries an
+	// odd-length null/space pad byte the caller did not trim. Guard len > 0:
+	// an empty UID (e.g. from malformed/truncated file meta) must not slice to
+	// a negative bound.
+	if len(uid) > 0 {
+		trimmed := uid[:len(uid)-1]
+		for _, ts := range transferSyntaxes {
+			if ts.UID == trimmed {
+				return ts
+			}
 		}
 	}
 	return nil

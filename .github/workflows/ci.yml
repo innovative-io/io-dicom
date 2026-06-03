@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+# This is the lightweight, pure-Go pipeline: vet, staticcheck, race tests, and a
+# short fuzz smoke run, all without native codec dependencies (the cgo-only
+# bridges are excluded by build constraints). Native codec coverage lives in
+# codec-tagged-tests.yml.
+jobs:
+  vet-lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test (race detector)
+        run: go test -race ./...
+
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Actively explore for a short window on top of the committed seed corpus.
+      # Any new crasher is written under testdata/fuzz and fails the job.
+      - name: Fuzz DICOM object parser
+        run: go test -run=^$ -fuzz=FuzzNewDCMObjFromBytes -fuzztime=60s ./media
+
+      - name: Fuzz PDU reader
+        run: go test -run=^$ -fuzz=FuzzReadIncomingPDU -fuzztime=60s ./network
+
+      - name: Fuzz P-DATA-TF decoder
+        run: go test -run=^$ -fuzz=FuzzPDataTFReadDynamic -fuzztime=60s ./network
