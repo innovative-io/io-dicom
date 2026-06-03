@@ -95,10 +95,6 @@ func (aaac *associationAccept) GetPresContextAccepts() []PresentationContextAcce
 	return aaac.PresContextAccepts
 }
 
-func (aaac *associationAccept) getUserInfo() *userInformation {
-	return aaac.UserInfo
-}
-
 func (aaac *associationAccept) setUserInfo(userInfo *userInformation) {
 	aaac.UserInfo = userInfo
 }

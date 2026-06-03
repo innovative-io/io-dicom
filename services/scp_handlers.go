@@ -386,7 +386,7 @@ func (s *scp) runCGetOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network.
 				select {
 				case <-ctx.Done():
 					return
-				case progressCh <- subopProgress{p.Remaining, p.Completed, p.Failed, p.Warnings}:
+				case progressCh <- subopProgress(p):
 				}
 			},
 		)
@@ -498,7 +498,7 @@ func (s *scp) runCMoveOperation(rw *bufio.ReadWriter, conn net.Conn, pdu network
 			select {
 			case <-ctx.Done():
 				return
-			case progressCh <- subopProgress{p.Remaining, p.Completed, p.Failed, p.Warnings}:
+			case progressCh <- subopProgress(p):
 			}
 		})
 		resultCh <- subopResult{
