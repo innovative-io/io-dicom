@@ -58,7 +58,7 @@ type PDUService interface {
 	// ConnectTLS dials the remote AE over TLS and negotiates an A-ASSOCIATE.
 	// Pass nil for cfg to use the system certificate pool without a client certificate.
 	ConnectTLS(ctx context.Context, IP string, Port string, cfg *tls.Config) error
-	Close()
+	Close() error
 	GetAAssociationRQ() AssociationRequest
 	GetCalledAE() string
 	GetCallingAE() string
@@ -78,6 +78,19 @@ type PDUService interface {
 	Write(DCO media.DICOMObject, ItemType byte) error
 }
 
+// PDUServiceOption configures a PDUService at construction time.
+type PDUServiceOption func(*pduService)
+
+// WithImplementationClass overrides the implementation class UID and version
+// name sent in A-ASSOCIATE-RQ and A-ASSOCIATE-AC PDUs. By default the library
+// global values from internal/implclass are used.
+func WithImplementationClass(uid, version string) PDUServiceOption {
+	return func(p *pduService) {
+		p.implClassUID = uid
+		p.implVersion = version
+	}
+}
+
 type pduService struct {
 	AcceptedPresentationContexts []PresentationContextAccept
 	conn                         net.Conn
@@ -95,11 +108,14 @@ type pduService struct {
 	Timeout                      int
 	OnAssociationRequest         func(request AssociationRequest) bool
 	onRawPDU                     func(event RawPDUEvent)
+	implClassUID                 string
+	implVersion                  string
 }
 
-// NewPDUService - creates a pointer to PDUService
-func NewPDUService() PDUService {
-	return &pduService{
+// NewPDUService creates a PDUService. Pass PDUServiceOption values to
+// configure non-default behaviour (e.g. WithImplementationClass).
+func NewPDUService(opts ...PDUServiceOption) PDUService {
+	p := &pduService{
 		buf:       media.NewDICOMBuffer(),
 		AssocRQ:   newAssociationRequest(),
 		AssocAC:   newAssociationAccept(),
@@ -108,11 +124,25 @@ func NewPDUService() PDUService {
 		ReleaseRP: NewReleaseResponse(),
 		AbortRQ:   NewAbortRequest(),
 	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 const maxPduLength uint32 = 16384
 
 const releaseHandshakeTimeout = 5 * time.Second
+
+// resolveImplClass returns the implementation class UID and version to use
+// for this connection. Per-instance values (set via WithImplementationClass)
+// take precedence over the library-wide global defaults.
+func (pdu *pduService) resolveImplClass() (uid, version string) {
+	if pdu.implClassUID != "" || pdu.implVersion != "" {
+		return pdu.implClassUID, pdu.implVersion
+	}
+	return implementation.GetImplementationClassUID(), implementation.GetImplementationVersion()
+}
 
 func (pdu *pduService) SetConn(rw *bufio.ReadWriter) {
 	pdu.readWriter = rw
@@ -279,8 +309,9 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 
 	pdu.readWriter = rw
 	pdu.AssocRQ.SetMaxSubLength(maxPduLength)
-	pdu.AssocRQ.SetImplementationClassUID(implementation.GetImplementationClassUID())
-	pdu.AssocRQ.SetImplementationVersionName(implementation.GetImplementationVersion())
+	scuUID, scuVer := pdu.resolveImplClass()
+	pdu.AssocRQ.SetImplementationClassUID(scuUID)
+	pdu.AssocRQ.SetImplementationVersionName(scuVer)
 
 	slog.Debug("pduservice::finishConnect: sending A-ASSOCIATE-RQ", "callingAE", pdu.AssocRQ.GetCallingAE(), "calledAE", pdu.AssocRQ.GetCalledAE())
 	if err := pdu.writeEncodedPDU(byte(pdutype.AssociationRequest), func(rw *bufio.ReadWriter) error {
@@ -350,9 +381,9 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 	}
 }
 
-func (pdu *pduService) Close() {
+func (pdu *pduService) Close() error {
 	if pdu.readWriter == nil {
-		return
+		return nil
 	}
 
 	slog.Info("Releasing Association")
@@ -364,7 +395,7 @@ func (pdu *pduService) Close() {
 			return pdu.AbortRQ.Write(rw)
 		})
 		pdu.closeConn()
-		return
+		return err
 	}
 
 	if pdu.conn != nil {
@@ -377,14 +408,17 @@ func (pdu *pduService) Close() {
 		_ = pdu.writeEncodedPDU(byte(pdutype.AssociationAbortRequest), func(rw *bufio.ReadWriter) error {
 			return pdu.AbortRQ.Write(rw)
 		})
-	} else {
-		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
-		if int(itemType) != pdutype.AssociationReleaseResponse {
-			slog.Warn("pduservice::Close - unexpected PDU waiting for A-RELEASE-RP", "type", itemType)
-		}
+		pdu.closeConn()
+		return err
+	}
+
+	pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
+	if int(itemType) != pdutype.AssociationReleaseResponse {
+		slog.Warn("pduservice::Close - unexpected PDU waiting for A-RELEASE-RP", "type", itemType)
 	}
 
 	pdu.closeConn()
+	return nil
 }
 
 func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
@@ -778,8 +812,9 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 	if len(pdu.AcceptedPresentationContexts) > 0 {
 		userInfo := newUserInformation()
 		userInfo.MaxSubLength.SetMaximumLength(maxPduLength)
-		userInfo.SetImplementationClassUID(implementation.GetImplementationClassUID())
-		userInfo.SetImplementationVersionName(implementation.GetImplementationVersion())
+		scpUID, scpVer := pdu.resolveImplClass()
+		userInfo.SetImplementationClassUID(scpUID)
+		userInfo.SetImplementationVersionName(scpVer)
 		pdu.AssocAC.setUserInfo(userInfo)
 		return pdu.writeEncodedPDU(byte(pdutype.AssociationAccept), func(rw *bufio.ReadWriter) error {
 			return pdu.AssocAC.Write(rw)

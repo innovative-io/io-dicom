@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/innovative-io/io-dicom/dictionary"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	implementation "github.com/innovative-io/io-dicom/internal/implclass"
 )
@@ -178,7 +179,7 @@ func (buf *DICOMBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 		}
 	} else {
 		if !internalVR {
-			tag.VR = GetDictionaryVR(tag.Group, tag.Element)
+			tag.VR = dictionary.GetDictionaryVR(tag.Group, tag.Element)
 		}
 		length, err := buf.ReadUint32(buf.bigEndian)
 		if err != nil {

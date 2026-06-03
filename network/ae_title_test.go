@@ -39,3 +39,17 @@ func TestFormatAETitleTruncatesToSixteenBytes(t *testing.T) {
 		t.Fatalf("GetCallingAE() = %q, want %q", got, "ABCDEFGHIJKLMNOP")
 	}
 }
+
+func TestAssociationRequest_GetImplementationVersionName(t *testing.T) {
+	aarq := NewAssociationRequest()
+
+	// Before setting, should return empty string.
+	if got := aarq.GetImplementationVersionName(); got != "" {
+		t.Fatalf("GetImplementationVersionName() before set = %q, want %q", got, "")
+	}
+
+	aarq.SetImplementationVersionName("MY-IMPL-1.0")
+	if got := aarq.GetImplementationVersionName(); got != "MY-IMPL-1.0" {
+		t.Fatalf("GetImplementationVersionName() = %q, want %q", got, "MY-IMPL-1.0")
+	}
+}

@@ -1,6 +1,6 @@
 //go:build libjpeg || charls || openjpeg || libjxl || openjph || ffmpeg || st2110
 
-package media
+package media_test
 
 import (
 	"strings"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/innovative-io/io-dicom/codecs"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
+	"github.com/innovative-io/io-dicom/transcoder"
 )
 
 func TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends(t *testing.T) {
@@ -55,13 +56,13 @@ func TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends(t *testin
 			forceCodecBackends(t, cfg)
 			obj := tc.newObj()
 
-			if err := obj.ChangeTransferSyntax(tc.ts); err != nil {
+			if err := transcoder.ChangeTransferSyntax(obj, tc.ts); err != nil {
 				if tc.nativeToolingHint != "" && strings.Contains(err.Error(), tc.nativeToolingHint) {
 					t.Skipf("native tooling unavailable for %s backend: %v", tc.nativeBackend, err)
 				}
 				t.Fatalf("ChangeTransferSyntax to %s failed: %v", tc.ts.Name, err)
 			}
-			if err := obj.ChangeTransferSyntax(transfersyntax.ExplicitVRLittleEndian); err != nil {
+			if err := transcoder.ChangeTransferSyntax(obj, transfersyntax.ExplicitVRLittleEndian); err != nil {
 				t.Fatalf("ChangeTransferSyntax back to ExplicitVRLittleEndian failed: %v", err)
 			}
 

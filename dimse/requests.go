@@ -1,15 +1,16 @@
-package media
+package dimse
 
 import (
 	"time"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
-	"github.com/innovative-io/io-dicom/uuids"
+	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/internal/uuids"
 )
 
-// DefaultCFindRequest - Creates a default C-Find request
-func DefaultCFindRequest() DICOMObject {
-	query := NewEmptyDCMObj()
+// DefaultCFindRequest creates a default C-FIND request at the STUDY level.
+func DefaultCFindRequest() media.DICOMObject {
+	query := media.NewEmptyDCMObj()
 	query.Write(tags.StudyDate, "")
 	query.Write(tags.StudyTime, "")
 	query.Write(tags.AccessionNumber, "")
@@ -27,9 +28,9 @@ func DefaultCFindRequest() DICOMObject {
 	return query
 }
 
-// DefaultCMoveRequest - Creates a default C-Move request
-func DefaultCMoveRequest(studyUID string) DICOMObject {
-	query := NewEmptyDCMObj()
+// DefaultCMoveRequest creates a default C-MOVE request for the given study UID.
+func DefaultCMoveRequest(studyUID string) media.DICOMObject {
+	query := media.NewEmptyDCMObj()
 	query.Write(tags.StudyDate, "")
 	query.Write(tags.StudyTime, "")
 	query.Write(tags.AccessionNumber, "")
@@ -44,10 +45,10 @@ func DefaultCMoveRequest(studyUID string) DICOMObject {
 	return query
 }
 
-// GenerateCFindRequest - Generates C-Find request
-func GenerateCFindRequest() DICOMObject {
+// GenerateCFindRequest builds a populated C-FIND request with synthetic patient data.
+func GenerateCFindRequest() media.DICOMObject {
 	studyUID := uuids.CreateStudyUID("FAKE^PATIENT", "123456789", "AC1234", time.Now().Format("20060102"))
-	query := NewEmptyDCMObj()
+	query := media.NewEmptyDCMObj()
 	query.Write(tags.StudyDate, time.Now())
 	query.Write(tags.StudyTime, time.Now())
 	query.Write(tags.AccessionNumber, "AC1234")

@@ -1,13 +1,14 @@
-package media
+package dimse_test
 
 import (
 	"testing"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
+	"github.com/innovative-io/io-dicom/dimse"
 )
 
 func TestDefaultCFindRequest(t *testing.T) {
-	obj := DefaultCFindRequest()
+	obj := dimse.DefaultCFindRequest()
 	if obj == nil {
 		t.Fatal("DefaultCFindRequest() returned nil")
 	}
@@ -21,7 +22,7 @@ func TestDefaultCFindRequest(t *testing.T) {
 }
 
 func TestDefaultCMoveRequest(t *testing.T) {
-	obj := DefaultCMoveRequest("1.2.3.4.5")
+	obj := dimse.DefaultCMoveRequest("1.2.3.4.5")
 	if obj == nil {
 		t.Fatal("DefaultCMoveRequest() returned nil")
 	}
@@ -36,7 +37,7 @@ func TestDefaultCMoveRequest(t *testing.T) {
 }
 
 func TestDefaultCMoveRequest_EmptyUID(t *testing.T) {
-	obj := DefaultCMoveRequest("")
+	obj := dimse.DefaultCMoveRequest("")
 	uid := obj.GetString(tags.StudyInstanceUID)
 	if uid != "" {
 		t.Fatalf("StudyInstanceUID should be empty, got %q", uid)
@@ -44,7 +45,7 @@ func TestDefaultCMoveRequest_EmptyUID(t *testing.T) {
 }
 
 func TestGenerateCFindRequest(t *testing.T) {
-	obj := GenerateCFindRequest()
+	obj := dimse.GenerateCFindRequest()
 	if obj == nil {
 		t.Fatal("GenerateCFindRequest() returned nil")
 	}
@@ -59,7 +60,6 @@ func TestGenerateCFindRequest(t *testing.T) {
 	if modality != "MR" {
 		t.Fatalf("ModalitiesInStudy = %q, want MR", modality)
 	}
-	// UID must be non-empty and at most 64 chars
 	uid := obj.GetString(tags.StudyInstanceUID)
 	if uid == "" {
 		t.Fatal("StudyInstanceUID should be non-empty")

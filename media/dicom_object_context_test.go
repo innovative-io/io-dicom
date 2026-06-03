@@ -1,4 +1,4 @@
-package media
+package media_test
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	jpeg2000codec "github.com/innovative-io/io-dicom/codecs/jpeg2000"
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
+	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/transcoder"
 )
 
 type mediaContextJPEG2000Backend struct{}
@@ -46,27 +48,26 @@ func TestChangeTransferSyntaxContextPropagatesCodecContext(t *testing.T) {
 		t.Fatalf("UseBackend failed: %v", err)
 	}
 
-	obj := &dicomObject{
-		Tags:           make([]*DICOMTag, 0),
-		TransferSyntax: transfersyntax.JPEG2000Lossless,
-		ExplicitVR:     true,
-		BigEndian:      false,
-	}
+	obj := media.NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.JPEG2000Lossless)
+	obj.SetExplicitVR(true)
+	obj.SetBigEndian(false)
+
 	obj.Write(tags.PhotometricInterpretation, "MONOCHROME2")
 	obj.Write(tags.Rows, 1)
 	obj.Write(tags.Columns, 1)
 	obj.Write(tags.BitsAllocated, 8)
 	obj.Write(tags.BitsStored, 8)
 	obj.Write(tags.PixelRepresentation, 0)
-	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 1, VR: "DL", Data: []byte{0x01}, BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 1, VR: "DL", Data: []byte{0x01}, BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := obj.ChangeTransferSyntaxContext(ctx, transfersyntax.ExplicitVRLittleEndian)
+	err := transcoder.ChangeTransferSyntaxContext(ctx, obj, transfersyntax.ExplicitVRLittleEndian)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}

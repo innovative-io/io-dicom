@@ -17,15 +17,20 @@ func TestSupportedTransferSyntaxesHaveMediaLayerCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read dicom_object.go: %v", err)
 	}
-	tsSource, err := os.ReadFile("dicom_object_transcoding.go")
+	tsSource, err := os.ReadFile("../transcoder/transcoder.go")
 	if err != nil {
-		t.Fatalf("failed to read dicom_object_transcoding.go: %v", err)
+		t.Fatalf("failed to read transcoder/transcoder.go: %v", err)
+	}
+	dispatchSource, err := os.ReadFile("../codecs/dispatch.go")
+	if err != nil {
+		t.Fatalf("failed to read codecs/dispatch.go: %v", err)
 	}
 
 	src := string(source)
 	tsSrc := string(tsSource)
-	compressSection := sourceSection(t, tsSrc, "func (obj *dicomObject) compress(", "func (obj *dicomObject) uncompress(")
-	uncompressSection := sourceSection(t, tsSrc, "func (obj *dicomObject) uncompress(", "")
+	compressSection := sourceSection(t, tsSrc, "func compress(", "func uncompress(")
+	// uncompress delegates to codecs.DecompressFrame; check coverage there.
+	uncompressSection := string(dispatchSource)
 	parseSection := sourceSection(t, src, "func parseDICOMBuffer(", "func (obj *dicomObject) WriteToBytes()")
 	writeSection := sourceSection(t, src, "func (obj *dicomObject) WriteToBytes()", "func (obj *dicomObject) DumpTags()")
 

@@ -2,8 +2,10 @@ package wado_test
 
 import (
 	"context"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"testing"
 
@@ -177,6 +179,61 @@ func TestClient_SearchInstances_OK(t *testing.T) {
 	_, err := client.SearchInstances(context.Background(), "1.2.3", "1.2.3.1", nil)
 	if err != nil {
 		t.Fatalf("SearchInstances() error: %v", err)
+	}
+}
+
+func TestClient_RetrieveFrames_OK(t *testing.T) {
+	// Serve a stub multipart response with two raw-bytes frame parts.
+	frame1 := []byte{0x01, 0x02, 0x03}
+	frame2 := []byte{0x04, 0x05, 0x06}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mw := multipart.NewWriter(w)
+		w.Header().Set("Content-Type", "multipart/related; type=\"application/octet-stream\"; boundary="+mw.Boundary())
+		for _, frame := range [][]byte{frame1, frame2} {
+			part, _ := mw.CreatePart(textproto.MIMEHeader{
+				"Content-Type": []string{"application/octet-stream"},
+			})
+			_, _ = part.Write(frame)
+		}
+		_ = mw.Close()
+	}))
+	defer srv.Close()
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	frames, err := client.RetrieveFrames(context.Background(), "s", "se", "sop", []int{1, 2})
+	if err != nil {
+		t.Fatalf("RetrieveFrames() error: %v", err)
+	}
+	if len(frames) != 2 {
+		t.Fatalf("got %d frames, want 2", len(frames))
+	}
+	if string(frames[0]) != string(frame1) {
+		t.Errorf("frame[0] = %v, want %v", frames[0], frame1)
+	}
+	if string(frames[1]) != string(frame2) {
+		t.Errorf("frame[1] = %v, want %v", frames[1], frame2)
+	}
+}
+
+func TestClient_RetrieveFrames_EmptyList(t *testing.T) {
+	client := wado.NewClient(wado.ClientParams{BaseURL: "http://127.0.0.1:1"})
+	_, err := client.RetrieveFrames(context.Background(), "s", "se", "sop", nil)
+	if err == nil {
+		t.Fatal("want error for empty frame list")
+	}
+}
+
+func TestClient_RetrieveFrames_ViaServer(t *testing.T) {
+	srv, store := newWADOTestServer(t)
+	defer srv.Close()
+	store.studies["1.2.3"] = []media.DICOMObject{loadSampleDICOM(t)}
+
+	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
+	// Frame retrieval may return 0 frames if the sample has no pixel data — that's OK.
+	// What matters is no protocol/parse error.
+	_, err := client.RetrieveFrames(context.Background(), "1.2.3", "1.2.3.1", "1.2.3.1.1", []int{1})
+	if err != nil {
+		t.Fatalf("RetrieveFrames() via server error: %v", err)
 	}
 }
 

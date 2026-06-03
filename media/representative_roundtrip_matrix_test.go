@@ -1,9 +1,10 @@
-package media
+package media_test
 
 import (
 	"testing"
 
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
+	"github.com/innovative-io/io-dicom/media"
 )
 
 type roundTripAssertionMode string
@@ -17,7 +18,7 @@ const (
 type representativeRoundTripCase struct {
 	name              string
 	ts                *transfersyntax.TransferSyntax
-	newObj            func() DICOMObject
+	newObj            func() media.DICOMObject
 	want              []byte
 	passthroughMode   roundTripAssertionMode
 	nativeFamily      string
@@ -52,14 +53,14 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 		{
 			name:            "JPEGBaseline8Bit",
 			ts:              transfersyntax.JPEGBaseline8Bit,
-			newObj:          func() DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			newObj:          func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
 			want:            []byte{7, 17, 27, 37},
 			passthroughMode: roundTripAssertionDelta3,
 		},
 		{
 			name:            "JPEGLosslessSV1",
 			ts:              transfersyntax.JPEGLosslessSV1,
-			newObj:          func() DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			newObj:          func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
 			want:            []byte{7, 17, 27, 37},
 			passthroughMode: roundTripAssertionDelta3,
 		},
@@ -77,7 +78,7 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 		{
 			name:              "JPEGLSLossless",
 			ts:                transfersyntax.JPEGLSLossless,
-			newObj:            func() DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
 			want:              []byte{7, 17, 27, 37},
 			passthroughMode:   roundTripAssertionExact,
 			nativeFamily:      "jpegls",
@@ -88,7 +89,7 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 		{
 			name:              "JPEG2000Lossless",
 			ts:                transfersyntax.JPEG2000Lossless,
-			newObj:            func() DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
 			want:              []byte{7, 17, 27, 37},
 			passthroughMode:   roundTripAssertionExact,
 			nativeFamily:      "jpeg2000",
@@ -99,7 +100,7 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 		{
 			name:              "JPEGXL",
 			ts:                transfersyntax.JPEGXL,
-			newObj:            func() DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
 			want:              []byte{7, 17, 27, 37},
 			passthroughMode:   roundTripAssertionExact,
 			nativeFamily:      "jpegxl",
@@ -110,7 +111,7 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 		{
 			name:              "JPEGXLLossless",
 			ts:                transfersyntax.JPEGXLLossless,
-			newObj:            func() DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
 			want:              []byte{7, 17, 27, 37},
 			passthroughMode:   roundTripAssertionExact,
 			nativeFamily:      "jpegxl",
@@ -121,7 +122,7 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 		{
 			name:              "JPIPHTJ2KReferenced",
 			ts:                transfersyntax.JPIPHTJ2KReferenced,
-			newObj:            func() DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
 			want:              []byte{7, 17, 27, 37},
 			passthroughMode:   roundTripAssertionExact,
 			nativeFamily:      "jpip",
@@ -132,7 +133,7 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 		{
 			name:              "MPEG2MPML",
 			ts:                transfersyntax.MPEG2MPML,
-			newObj:            func() DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
 			want:              []byte{7, 17, 27, 37},
 			passthroughMode:   roundTripAssertionExact,
 			nativeFamily:      "mpeg",
@@ -143,7 +144,7 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 		{
 			name:              "SMPTEST211020Progressive",
 			ts:                transfersyntax.SMPTEST211020UncompressedProgressiveActiveVideo,
-			newObj:            func() DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
 			want:              []byte{7, 17, 27, 37},
 			passthroughMode:   roundTripAssertionExact,
 			nativeFamily:      "smpte2110",
@@ -154,7 +155,7 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 	}
 }
 
-func assertRoundTripByMode(t *testing.T, obj DICOMObject, want []byte, mode roundTripAssertionMode) {
+func assertRoundTripByMode(t *testing.T, obj media.DICOMObject, want []byte, mode roundTripAssertionMode) {
 	t.Helper()
 
 	switch mode {

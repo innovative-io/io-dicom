@@ -28,6 +28,9 @@ type AssociationRequest interface {
 	SetMaxSubLength(length uint32)
 	GetImplementationClass() UIDItem
 	SetImplementationClassUID(uid string)
+	// GetImplementationVersionName returns the implementation version name string
+	// sent in the A-ASSOCIATE-RQ user information item, or empty string if absent.
+	GetImplementationVersionName() string
 	SetImplementationVersionName(name string)
 	GetPeerCertificates() []*x509.Certificate
 	SetPeerCertificates(certs []*x509.Certificate)
@@ -140,6 +143,10 @@ func (aarq *associationRequest) SetImplementationClassUID(uid string) {
 
 func (aarq *associationRequest) SetImplementationVersionName(name string) {
 	aarq.UserInfo.SetImplementationVersionName(name)
+}
+
+func (aarq *associationRequest) GetImplementationVersionName() string {
+	return aarq.UserInfo.GetImplementationVersion().GetUID()
 }
 
 func (aarq *associationRequest) GetPeerCertificates() []*x509.Certificate {

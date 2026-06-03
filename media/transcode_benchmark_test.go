@@ -1,4 +1,4 @@
-package media
+package media_test
 
 // Transcoding benchmarks: each iteration is NewDCMObjFromBytes + ChangeTransferSyntax (fresh parse).
 //
@@ -7,29 +7,32 @@ package media
 //	go test ./media -run '^$' -bench 'BenchmarkTranscode_' -benchmem -benchtime=1s
 //
 import (
+	"io"
+	"log"
 	"os"
 	"testing"
 
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
+	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/transcoder"
 )
 
 // benchmarkTranscode measures parse + ChangeTransferSyntax per iteration (fresh object each time),
-// which matches batch “read file → convert transfer syntax” workloads.
+// which matches batch "read file → convert transfer syntax" workloads.
 func benchmarkTranscode(b *testing.B, relPath string, outTS *transfersyntax.TransferSyntax) {
 	b.Helper()
-	muteParserLogsForBenchmarks()
-	InitDict()
+	log.SetOutput(io.Discard)
 
 	data, err := os.ReadFile(relPath)
 	if err != nil {
 		b.Skipf("benchmark sample %s: %v", relPath, err)
 	}
 
-	obj, err := NewDCMObjFromBytes(data)
+	obj, err := media.NewDCMObjFromBytes(data)
 	if err != nil {
 		b.Fatalf("NewDCMObjFromBytes(%s): %v", relPath, err)
 	}
-	if err := obj.ChangeTransferSyntax(outTS); err != nil {
+	if err := transcoder.ChangeTransferSyntax(obj, outTS); err != nil {
 		b.Skipf("transcode %s → %s not available in this build: %v", relPath, outTS.Name, err)
 	}
 
@@ -37,11 +40,11 @@ func benchmarkTranscode(b *testing.B, relPath string, outTS *transfersyntax.Tran
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		o, err := NewDCMObjFromBytes(data)
+		o, err := media.NewDCMObjFromBytes(data)
 		if err != nil {
 			b.Fatalf("NewDCMObjFromBytes: %v", err)
 		}
-		if err := o.ChangeTransferSyntax(outTS); err != nil {
+		if err := transcoder.ChangeTransferSyntax(o, outTS); err != nil {
 			b.Fatalf("ChangeTransferSyntax → %s: %v", outTS.Name, err)
 		}
 	}
@@ -50,22 +53,21 @@ func benchmarkTranscode(b *testing.B, relPath string, outTS *transfersyntax.Tran
 // benchmarkTranscodeRoundTrip runs two ChangeTransferSyntax calls per iteration on a fresh parse.
 func benchmarkTranscodeRoundTrip(b *testing.B, relPath string, midTS, backTS *transfersyntax.TransferSyntax) {
 	b.Helper()
-	muteParserLogsForBenchmarks()
-	InitDict()
+	log.SetOutput(io.Discard)
 
 	data, err := os.ReadFile(relPath)
 	if err != nil {
 		b.Skipf("benchmark sample %s: %v", relPath, err)
 	}
 
-	obj, err := NewDCMObjFromBytes(data)
+	obj, err := media.NewDCMObjFromBytes(data)
 	if err != nil {
 		b.Fatalf("NewDCMObjFromBytes(%s): %v", relPath, err)
 	}
-	if err := obj.ChangeTransferSyntax(midTS); err != nil {
+	if err := transcoder.ChangeTransferSyntax(obj, midTS); err != nil {
 		b.Skipf("transcode → %s: %v", midTS.Name, err)
 	}
-	if err := obj.ChangeTransferSyntax(backTS); err != nil {
+	if err := transcoder.ChangeTransferSyntax(obj, backTS); err != nil {
 		b.Skipf("transcode back → %s: %v", backTS.Name, err)
 	}
 
@@ -73,14 +75,14 @@ func benchmarkTranscodeRoundTrip(b *testing.B, relPath string, midTS, backTS *tr
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		o, err := NewDCMObjFromBytes(data)
+		o, err := media.NewDCMObjFromBytes(data)
 		if err != nil {
 			b.Fatalf("NewDCMObjFromBytes: %v", err)
 		}
-		if err := o.ChangeTransferSyntax(midTS); err != nil {
+		if err := transcoder.ChangeTransferSyntax(o, midTS); err != nil {
 			b.Fatalf("ChangeTransferSyntax → %s: %v", midTS.Name, err)
 		}
-		if err := o.ChangeTransferSyntax(backTS); err != nil {
+		if err := transcoder.ChangeTransferSyntax(o, backTS); err != nil {
 			b.Fatalf("ChangeTransferSyntax → %s: %v", backTS.Name, err)
 		}
 	}

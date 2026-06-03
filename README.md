@@ -46,7 +46,8 @@ Library-level human-readable output can be redirected without relying on process
 
 - default `log` output
 - default `slog` output
-- `media.DICOMObject.DumpTags()` output
+
+`media.DICOMObject.DumpTags(w io.Writer)` accepts a writer directly — pass the same writer there to capture tag-dump output in the same destination.
 
 This is the hook used by `io-dicom-tools` so bridge-hosted library activity is surfaced in the app Console.
 

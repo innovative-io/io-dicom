@@ -37,7 +37,6 @@ func TestSCP_OnCEchoRequest_Allow(t *testing.T) {
 		return true // allow
 	})
 
-	media.InitDict()
 	dest := &network.Destination{
 		Name:      "CEchoTest",
 		CalledAE:  "SCP",
@@ -46,7 +45,7 @@ func TestSCP_OnCEchoRequest_Allow(t *testing.T) {
 		Port:      1044,
 	}
 	scu := NewSCU(dest)
-	if err := scu.EchoSCU(context.Background(), 0); err != nil {
+	if err := scu.EchoSCU(context.Background()); err != nil {
 		t.Fatalf("EchoSCU: %v", err)
 	}
 	if !called {
@@ -66,7 +65,6 @@ func TestSCP_OnCEchoRequest_Reject(t *testing.T) {
 		return false // reject
 	})
 
-	media.InitDict()
 	dest := &network.Destination{
 		Name:      "CEchoRejectTest",
 		CalledAE:  "SCP",
@@ -78,7 +76,7 @@ func TestSCP_OnCEchoRequest_Reject(t *testing.T) {
 	// When the echo is rejected the SCP drops the response; the SCU should
 	// get an error (timeout, connection close, or bad response).
 	// We simply verify the call completes without panicking.
-	_ = scu.EchoSCU(context.Background(), 1)
+	_ = scu.EchoSCU(context.Background())
 }
 
 // TestSCP_OnCMoveRequest verifies the OnCMoveRequest handler setter and that
@@ -93,7 +91,6 @@ func TestSCP_OnCMoveRequest(t *testing.T) {
 		return CMoveResult{Status: dicomstatus.Success}, nil
 	})
 
-	media.InitDict()
 	dest := &network.Destination{
 		Name:      "CMoveTest",
 		CalledAE:  "SCP",
@@ -103,7 +100,7 @@ func TestSCP_OnCMoveRequest(t *testing.T) {
 	}
 	scu := NewSCU(dest)
 
-	status, err := scu.MoveSCU(context.Background(), "DEST_AE", media.DefaultCMoveRequest("1.2.3.4"), 0)
+	status, err := scu.MoveSCU(context.Background(), "DEST_AE", dimse.DefaultCMoveRequest("1.2.3.4"))
 	if err != nil {
 		t.Fatalf("MoveSCU: %v", err)
 	}
@@ -141,7 +138,6 @@ func TestSCP_CFindRejectsInvalidQueryRetrieveLevel(t *testing.T) {
 		return CFindResult{Status: dicomstatus.Success}, nil
 	})
 
-	media.InitDict()
 	dest := &network.Destination{
 		Name:      "CFindInvalidLevel",
 		CalledAE:  "SCP",
@@ -155,7 +151,7 @@ func TestSCP_CFindRejectsInvalidQueryRetrieveLevel(t *testing.T) {
 	query.Write(tags.PatientID, "P123")
 
 	scu := NewSCU(dest)
-	_, status, err := scu.FindSCU(context.Background(), query, 5)
+	_, status, err := scu.FindSCU(context.Background(), query)
 	if err != nil {
 		t.Fatalf("FindSCU: %v", err)
 	}
@@ -181,7 +177,6 @@ func TestSCP_CFindAllowsEmptyQueryRetrieveLevelForWorklist(t *testing.T) {
 		return CFindResult{Status: dicomstatus.Success}, nil
 	})
 
-	media.InitDict()
 	dest := &network.Destination{
 		Name:      "Worklist SCP",
 		CalledAE:  "SCP",
@@ -199,7 +194,7 @@ func TestSCP_CFindAllowsEmptyQueryRetrieveLevelForWorklist(t *testing.T) {
 		results++
 	})
 
-	count, status, err := scu.WorklistSCU(context.Background(), query, 5)
+	count, status, err := scu.WorklistSCU(context.Background(), query)
 	if err != nil {
 		t.Fatalf("WorklistSCU: %v", err)
 	}
@@ -819,8 +814,6 @@ func TestSCP_CGetStoreSubop(t *testing.T) {
 		return CGetResult{Status: dicomstatus.Success, Completed: 1}, nil
 	})
 
-	media.InitDict()
-
 	pdu := network.NewPDUService()
 	pdu.SetCalledAE("SCP")
 	pdu.SetCallingAE("SCU")
@@ -946,7 +939,7 @@ func (m *cgetStoreSubopMockPDU) Connect(_ context.Context, _, _ string) error { 
 func (m *cgetStoreSubopMockPDU) ConnectTLS(_ context.Context, _, _ string, _ *tls.Config) error {
 	return nil
 }
-func (m *cgetStoreSubopMockPDU) Close() {}
+func (m *cgetStoreSubopMockPDU) Close() error { return nil }
 func (m *cgetStoreSubopMockPDU) GetAAssociationRQ() network.AssociationRequest {
 	return network.NewAssociationRequest()
 }
@@ -970,7 +963,6 @@ func TestCGetStoreSubop_TranscodesToNegotiatedTS(t *testing.T) {
 	if _, err := os.Stat(samplePath); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
-	media.InitDict()
 
 	original, err := media.NewDCMObjFromFile(samplePath)
 	if err != nil {
@@ -1015,4 +1007,63 @@ func TestCGetStoreSubop_TranscodesToNegotiatedTS(t *testing.T) {
 		}
 		t.Errorf("written data TS = %q, want %q (%s)", gotUID, targetTS.UID, targetTS.Description)
 	}
+}
+
+// TestSCP_WithImplementationClass verifies that the WithImplementationClass
+// option causes the SCP to send the overridden UID in the A-ASSOCIATE-AC.
+// The SCU captures the raw PDU bytes and checks for the custom UID string.
+func TestSCP_WithImplementationClass(t *testing.T) {
+	const customUID = "1.2.3.4.888"
+	const port = 1065
+
+	_, testSCP := StartSCP(t, port, WithImplementationClass(customUID, "MYVER"))
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool { return true })
+	testSCP.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, findLevel string, data media.DICOMObject, emit func(media.DICOMObject)) (CFindResult, error) {
+		return CFindResult{Status: dicomstatus.Success}, nil
+	})
+
+	var foundUID bool
+	dest := &network.Destination{
+		Name:      "Impl Class SCP Test",
+		CalledAE:  "TEST_SCP",
+		CallingAE: "TEST_SCU",
+		HostName:  "localhost",
+		Port:      port,
+	}
+	scu := NewSCU(dest)
+	scu.SetOnRawPDU(func(event network.RawPDUEvent) {
+		if event.Direction == network.RawPDUDirectionInbound && event.PDUType == 0x02 {
+			if containsString(event.Data, customUID) {
+				foundUID = true
+			}
+		}
+	})
+
+	if err := scu.EchoSCU(context.Background()); err != nil {
+		t.Fatalf("EchoSCU: %v", err)
+	}
+	if !foundUID {
+		t.Errorf("custom implementation class UID %q not found in A-ASSOCIATE-AC PDU", customUID)
+	}
+}
+
+// containsString reports whether s appears as a substring in data.
+func containsString(data []byte, s string) bool {
+	b := []byte(s)
+	if len(b) > len(data) {
+		return false
+	}
+	for i := 0; i <= len(data)-len(b); i++ {
+		match := true
+		for j := range b {
+			if data[i+j] != b[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }

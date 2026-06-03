@@ -54,6 +54,11 @@ type Client interface {
 	SearchSeries(ctx context.Context, studyUID string, params url.Values) ([]map[string]interface{}, error)
 	// SearchInstances queries for matching instances via QIDO-RS.
 	SearchInstances(ctx context.Context, studyUID, seriesUID string, params url.Values) ([]map[string]interface{}, error)
+	// RetrieveFrames fetches the raw pixel data for specific frames of a DICOM
+	// instance via WADO-RS. frames is a 1-based list of frame numbers matching
+	// the DICOM standard. Each element of the returned slice is the uncompressed
+	// or compressed pixel data for the corresponding requested frame.
+	RetrieveFrames(ctx context.Context, studyUID, seriesUID, sopInstanceUID string, frames []int) ([][]byte, error)
 }
 
 type wadoClient struct {
@@ -61,9 +66,8 @@ type wadoClient struct {
 	httpClient *http.Client
 }
 
-// NewClient creates a new DICOMweb client and initialises the DICOM dictionary.
+// NewClient creates a new DICOMweb client.
 func NewClient(params ClientParams) Client {
-	media.InitDict()
 	// #nosec G402 -- InsecureTLS is an explicit opt-in controlled by the caller.
 	tlsCfg := &tls.Config{InsecureSkipVerify: params.InsecureTLS} //nolint:gosec
 	return &wadoClient{
@@ -186,7 +190,53 @@ func (c *wadoClient) SearchInstances(ctx context.Context, studyUID, seriesUID st
 	return c.searchJSON(ctx, u, params)
 }
 
+// RetrieveFrames fetches raw pixel data for the given 1-based frame numbers.
+func (c *wadoClient) RetrieveFrames(ctx context.Context, studyUID, seriesUID, sopInstanceUID string, frames []int) ([][]byte, error) {
+	if len(frames) == 0 {
+		return nil, fmt.Errorf("wado: RetrieveFrames: frames list must not be empty")
+	}
+	parts := make([]string, len(frames))
+	for i, f := range frames {
+		parts[i] = fmt.Sprintf("%d", f)
+	}
+	u := fmt.Sprintf("%s/wado/rs/studies/%s/series/%s/instances/%s/frames/%s",
+		c.params.BaseURL, studyUID, seriesUID, sopInstanceUID,
+		strings.Join(parts, ","))
+	return c.retrieveMultipartBytes(ctx, u)
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// retrieveMultipartBytes fetches a WADO-RS URL and returns each part as raw bytes.
+// Used for frame retrieval where each part is pixel data, not a DICOM object.
+func (c *wadoClient) retrieveMultipartBytes(ctx context.Context, rawURL string) ([][]byte, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, rawURL, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	mediaType, mparams, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
+		return nil, fmt.Errorf("wado: expected multipart response, got %q",
+			resp.Header.Get("Content-Type"))
+	}
+
+	mr := multipart.NewReader(resp.Body, mparams["boundary"])
+	var results [][]byte
+	for {
+		part, partErr := mr.NextPart()
+		if partErr != nil {
+			break
+		}
+		data, readErr := io.ReadAll(part)
+		if readErr != nil {
+			continue
+		}
+		results = append(results, data)
+	}
+	return results, nil
+}
 
 // retrieveMultipart fetches a WADO-RS URL and returns parsed DICOM objects.
 func (c *wadoClient) retrieveMultipart(ctx context.Context, rawURL string) ([]media.DICOMObject, error) {

@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
+	"github.com/innovative-io/io-dicom/dimse"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
@@ -27,8 +28,6 @@ var version string
 
 func main() {
 	log.Printf("Starting io-dicom %s\n\n", version)
-
-	media.InitDict()
 
 	hostName := flag.String("host", "localhost", "Destination host name or IP")
 	calledAE := flag.String("calledae", "DICOM_SCP", "AE of the destination")
@@ -108,7 +107,7 @@ func main() {
 		scp.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, queryLevel string, query media.DICOMObject, emit func(media.DICOMObject)) (services.CFindResult, error) {
 			query.DumpTags(os.Stdout)
 			for i := 0; i < 10; i++ {
-				emit(media.GenerateCFindRequest())
+				emit(dimse.GenerateCFindRequest())
 			}
 			return services.CFindResult{Status: dicomstatus.Success}, nil
 		})
@@ -118,7 +117,7 @@ func main() {
 			return services.CMoveResult{Status: dicomstatus.Success}, nil
 		})
 
-		scp.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
+		scp.OnCStoreRequest(func(ctx context.Context, request network.AssociationRequest, data media.DICOMObject) uint16 {
 			log.Printf("INFO, C-Store received %s", data.GetString(tags.SOPInstanceUID))
 			directory := filepath.Join(*datastore, data.GetString(tags.PatientID), data.GetString(tags.StudyInstanceUID), data.GetString(tags.SeriesInstanceUID))
 			os.MkdirAll(directory, 0755)
@@ -186,21 +185,21 @@ func main() {
 
 	if *cecho {
 		scu := services.NewSCU(destination)
-		err := scu.EchoSCU(context.Background(), 30)
+		err := scu.EchoSCU(context.Background())
 		if err != nil {
 			log.Fatalln(err)
 		}
 		slog.Info("CEcho was successful")
 	}
 	if *cfind {
-		request := media.DefaultCFindRequest()
+		request := dimse.DefaultCFindRequest()
 		scu := services.NewSCU(destination)
 		scu.SetOnCFindResult(func(result media.DICOMObject) {
 			log.Printf("Found study %s\n", result.GetString(tags.StudyInstanceUID))
 			result.DumpTags(os.Stdout)
 		})
 
-		count, status, err := scu.FindSCU(context.Background(), request, 0)
+		count, status, err := scu.FindSCU(context.Background(), request)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -223,7 +222,7 @@ func main() {
 			result.DumpTags(os.Stdout)
 		})
 
-		count, status, err := scu.WorklistSCU(context.Background(), request, 0)
+		count, status, err := scu.WorklistSCU(context.Background(), request)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -240,10 +239,10 @@ func main() {
 			log.Fatalln("studyuid is required for a C-Move")
 		}
 
-		request := media.DefaultCMoveRequest(*studyUID)
+		request := dimse.DefaultCMoveRequest(*studyUID)
 
 		scu := services.NewSCU(destination)
-		_, err := scu.MoveSCU(context.Background(), *destinationAE, request, 0)
+		_, err := scu.MoveSCU(context.Background(), *destinationAE, request)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -255,7 +254,7 @@ func main() {
 			log.Fatalln("file is required for a C-Store")
 		}
 		scu := services.NewSCU(destination)
-		err := scu.StoreSCU(context.Background(), *fileName, 0)
+		err := scu.StoreSCU(context.Background(), *fileName)
 		if err != nil {
 			log.Fatalln(err)
 		}

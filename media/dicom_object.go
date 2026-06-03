@@ -6,20 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/innovative-io/io-dicom/codecs"
 	"github.com/innovative-io/io-dicom/codecs/deflate"
 	"github.com/innovative-io/io-dicom/codecs/jpeg"
-	"github.com/innovative-io/io-dicom/codecs/jpeg2000"
-	"github.com/innovative-io/io-dicom/codecs/jpegls"
-	"github.com/innovative-io/io-dicom/codecs/jpegxl"
-	"github.com/innovative-io/io-dicom/codecs/jpip"
-	"github.com/innovative-io/io-dicom/codecs/mpeg"
-	"github.com/innovative-io/io-dicom/codecs/rle"
-	"github.com/innovative-io/io-dicom/codecs/smpte2110"
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 )
@@ -51,6 +46,16 @@ type DICOMObject interface {
 	GetUint16(tag *tags.Tag) uint16
 	GetUint32(tag *tags.Tag) uint32
 	GetString(tag *tags.Tag) string
+	// GetFloat32 returns the IEEE 754 single-precision (FL) value of tag, or 0.
+	GetFloat32(tag *tags.Tag) float32
+	// GetFloat64 returns the IEEE 754 double-precision (FD) value of tag, or 0.
+	GetFloat64(tag *tags.Tag) float64
+	// GetDate parses a DICOM DA-encoded tag and returns a time.Time.
+	// Returns the zero value if absent or not a valid "YYYYMMDD" date.
+	GetDate(tag *tags.Tag) time.Time
+	// GetTime parses a DICOM TM-encoded tag and returns a time.Time.
+	// Returns the zero value if absent or not a valid "HHMMSS" time.
+	GetTime(tag *tags.Tag) time.Time
 	// Write encodes value and appends it to the object as a tag. The concrete
 	// type of value determines encoding:
 	//   - string   → DICOM string tag (padded per VR)
@@ -60,10 +65,25 @@ type DICOMObject interface {
 	//   - time.Time → formatted string: "20060102" for DA, "150405" for TM
 	//   - DateRange → formatted "YYYYMMDD-YYYYMMDD" string for date range queries
 	Write(tag *tags.Tag, value any)
+	// WriteString is a type-safe variant of Write for string values.
+	WriteString(tag *tags.Tag, value string)
+	// WriteUint16 is a type-safe variant of Write for uint16 values.
+	WriteUint16(tag *tags.Tag, value uint16)
+	// WriteUint32 is a type-safe variant of Write for uint32 values.
+	WriteUint32(tag *tags.Tag, value uint32)
+	// WriteFloat32 is a type-safe variant of Write for float32 (FL) values.
+	WriteFloat32(tag *tags.Tag, value float32)
+	// WriteFloat64 is a type-safe variant of Write for float64 (FD) values.
+	WriteFloat64(tag *tags.Tag, value float64)
+	// WriteTime is a type-safe variant of Write for time.Time values.
+	WriteTime(tag *tags.Tag, value time.Time)
+	// WriteDateRange is a type-safe variant of Write for DateRange values.
+	WriteDateRange(tag *tags.Tag, value DateRange)
+	// Clone returns a deep copy of this DICOMObject. The returned object has
+	// independent tag data; mutations to either object do not affect the other.
+	Clone() DICOMObject
 	GetTransferSyntax() *transfersyntax.TransferSyntax
 	SetTransferSyntax(ts *transfersyntax.TransferSyntax)
-	ChangeTransferSyntax(ts *transfersyntax.TransferSyntax) error
-	ChangeTransferSyntaxContext(ctx context.Context, ts *transfersyntax.TransferSyntax) error
 	TagCount() int
 	WriteToBytes() []byte
 	WriteToFile(fileName string) error
@@ -328,13 +348,37 @@ func (obj *dicomObject) formatTagValue(tag *DICOMTag) string {
 	}
 }
 
+func (obj *dicomObject) GetFloat32(tag *tags.Tag) float32 {
+	if t := obj.findTagGE(tag.Group, tag.Element); t != nil {
+		return t.GetFloat()
+	}
+	return 0
+}
+
+func (obj *dicomObject) GetFloat64(tag *tags.Tag) float64 {
+	if t := obj.findTagGE(tag.Group, tag.Element); t != nil {
+		return t.GetFloat64()
+	}
+	return 0
+}
+
+func (obj *dicomObject) GetDate(tag *tags.Tag) time.Time {
+	d, _ := time.Parse("20060102", obj.GetString(tag))
+	return d
+}
+
+func (obj *dicomObject) GetTime(tag *tags.Tag) time.Time {
+	tm, _ := time.Parse("150405", obj.GetString(tag))
+	return tm
+}
+
 // GetDate parses a DICOM DA-encoded tag from obj and returns a time.Time.
 // Returns the zero value if the tag is absent or the value is not a valid
 // "YYYYMMDD" date string.
+//
+// Deprecated: call obj.GetDate(tag) directly.
 func GetDate(obj DICOMObject, tag *tags.Tag) time.Time {
-	s := obj.GetString(tag)
-	d, _ := time.Parse("20060102", s)
-	return d
+	return obj.GetDate(tag)
 }
 
 // findTagGE returns the first top-level tag matching group/element whose
@@ -513,11 +557,39 @@ func (obj *dicomObject) Write(tag *tags.Tag, value any) {
 			s = v.Format("20060102")
 		}
 		obj.Add(NewStringTag(tag.Group, tag.Element, tag.VR, s))
+	case float32:
+		c := make([]byte, 4)
+		if obj.BigEndian {
+			binary.BigEndian.PutUint32(c, math.Float32bits(v))
+		} else {
+			binary.LittleEndian.PutUint32(c, math.Float32bits(v))
+		}
+		t := &DICOMTag{Group: tag.Group, Element: tag.Element, Length: 4, VR: tag.VR, Data: c, BigEndian: obj.BigEndian}
+		FillTag(t)
+		obj.Add(t)
+	case float64:
+		c := make([]byte, 8)
+		if obj.BigEndian {
+			binary.BigEndian.PutUint64(c, math.Float64bits(v))
+		} else {
+			binary.LittleEndian.PutUint64(c, math.Float64bits(v))
+		}
+		t := &DICOMTag{Group: tag.Group, Element: tag.Element, Length: 8, VR: tag.VR, Data: c, BigEndian: obj.BigEndian}
+		FillTag(t)
+		obj.Add(t)
 	case DateRange:
 		obj.Add(NewStringTag(tag.Group, tag.Element, tag.VR,
 			fmt.Sprintf("%s-%s", v.Start.Format("20060102"), v.End.Format("20060102"))))
 	}
 }
+
+func (obj *dicomObject) WriteString(tag *tags.Tag, value string)       { obj.Write(tag, value) }
+func (obj *dicomObject) WriteUint16(tag *tags.Tag, value uint16)       { obj.Write(tag, value) }
+func (obj *dicomObject) WriteUint32(tag *tags.Tag, value uint32)       { obj.Write(tag, value) }
+func (obj *dicomObject) WriteFloat32(tag *tags.Tag, value float32)     { obj.Write(tag, value) }
+func (obj *dicomObject) WriteFloat64(tag *tags.Tag, value float64)     { obj.Write(tag, value) }
+func (obj *dicomObject) WriteTime(tag *tags.Tag, value time.Time)      { obj.Write(tag, value) }
+func (obj *dicomObject) WriteDateRange(tag *tags.Tag, value DateRange) { obj.Write(tag, value) }
 
 // NewStringTag builds a DICOMTag with string content, properly encoded and
 // padded. Use obj.Add(media.NewStringTag(...)) when the tag identity is known
@@ -536,6 +608,28 @@ func NewStringTag(group, element uint16, vr, content string) *DICOMTag {
 	t := &DICOMTag{Group: group, Element: element, Length: uint32(length), VR: vr, Data: data, BigEndian: false}
 	FillTag(t)
 	return t
+}
+
+// Clone returns a deep copy of this DICOMObject. Each tag's data bytes are
+// copied independently, so mutations to either object's tag data do not affect
+// the other. The tagIndex is not copied and will be rebuilt lazily on first use.
+func (obj *dicomObject) Clone() DICOMObject {
+	cloned := &dicomObject{
+		Tags:           make([]*DICOMTag, len(obj.Tags)),
+		tagIndex:       nil,
+		TransferSyntax: obj.TransferSyntax,
+		ExplicitVR:     obj.ExplicitVR,
+		BigEndian:      obj.BigEndian,
+	}
+	for i, t := range obj.Tags {
+		cp := *t
+		if t.Data != nil {
+			cp.Data = make([]byte, len(t.Data))
+			copy(cp.Data, t.Data)
+		}
+		cloned.Tags[i] = &cp
+	}
+	return cloned
 }
 
 func (obj *dicomObject) GetTransferSyntax() *transfersyntax.TransferSyntax {
@@ -569,22 +663,6 @@ func joinFragments(fragments [][]byte) []byte {
 		pos += len(frag)
 	}
 	return out
-}
-
-// deplanarizeRGBFrames converts RGB pixel data from planar format (all R values
-// followed by all G values followed by all B values, per frame) to interleaved
-// RGB format in dst. src and dst may overlap or be the same slice.
-// frameSize is the byte count of one frame (rows * cols * 3).
-func deplanarizeRGBFrames(dst, src []byte, frameSize, frames uint32) {
-	for f := uint32(0); f < frames; f++ {
-		off := frameSize * f
-		pixels := frameSize / 3
-		for j := uint32(0); j < pixels; j++ {
-			dst[3*j+off] = src[j+off]
-			dst[3*j+1+off] = src[j+pixels+off]
-			dst[3*j+2+off] = src[j+2*pixels+off]
-		}
-	}
 }
 
 func frameFragmentRangeByBOT(offsets []uint32, frame int, fragmentPayloadSizes []int) (int, int, bool) {
@@ -808,149 +886,7 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 // decompressSingleFrame decodes a single compressed frame into out.
 // The caller must pre-allocate out with the exact uncompressed frame size.
 func decompressSingleFrame(ctx context.Context, tsUID string, compressed []byte, bitsa uint16, photoInt string, out []byte) error {
-	compLen := uint32(len(compressed))
-	outLen := uint32(len(out))
-	switch tsUID {
-	case transfersyntax.DeflatedImageFrameCompression.UID:
-		inflated, err := deflate.InflateFrame(compressed, int(outLen))
-		if err != nil {
-			return err
-		}
-		copy(out, inflated)
-	case transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian.UID,
-		// Non-conformant files that declare an uncompressed transfer syntax but
-		// store pixel data as encapsulated fragments (length 0xFFFFFFFF). Per the
-		// DICOM standard these should never be encapsulated, but real-world
-		// scanners produce them. Treat the fragment payload as raw pixel bytes.
-		transfersyntax.ExplicitVRLittleEndian.UID,
-		transfersyntax.ImplicitVRLittleEndian.UID:
-		// A non-conformant C-GET SCP may accept an uncompressed transfer syntax
-		// during association negotiation but send the image in its native
-		// compressed format without transcoding. Always check the byte signature
-		// for well-known compressed formats first, regardless of whether the
-		// fragment is larger or smaller than the expected raw frame — compressed
-		// streams for small images (e.g. JPEG 2000 on 8×8 tiles) are often
-		// *larger* than the raw bytes, so the old "fragment smaller than outLen"
-		// guard was insufficient.
-		if len(compressed) >= 2 {
-			b0, b1 := compressed[0], compressed[1]
-			switch {
-			case b0 == 0xFF && b1 == 0xD8:
-				// JPEG family (SOI marker). Check for JPEG-LS (SOF55 = 0xFF 0xF7).
-				if len(compressed) >= 4 && compressed[2] == 0xFF && compressed[3] == 0xF7 {
-					return jpegls.JLSdecodeContext(ctx, compressed, compLen, out)
-				}
-				// JPEG lossless / baseline / extended: dispatch by SOF precision.
-				prec := jpeg.SOFPrecision(compressed)
-				if prec == 0 {
-					// Fall back to bitsa heuristic when SOF is unreadable.
-					if bitsa == 8 {
-						return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
-					}
-					if bitsa <= 12 {
-						return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
-					}
-					return jpeg.DIJG16decodeContext(ctx, compressed, compLen, out, outLen)
-				}
-				switch {
-				case prec == 8:
-					return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
-				case prec <= 12:
-					return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
-				default:
-					return jpeg.DIJG16decodeContext(ctx, compressed, compLen, out, outLen)
-				}
-			case b0 == 0xFF && b1 == 0x4F:
-				// JPEG 2000 / HTJ2K codestream (SOC marker).
-				return jpeg2000.J2KdecodeContext(ctx, compressed, compLen, out)
-			case b0 == 0xFF && b1 == 0x0A:
-				// JPEG XL bare codestream.
-				return jpegxl.JXLdecodeContext(ctx, compressed, compLen, out)
-			}
-		}
-		if int(outLen) > len(compressed) {
-			return errors.New("encapsulated uncompressed frame too small")
-		}
-		copy(out, compressed[:outLen])
-	case transfersyntax.RLELossless.UID:
-		return rle.RLEdecode(compressed, out, compLen, outLen, photoInt)
-	case transfersyntax.JPEGLosslessSV1.UID,
-		transfersyntax.JPEGLossless.UID:
-		// Dispatch on the precision declared in the JPEG SOF header rather than
-		// bitsa: DICOM metadata may differ from the actual payload precision
-		// (e.g. 10-bit CT stored with bitsa=12, or non-conformant encoders).
-		prec := jpeg.SOFPrecision(compressed)
-		if prec == 0 {
-			// Could not read SOF — fall back to bitsa heuristic.
-			if bitsa == 8 {
-				return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
-			}
-			if bitsa <= 12 {
-				return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
-			}
-			return jpeg.DIJG16decodeContext(ctx, compressed, compLen, out, outLen)
-		}
-		switch {
-		case prec == 8:
-			return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
-		case prec <= 12:
-			return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
-		default:
-			return jpeg.DIJG16decodeContext(ctx, compressed, compLen, out, outLen)
-		}
-	case transfersyntax.JPEGBaseline8Bit.UID:
-		if bitsa == 8 {
-			return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
-		}
-		return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
-	case transfersyntax.JPEGExtended12Bit.UID:
-		if jpeg.SOFPrecision(compressed) == 8 {
-			return jpeg.DIJG8decodeContext(ctx, compressed, compLen, out, outLen)
-		}
-		return jpeg.DIJG12decodeContext(ctx, compressed, compLen, out, outLen)
-	case transfersyntax.JPEGLSLossless.UID,
-		transfersyntax.JPEGLSNearLossless.UID:
-		return jpegls.JLSdecodeContext(ctx, compressed, compLen, out)
-	case transfersyntax.JPEG2000Lossless.UID,
-		transfersyntax.JPEG2000MCLossless.UID,
-		transfersyntax.HTJ2KLossless.UID,
-		transfersyntax.HTJ2KLosslessRPCL.UID,
-		transfersyntax.JPEG2000.UID,
-		transfersyntax.JPEG2000MC.UID,
-		transfersyntax.HTJ2K.UID:
-		return jpeg2000.J2KdecodeContext(ctx, compressed, compLen, out)
-	case transfersyntax.JPEGXLLossless.UID,
-		transfersyntax.JPEGXLJPEGRecompression.UID,
-		transfersyntax.JPEGXL.UID:
-		return jpegxl.JXLdecodeContext(ctx, compressed, compLen, out)
-	case transfersyntax.JPIPHTJ2KReferenced.UID,
-		transfersyntax.JPIPHTJ2KReferencedDeflate.UID:
-		return jpip.JPIPdecodeContext(ctx, compressed, compLen, out, tsUID)
-	case transfersyntax.MPEG2MPML.UID,
-		transfersyntax.MPEG2MPMLF.UID,
-		transfersyntax.MPEG2MPHL.UID,
-		transfersyntax.MPEG2MPHLF.UID,
-		transfersyntax.MPEG4HP41.UID,
-		transfersyntax.MPEG4HP41F.UID,
-		transfersyntax.MPEG4HP41BD.UID,
-		transfersyntax.MPEG4HP41BDF.UID,
-		transfersyntax.MPEG4HP422D.UID,
-		transfersyntax.MPEG4HP422DF.UID,
-		transfersyntax.MPEG4HP423D.UID,
-		transfersyntax.MPEG4HP423DF.UID,
-		transfersyntax.MPEG4HP42STEREO.UID,
-		transfersyntax.MPEG4HP42STEREOF.UID,
-		transfersyntax.HEVCMP51.UID,
-		transfersyntax.HEVCM10P51.UID:
-		return mpeg.MPEGdecodeContext(ctx, compressed, compLen, out, tsUID)
-	case transfersyntax.SMPTEST211020UncompressedProgressiveActiveVideo.UID,
-		transfersyntax.SMPTEST211020UncompressedInterlacedActiveVideo.UID,
-		transfersyntax.SMPTEST211030PCMDigitalAudio.UID:
-		return smpte2110.SMPTE2110decodeContext(ctx, compressed, compLen, out, tsUID)
-	default:
-		return fmt.Errorf("unsupported transfer syntax for single-frame decompression: %s", tsUID)
-	}
-	return nil
+	return codecs.DecompressFrame(ctx, tsUID, compressed, bitsa, photoInt, out)
 }
 
 // GetDecompressedFrame returns the raw uncompressed pixel bytes for the requested frame.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
+	"github.com/innovative-io/io-dicom/dimse"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
@@ -25,8 +26,6 @@ func Test_scu_EchoSCU(t *testing.T) {
 	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
 		return request.GetCalledAE() == "TEST_SCP"
 	})
-
-	media.InitDict()
 
 	type fields struct {
 		destination *network.Destination
@@ -78,7 +77,7 @@ func Test_scu_EchoSCU(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := NewSCU(tt.fields.destination)
-			if err := d.EchoSCU(context.Background(), tt.args.timeout); (err != nil) != tt.wantErr {
+			if err := d.EchoSCU(context.Background()); (err != nil) != tt.wantErr {
 				t.Errorf("scu.EchoSCU() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -95,8 +94,6 @@ func Test_scu_FindSCU(t *testing.T) {
 	testSCP.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, findLevel string, data media.DICOMObject, emit func(media.DICOMObject)) (CFindResult, error) {
 		return CFindResult{Status: dicomstatus.Success}, nil
 	})
-
-	media.InitDict()
 
 	type fields struct {
 		destination *network.Destination
@@ -125,7 +122,7 @@ func Test_scu_FindSCU(t *testing.T) {
 				},
 			},
 			args: args{
-				Query:   media.DefaultCFindRequest(),
+				Query:   dimse.DefaultCFindRequest(),
 				timeout: 0,
 			},
 			wantErr: false,
@@ -139,7 +136,7 @@ func Test_scu_FindSCU(t *testing.T) {
 				result.DumpTags(io.Discard)
 			})
 
-			_, status, err := d.FindSCU(context.Background(), tt.args.Query, tt.args.timeout)
+			_, status, err := d.FindSCU(context.Background(), tt.args.Query)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("scu.FindSCU() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -162,12 +159,10 @@ func Test_scu_StoreSCU(t *testing.T) {
 		return request.GetCalledAE() == "TEST_SCP"
 	})
 
-	testSCP.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
+	testSCP.OnCStoreRequest(func(ctx context.Context, request network.AssociationRequest, data media.DICOMObject) uint16 {
 		data.DumpTags(io.Discard)
 		return dicomstatus.Success
 	})
-
-	media.InitDict()
 
 	type fields struct {
 		destination *network.Destination
@@ -204,7 +199,7 @@ func Test_scu_StoreSCU(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := NewSCU(tt.fields.destination)
-			if err := d.StoreSCU(context.Background(), tt.args.FileName, tt.args.timeout); (err != nil) != tt.wantErr {
+			if err := d.StoreSCU(context.Background(), tt.args.FileName); (err != nil) != tt.wantErr {
 				t.Errorf("scu.StoreSCU() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -223,7 +218,7 @@ func Test_scu_StoreObjectSCU(t *testing.T) {
 	})
 
 	var received media.DICOMObject
-	testSCP.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
+	testSCP.OnCStoreRequest(func(ctx context.Context, request network.AssociationRequest, data media.DICOMObject) uint16 {
 		received = data
 		return dicomstatus.Success
 	})
@@ -241,7 +236,7 @@ func Test_scu_StoreObjectSCU(t *testing.T) {
 		Port:      1043,
 	}
 	d := NewSCU(dest)
-	if err := d.StoreObjectSCU(context.Background(), obj, 0); err != nil {
+	if err := d.StoreObjectSCU(context.Background(), obj); err != nil {
 		t.Fatalf("StoreObjectSCU: %v", err)
 	}
 	if received == nil {
@@ -259,8 +254,6 @@ func Test_scu_GetSCU(t *testing.T) {
 	testSCP.OnCGetRequest(func(ctx context.Context, request network.AssociationRequest, getLevel string, data media.DICOMObject, _ func(string) error, emit func(CGetProgress)) (CGetResult, error) {
 		return CGetResult{Status: dicomstatus.Success, Completed: 0}, nil
 	})
-
-	media.InitDict()
 
 	dest := &network.Destination{
 		Name:      "Test Destination",
@@ -281,7 +274,7 @@ func Test_scu_GetSCU(t *testing.T) {
 	query.Write(tags.QueryRetrieveLevel, "STUDY")
 	query.Write(tags.StudyInstanceUID, "1.2.3.4")
 
-	status, err := d.GetSCU(context.Background(), query, 0)
+	status, err := d.GetSCU(context.Background(), query)
 	if err != nil {
 		t.Fatalf("GetSCU: %v", err)
 	}
@@ -312,8 +305,6 @@ func Test_scu_GetSCUReceivesStoreSuboperations(t *testing.T) {
 		return CGetResult{Status: dicomstatus.Success, Completed: 1}, nil
 	})
 
-	media.InitDict()
-
 	dest := &network.Destination{
 		Name:      "Test Destination",
 		CalledAE:  "TEST_SCP",
@@ -333,7 +324,7 @@ func Test_scu_GetSCUReceivesStoreSuboperations(t *testing.T) {
 	query.Write(tags.QueryRetrieveLevel, "STUDY")
 	query.Write(tags.StudyInstanceUID, "1.2.3.4")
 
-	status, err := d.GetSCU(context.Background(), query, 0)
+	status, err := d.GetSCU(context.Background(), query)
 	if err != nil {
 		t.Fatalf("GetSCU: %v", err)
 	}
@@ -345,8 +336,8 @@ func Test_scu_GetSCUReceivesStoreSuboperations(t *testing.T) {
 	}
 }
 
-func StartSCP(t testing.TB, port int) (func(t testing.TB), SCP) {
-	testSCP := NewSCP(port)
+func StartSCP(t testing.TB, port int, opts ...SCPOption) (func(t testing.TB), SCP) {
+	testSCP := NewSCP(port, opts...)
 	go func() {
 		if err := testSCP.Start(context.Background()); err != nil {
 			t.Logf("SCP stopped: %v", err)
@@ -385,7 +376,6 @@ func Test_scu_writeStoreRQ_TranscodesOnMismatch(t *testing.T) {
 	if _, err := os.Stat("../testdata/test.dcm"); err != nil {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
-	media.InitDict()
 
 	DDO, err := media.NewDCMObjFromFile("../testdata/test.dcm")
 	if err != nil {
@@ -425,7 +415,7 @@ func (m *storeMockPDU) Write(dco media.DICOMObject, _ byte) error {
 func (m *storeMockPDU) SetTimeout(_ int)                                               {}
 func (m *storeMockPDU) Connect(_ context.Context, _, _ string) error                   { return nil }
 func (m *storeMockPDU) ConnectTLS(_ context.Context, _, _ string, _ *tls.Config) error { return nil }
-func (m *storeMockPDU) Close()                                                         {}
+func (m *storeMockPDU) Close() error                                                   { return nil }
 func (m *storeMockPDU) GetAAssociationRQ() network.AssociationRequest {
 	return network.NewAssociationRequest()
 }
@@ -453,8 +443,6 @@ func Test_scu_BeginStoreSession_SendsMultipleFilesOnOneAssociation(t *testing.T)
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
 
-	media.InitDict()
-
 	_, testSCP := StartSCP(t, 1062)
 	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
 		return request.GetCalledAE() == "TEST_SCP"
@@ -462,7 +450,7 @@ func Test_scu_BeginStoreSession_SendsMultipleFilesOnOneAssociation(t *testing.T)
 
 	var mu sync.Mutex
 	received := 0
-	testSCP.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
+	testSCP.OnCStoreRequest(func(ctx context.Context, request network.AssociationRequest, data media.DICOMObject) uint16 {
 		mu.Lock()
 		received++
 		mu.Unlock()
@@ -478,7 +466,7 @@ func Test_scu_BeginStoreSession_SendsMultipleFilesOnOneAssociation(t *testing.T)
 	}
 	d := NewSCU(dest)
 
-	session, err := d.BeginStoreSession(context.Background(), 0)
+	session, err := d.BeginStoreSession(context.Background())
 	if err != nil {
 		t.Fatalf("BeginStoreSession: %v", err)
 	}
@@ -508,15 +496,13 @@ func Test_scu_BeginStoreSession_StoreObject(t *testing.T) {
 		t.Skipf("sample fixture unavailable: %v", err)
 	}
 
-	media.InitDict()
-
 	_, testSCP := StartSCP(t, 1063)
 	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
 		return request.GetCalledAE() == "TEST_SCP"
 	})
 
 	var received media.DICOMObject
-	testSCP.OnCStoreRequest(func(request network.AssociationRequest, data media.DICOMObject) uint16 {
+	testSCP.OnCStoreRequest(func(ctx context.Context, request network.AssociationRequest, data media.DICOMObject) uint16 {
 		received = data
 		return dicomstatus.Success
 	})
@@ -533,7 +519,7 @@ func Test_scu_BeginStoreSession_StoreObject(t *testing.T) {
 		HostName:  "localhost",
 		Port:      1063,
 	}
-	session, err := NewSCU(dest).BeginStoreSession(context.Background(), 0)
+	session, err := NewSCU(dest).BeginStoreSession(context.Background())
 	if err != nil {
 		t.Fatalf("BeginStoreSession: %v", err)
 	}
@@ -546,5 +532,69 @@ func Test_scu_BeginStoreSession_StoreObject(t *testing.T) {
 
 	if received == nil {
 		t.Fatal("SCP did not receive the C-STORE request")
+	}
+}
+
+// Test_scu_SetImplementationClass verifies that SetImplementationClass causes
+// the SCU to send the overridden UID in the A-ASSOCIATE-RQ.
+func Test_scu_SetImplementationClass(t *testing.T) {
+	_, testSCP := StartSCP(t, 1064)
+	testSCP.OnCFindRequest(func(ctx context.Context, request network.AssociationRequest, findLevel string, data media.DICOMObject, emit func(media.DICOMObject)) (CFindResult, error) {
+		return CFindResult{Status: dicomstatus.Success}, nil
+	})
+
+	const wantUID = "1.2.3.4.999"
+	const wantVer = "CUSTOM-TEST"
+
+	var gotUID string
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
+		gotUID = request.GetImplementationClass().GetUID()
+		return request.GetCalledAE() == "TEST_SCP"
+	})
+
+	dest := &network.Destination{
+		Name:      "Impl Class Test",
+		CalledAE:  "TEST_SCP",
+		CallingAE: "TEST_SCU",
+		HostName:  "localhost",
+		Port:      1064,
+	}
+	d := NewSCU(dest)
+	d.SetImplementationClass(wantUID, wantVer)
+	if err := d.EchoSCU(context.Background()); err != nil {
+		t.Fatalf("EchoSCU: %v", err)
+	}
+	if gotUID != wantUID {
+		t.Errorf("implementation class UID = %q, want %q", gotUID, wantUID)
+	}
+}
+
+// Test_scu_WithTimeout verifies that an SCU constructed with WithTimeout
+// successfully completes an association when the remote SCP responds within
+// the configured window. It also exercises the SetTimeout setter path.
+func Test_scu_WithTimeout(t *testing.T) {
+	_, testSCP := StartSCP(t, 1066)
+	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
+		return request.GetCalledAE() == "TEST_SCP"
+	})
+
+	dest := &network.Destination{
+		Name:      "Timeout Test",
+		CalledAE:  "TEST_SCP",
+		CallingAE: "TEST_SCU",
+		HostName:  "localhost",
+		Port:      1066,
+	}
+
+	// Via SCUOption at construction time.
+	if err := NewSCU(dest, WithTimeout(30)).EchoSCU(context.Background()); err != nil {
+		t.Fatalf("EchoSCU with WithTimeout option: %v", err)
+	}
+
+	// Via SetTimeout setter after construction.
+	d := NewSCU(dest)
+	d.SetTimeout(30)
+	if err := d.EchoSCU(context.Background()); err != nil {
+		t.Fatalf("EchoSCU with SetTimeout: %v", err)
 	}
 }

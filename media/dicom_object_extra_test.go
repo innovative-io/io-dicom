@@ -14,10 +14,6 @@ import (
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 )
 
-func init() {
-	InitDict()
-}
-
 func makeSimpleObj() DICOMObject {
 	obj := NewEmptyDCMObj()
 	obj.Write(tags.PatientName, "DOE^JOHN")

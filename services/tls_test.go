@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network"
 )
 
@@ -122,8 +121,6 @@ func Test_scu_EchoSCU_TLS(t *testing.T) {
 		return request.GetCalledAE() == "TLS_SCP"
 	})
 
-	media.InitDict()
-
 	clientTLS := &tls.Config{
 		RootCAs:    pool,
 		ServerName: "localhost",
@@ -141,7 +138,7 @@ func Test_scu_EchoSCU_TLS(t *testing.T) {
 	}
 
 	scu := NewSCU(dest)
-	if err := scu.EchoSCU(context.Background(), 10); err != nil {
+	if err := scu.EchoSCU(context.Background()); err != nil {
 		t.Fatalf("TLS C-Echo failed: %v", err)
 	}
 }
@@ -154,8 +151,6 @@ func Test_scu_EchoSCU_TLS_wrongCA(t *testing.T) {
 	testSCP.OnAssociationRequest(func(request network.AssociationRequest) bool {
 		return true
 	})
-
-	media.InitDict()
 
 	// Intentionally use a *different* cert pool — the client should reject the server cert.
 	differentCert := generateSelfSignedCert(t)
@@ -177,7 +172,7 @@ func Test_scu_EchoSCU_TLS_wrongCA(t *testing.T) {
 	}
 
 	scu := NewSCU(dest)
-	err := scu.EchoSCU(context.Background(), 10)
+	err := scu.EchoSCU(context.Background())
 	if err == nil {
 		t.Fatal("expected TLS handshake to fail with wrong CA, but it succeeded")
 	}
@@ -192,8 +187,6 @@ func Test_scu_EchoSCU_TLSPort_PlainClient(t *testing.T) {
 		return true
 	})
 
-	media.InitDict()
-
 	// Plain (non-TLS) SCU connecting to a TLS SCP must fail.
 	dest := &network.Destination{
 		Name:      "Plain to TLS",
@@ -205,7 +198,7 @@ func Test_scu_EchoSCU_TLSPort_PlainClient(t *testing.T) {
 	}
 
 	scu := NewSCU(dest)
-	err := scu.EchoSCU(context.Background(), 5)
+	err := scu.EchoSCU(context.Background())
 	if err == nil {
 		t.Fatal("expected plain SCU to fail against TLS SCP, but it succeeded")
 	}

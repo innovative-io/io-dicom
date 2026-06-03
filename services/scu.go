@@ -16,6 +16,7 @@ import (
 	"github.com/innovative-io/io-dicom/network/dicomcommand"
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
 	"github.com/innovative-io/io-dicom/network/priority"
+	"github.com/innovative-io/io-dicom/transcoder"
 )
 
 // StoreSession is a long-lived C-STORE session over a single DICOM association.
@@ -28,26 +29,27 @@ type StoreSession interface {
 	// StorePath loads a DICOM file from disk and sends it as a C-STORE-RQ.
 	StorePath(ctx context.Context, path string) error
 	// Close releases the underlying DICOM association (sends A-RELEASE-RQ).
-	Close()
+	// Returns any error from the release handshake.
+	Close() error
 }
 
 // SCU - interface to a scu
 type SCU interface {
-	EchoSCU(ctx context.Context, timeout int) error
-	FindSCU(ctx context.Context, Query media.DICOMObject, timeout int) (int, uint16, error)
-	WorklistSCU(ctx context.Context, Query media.DICOMObject, timeout int) (int, uint16, error)
-	MoveSCU(ctx context.Context, destAET string, Query media.DICOMObject, timeout int) (uint16, error)
-	GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) (uint16, error)
-	StoreSCU(ctx context.Context, FileName string, timeout int) error
+	EchoSCU(ctx context.Context) error
+	FindSCU(ctx context.Context, Query media.DICOMObject) (int, uint16, error)
+	WorklistSCU(ctx context.Context, Query media.DICOMObject) (int, uint16, error)
+	MoveSCU(ctx context.Context, destAET string, Query media.DICOMObject) (uint16, error)
+	GetSCU(ctx context.Context, Query media.DICOMObject) (uint16, error)
+	StoreSCU(ctx context.Context, FileName string) error
 	// StoreObjectSCU sends a DICOM object over a C-STORE association without
 	// requiring the object to be written to disk first. The object must contain
 	// a SOPClassUID tag.
-	StoreObjectSCU(ctx context.Context, obj media.DICOMObject, timeout int) error
+	StoreObjectSCU(ctx context.Context, obj media.DICOMObject) error
 	// BeginStoreSession opens a single DICOM association to the remote SCP,
 	// proposing all known storage SOP classes, and returns a StoreSession that
 	// can be used to send multiple instances over that one connection. Call
 	// Close on the session when all instances have been sent.
-	BeginStoreSession(ctx context.Context, timeout int) (StoreSession, error)
+	BeginStoreSession(ctx context.Context) (StoreSession, error)
 	SetOnCFindResult(f func(result media.DICOMObject))
 	SetOnCMoveResult(f func(result media.DICOMObject))
 	// SetOnCGetStore registers a callback invoked for each C-STORE sub-operation
@@ -56,11 +58,18 @@ type SCU interface {
 	// accepted with Success and the data is discarded.
 	SetOnCGetStore(f func(data media.DICOMObject) uint16)
 	SetOnRawPDU(f func(event network.RawPDUEvent))
+	// SetImplementationClass overrides the implementation class UID and version
+	// name sent in A-ASSOCIATE-RQ PDUs. By default the library global values from
+	// internal/implclass are used. Must be called before any association is opened.
+	SetImplementationClass(uid, version string)
 	// SetPriority sets the DICOM priority (High/Medium/Low) used for all
 	// outgoing C-FIND, C-GET, C-MOVE, and C-STORE requests.
 	// Use the constants from network/priority: priority.High, priority.Medium, priority.Low.
 	// The default is priority.Medium.
 	SetPriority(pri uint16)
+	// SetTimeout sets the per-connection network timeout in seconds applied to
+	// all associations opened by this SCU. 0 means no timeout (default).
+	SetTimeout(seconds int)
 	// GetNegotiatedContexts returns the presentation contexts accepted by the
 	// remote SCP after the most recent successful association. Returns nil if no
 	// association has been made yet.
@@ -70,11 +79,14 @@ type SCU interface {
 type scu struct {
 	destination        *network.Destination
 	priority           uint16
+	timeout            int
 	onCFindResult      func(result media.DICOMObject)
 	onCMoveResult      func(result media.DICOMObject)
 	onCGetStore        func(data media.DICOMObject) uint16
 	onRawPDU           func(event network.RawPDUEvent)
 	negotiatedContexts []network.PresentationContextAccept
+	implClassUID       string
+	implVersion        string
 }
 
 type associationPresentationContext struct {
@@ -82,18 +94,47 @@ type associationPresentationContext struct {
 	transferSyntaxes []string
 }
 
-// NewSCU - Creates an interface to scu
-func NewSCU(destination *network.Destination) SCU {
-	return &scu{
+// SCUOption configures an SCU at construction time.
+type SCUOption func(*scu)
+
+// WithTimeout returns an SCUOption that sets the per-connection network timeout
+// (in seconds) applied to all associations opened by the SCU. A value of 0
+// disables the timeout (default behaviour).
+func WithTimeout(seconds int) SCUOption {
+	return func(d *scu) { d.timeout = seconds }
+}
+
+// NewSCU creates an SCU targeting destination. Pass SCUOption values to
+// configure non-default behaviour.
+func NewSCU(destination *network.Destination, opts ...SCUOption) SCU {
+	d := &scu{
 		destination: destination,
 		priority:    priority.Medium,
 	}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d
 }
 
-func (d *scu) EchoSCU(ctx context.Context, timeout int) error {
-	pdu := network.NewPDUService()
+// newPDUService creates a PDUService, applying a per-SCU implementation class
+// override if one has been configured.
+func (d *scu) newPDUService() network.PDUService {
+	var opts []network.PDUServiceOption
+	if d.implClassUID != "" || d.implVersion != "" {
+		opts = append(opts, network.WithImplementationClass(d.implClassUID, d.implVersion))
+	}
+	pdu := network.NewPDUService(opts...)
+	if d.timeout > 0 {
+		pdu.SetTimeout(d.timeout)
+	}
+	return pdu
+}
+
+func (d *scu) EchoSCU(ctx context.Context) error {
+	pdu := d.newPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(ctx, pdu, sopclass.Verification.UID, []string{}, timeout); err != nil {
+	if err := d.openAssociation(ctx, pdu, sopclass.Verification.UID, []string{}); err != nil {
 		return err
 	}
 	slog.Info("Sending Echo Request")
@@ -107,26 +148,26 @@ func (d *scu) EchoSCU(ctx context.Context, timeout int) error {
 	return nil
 }
 
-func (d *scu) FindSCU(ctx context.Context, Query media.DICOMObject, timeout int) (int, uint16, error) {
-	return d.cfindSCU(ctx, sopclass.StudyRootQueryRetrieveInformationModelFind.UID, Query, timeout)
+func (d *scu) FindSCU(ctx context.Context, Query media.DICOMObject) (int, uint16, error) {
+	return d.cfindSCU(ctx, sopclass.StudyRootQueryRetrieveInformationModelFind.UID, Query)
 }
 
 // WorklistSCU sends a Modality Worklist C-FIND (SOP 1.2.840.10008.5.1.4.31)
 // and returns the match count, final status, and any error.
-func (d *scu) WorklistSCU(ctx context.Context, Query media.DICOMObject, timeout int) (int, uint16, error) {
-	return d.cfindSCU(ctx, sopclass.ModalityWorklistInformationModelFind.UID, Query, timeout)
+func (d *scu) WorklistSCU(ctx context.Context, Query media.DICOMObject) (int, uint16, error) {
+	return d.cfindSCU(ctx, sopclass.ModalityWorklistInformationModelFind.UID, Query)
 }
 
 // cfindSCU opens an association using abstractSyntax, sends a C-FIND request,
 // and drains all pending matches before returning the total count, final
 // status, and any transport or protocol error.
-func (d *scu) cfindSCU(ctx context.Context, abstractSyntax string, Query media.DICOMObject, timeout int) (int, uint16, error) {
+func (d *scu) cfindSCU(ctx context.Context, abstractSyntax string, Query media.DICOMObject) (int, uint16, error) {
 	results := 0
 	status := dicomstatus.FailureProcessingFailure
 
-	pdu := network.NewPDUService()
+	pdu := d.newPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(ctx, pdu, abstractSyntax, []string{}, timeout); err != nil {
+	if err := d.openAssociation(ctx, pdu, abstractSyntax, []string{}); err != nil {
 		return results, status, err
 	}
 
@@ -154,12 +195,12 @@ func (d *scu) cfindSCU(ctx context.Context, abstractSyntax string, Query media.D
 	return results, status, nil
 }
 
-func (d *scu) MoveSCU(ctx context.Context, destAET string, Query media.DICOMObject, timeout int) (uint16, error) {
+func (d *scu) MoveSCU(ctx context.Context, destAET string, Query media.DICOMObject) (uint16, error) {
 	var pending int
 
-	pdu := network.NewPDUService()
+	pdu := d.newPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(ctx, pdu, sopclass.StudyRootQueryRetrieveInformationModelMove.UID, []string{}, timeout); err != nil {
+	if err := d.openAssociation(ctx, pdu, sopclass.StudyRootQueryRetrieveInformationModelMove.UID, []string{}); err != nil {
 		return dicomstatus.FailureProcessingFailure, err
 	}
 
@@ -182,8 +223,8 @@ func (d *scu) MoveSCU(ctx context.Context, destAET string, Query media.DICOMObje
 	}
 }
 
-func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) (uint16, error) {
-	pdu := network.NewPDUService()
+func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject) (uint16, error) {
+	pdu := d.newPDUService()
 	defer pdu.Close()
 	contexts := []associationPresentationContext{{
 		abstractSyntax: sopclass.StudyRootQueryRetrieveInformationModelGet.UID,
@@ -195,7 +236,7 @@ func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) 
 			transferSyntaxes: storageTransferSyntaxes,
 		})
 	}
-	if err := d.openAssociationWithContexts(ctx, pdu, contexts, timeout); err != nil {
+	if err := d.openAssociationWithContexts(ctx, pdu, contexts); err != nil {
 		return dicomstatus.FailureProcessingFailure, err
 	}
 
@@ -236,24 +277,24 @@ func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject, timeout int) 
 	}
 }
 
-func (d *scu) StoreSCU(ctx context.Context, FileName string, timeout int) error {
+func (d *scu) StoreSCU(ctx context.Context, FileName string) error {
 	DDO, err := media.NewDCMObjFromFile(FileName)
 	if err != nil {
 		return err
 	}
-	return d.StoreObjectSCU(ctx, DDO, timeout)
+	return d.StoreObjectSCU(ctx, DDO)
 }
 
 // StoreObjectSCU sends obj over a C-STORE association.
-func (d *scu) StoreObjectSCU(ctx context.Context, obj media.DICOMObject, timeout int) error {
+func (d *scu) StoreObjectSCU(ctx context.Context, obj media.DICOMObject) error {
 	SOPClassUID := obj.GetString(tags.SOPClassUID)
 	if SOPClassUID == "" {
 		return errors.New("scu: StoreObjectSCU: missing SOPClassUID in DICOM object")
 	}
 
-	pdu := network.NewPDUService()
+	pdu := d.newPDUService()
 	defer pdu.Close()
-	if err := d.openAssociation(ctx, pdu, SOPClassUID, []string{obj.GetTransferSyntax().UID}, timeout); err != nil {
+	if err := d.openAssociation(ctx, pdu, SOPClassUID, []string{obj.GetTransferSyntax().UID}); err != nil {
 		return err
 	}
 
@@ -291,11 +332,20 @@ func (d *scu) SetPriority(pri uint16) {
 	d.priority = pri
 }
 
-func (d *scu) openAssociation(ctx context.Context, pdu network.PDUService, abstractSyntax string, transferSyntaxes []string, timeout int) error {
+func (d *scu) SetTimeout(seconds int) {
+	d.timeout = seconds
+}
+
+func (d *scu) SetImplementationClass(uid, version string) {
+	d.implClassUID = uid
+	d.implVersion = version
+}
+
+func (d *scu) openAssociation(ctx context.Context, pdu network.PDUService, abstractSyntax string, transferSyntaxes []string) error {
 	return d.openAssociationWithContexts(ctx, pdu, []associationPresentationContext{{
 		abstractSyntax:   abstractSyntax,
 		transferSyntaxes: transferSyntaxes,
-	}}, timeout)
+	}})
 }
 
 func (d *scu) GetNegotiatedContexts() []network.PresentationContextAccept {
@@ -330,15 +380,15 @@ func (ss *storeSession) StorePath(ctx context.Context, path string) error {
 	return ss.Store(ctx, obj)
 }
 
-func (ss *storeSession) Close() {
-	ss.pdu.Close()
+func (ss *storeSession) Close() error {
+	return ss.pdu.Close()
 }
 
 // BeginStoreSession opens a single DICOM association proposing all known
 // storage SOP classes and transfer syntaxes, and returns a StoreSession for
 // sending multiple instances over that one connection.
-func (d *scu) BeginStoreSession(ctx context.Context, timeout int) (StoreSession, error) {
-	pdu := network.NewPDUService()
+func (d *scu) BeginStoreSession(ctx context.Context) (StoreSession, error) {
+	pdu := d.newPDUService()
 	storageTransferSyntaxes := transfersyntax.GetSupportedTransferSyntaxUIDs()
 	storageClasses := sopclass.GetStorageSOPClasses()
 	contexts := make([]associationPresentationContext, 0, len(storageClasses))
@@ -348,7 +398,7 @@ func (d *scu) BeginStoreSession(ctx context.Context, timeout int) (StoreSession,
 			transferSyntaxes: storageTransferSyntaxes,
 		})
 	}
-	if err := d.openAssociationWithContexts(ctx, pdu, contexts, timeout); err != nil {
+	if err := d.openAssociationWithContexts(ctx, pdu, contexts); err != nil {
 		pdu.Close()
 		return nil, err
 	}
@@ -356,10 +406,9 @@ func (d *scu) BeginStoreSession(ctx context.Context, timeout int) (StoreSession,
 	return &storeSession{d: d, pdu: pdu}, nil
 }
 
-func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUService, contexts []associationPresentationContext, timeout int) error {
+func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUService, contexts []associationPresentationContext) error {
 	pdu.SetCallingAE(d.destination.CallingAE)
 	pdu.SetCalledAE(d.destination.CalledAE)
-	pdu.SetTimeout(timeout)
 	pdu.SetOnRawPDU(d.onRawPDU)
 
 	network.Resetuniq()
@@ -424,7 +473,7 @@ func (d *scu) writeStoreRQ(ctx context.Context, pdu network.PDUService, DDO medi
 	// ChangeTransferSyntaxContext is a no-op when both UIDs are the same, so this
 	// is always safe to call. For compressed → uncompressed it decodes pixel data;
 	// for VR-only differences (e.g. EVLE → ImplicitVRLE) it re-encodes in place.
-	if err := DDO.ChangeTransferSyntaxContext(ctx, trnSyntOut); err != nil {
+	if err := transcoder.ChangeTransferSyntaxContext(ctx, DDO, trnSyntOut); err != nil {
 		return fmt.Errorf("scu: writeStoreRQ: transcode to %s: %w", trnSyntOut.Name, err)
 	}
 

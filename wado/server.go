@@ -86,10 +86,8 @@ func resolveTimeout(d, defaultVal time.Duration) time.Duration {
 	return d
 }
 
-// NewServer creates and configures a new WADO server. It initialises the
-// DICOM dictionary automatically.
+// NewServer creates and configures a new WADO server.
 func NewServer(params ServerParams) Server {
-	media.InitDict()
 	s := &wadoServer{params: params}
 	s.mux = s.buildMux()
 	s.srv = &http.Server{

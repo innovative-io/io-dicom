@@ -13,10 +13,6 @@ import (
 	"github.com/innovative-io/io-dicom/media"
 )
 
-func init() {
-	media.InitDict()
-}
-
 func main() {
 	outputDir := flag.String("output", "samples", "Output directory for generated DICOM files")
 	flag.Parse()

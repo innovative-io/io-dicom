@@ -1,18 +1,20 @@
-package media
+package media_test
 
 import (
 	"bytes"
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/innovative-io/io-dicom/codecs"
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
+	"github.com/innovative-io/io-dicom/media"
+	"github.com/innovative-io/io-dicom/transcoder"
 )
 
 func TestNewDCMObjFromFile(t *testing.T) {
-	InitDict()
 	if _, err := os.Stat("../testdata/test2.dcm"); err != nil {
 		t.Skipf("sample fixtures unavailable: %v", err)
 	}
@@ -53,13 +55,13 @@ func TestNewDCMObjFromFile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dicomObject, err := NewDCMObjFromFile(tt.args.fileName)
+			dicomObject, err := media.NewDCMObjFromFile(tt.args.fileName)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("NewDCMObjFromFile() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("media.NewDCMObjFromFile() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if len(dicomObject.GetTags()) != tt.wantTagsCount {
-				t.Errorf("NewDCMObjFromFile() count = %v, wantTagsCount %v", len(dicomObject.GetTags()), tt.wantTagsCount)
+				t.Errorf("media.NewDCMObjFromFile() count = %v, wantTagsCount %v", len(dicomObject.GetTags()), tt.wantTagsCount)
 				return
 			}
 		})
@@ -290,11 +292,11 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dicomObject, err := NewDCMObjFromFile(tt.fileName)
+			dicomObject, err := media.NewDCMObjFromFile(tt.fileName)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := dicomObject.ChangeTransferSyntax(tt.args.outTS); (err != nil) != tt.wantErr {
+			if err := transcoder.ChangeTransferSyntax(dicomObject, tt.args.outTS); (err != nil) != tt.wantErr {
 				t.Errorf("dicomObject.ChangeTransferSyntax() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -302,9 +304,8 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 }
 
 func TestDeflatedExplicitVRLittleEndianRoundTrip(t *testing.T) {
-	InitDict()
 
-	obj := NewEmptyDCMObj()
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.DeflatedExplicitVRLittleEndian)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -319,7 +320,7 @@ func TestDeflatedExplicitVRLittleEndianRoundTrip(t *testing.T) {
 		t.Fatal("expected non-empty encoded bytes")
 	}
 
-	parsed, err := NewDCMObjFromBytes(data)
+	parsed, err := media.NewDCMObjFromBytes(data)
 	if err != nil {
 		t.Fatalf("NewDCMObjFromBytes failed: %v", err)
 	}
@@ -338,7 +339,7 @@ func TestDeflatedExplicitVRLittleEndianRoundTrip(t *testing.T) {
 }
 
 func TestRLELosslessMultiFrameRoundTrip(t *testing.T) {
-	obj := NewEmptyDCMObj()
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -354,7 +355,7 @@ func TestRLELosslessMultiFrameRoundTrip(t *testing.T) {
 	obj.Write(tags.BitsStored, 8)
 	obj.Write(tags.PixelRepresentation, 0)
 
-	pixel := &DICOMTag{
+	pixel := &media.DICOMTag{
 		Group:     0x7FE0,
 		Element:   0x0010,
 		Length:    4,
@@ -362,10 +363,10 @@ func TestRLELosslessMultiFrameRoundTrip(t *testing.T) {
 		Data:      []byte{1, 2, 3, 4},
 		BigEndian: false,
 	}
-	FillTag(pixel)
+	media.FillTag(pixel)
 	obj.Add(pixel)
 
-	if err := obj.ChangeTransferSyntax(transfersyntax.RLELossless); err != nil {
+	if err := transcoder.ChangeTransferSyntax(obj, transfersyntax.RLELossless); err != nil {
 		t.Fatalf("ChangeTransferSyntax to RLELossless failed: %v", err)
 	}
 
@@ -380,7 +381,7 @@ func TestRLELosslessMultiFrameRoundTrip(t *testing.T) {
 		t.Fatalf("expected 2 non-empty encapsulated frame items, got %d", frameItemCount)
 	}
 
-	if err := obj.ChangeTransferSyntax(transfersyntax.ExplicitVRLittleEndian); err != nil {
+	if err := transcoder.ChangeTransferSyntax(obj, transfersyntax.ExplicitVRLittleEndian); err != nil {
 		t.Fatalf("ChangeTransferSyntax back to ExplicitVRLittleEndian failed: %v", err)
 	}
 
@@ -401,8 +402,8 @@ func TestRLELosslessMultiFrameRoundTrip(t *testing.T) {
 	}
 }
 
-func newRGBRoundTripObject() DICOMObject {
-	obj := NewEmptyDCMObj()
+func newRGBRoundTripObject() media.DICOMObject {
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -419,7 +420,7 @@ func newRGBRoundTripObject() DICOMObject {
 	obj.Write(tags.BitsStored, 8)
 	obj.Write(tags.PixelRepresentation, 0)
 
-	pixel := &DICOMTag{
+	pixel := &media.DICOMTag{
 		Group:     0x7FE0,
 		Element:   0x0010,
 		Length:    6,
@@ -427,13 +428,13 @@ func newRGBRoundTripObject() DICOMObject {
 		Data:      []byte{10, 20, 30, 40, 50, 60},
 		BigEndian: false,
 	}
-	FillTag(pixel)
+	media.FillTag(pixel)
 	obj.Add(pixel)
 	return obj
 }
 
 func TestGetPixelData_UncompressedMultiFrameReturnsRequestedFrame(t *testing.T) {
-	obj := NewEmptyDCMObj()
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -446,7 +447,7 @@ func TestGetPixelData_UncompressedMultiFrameReturnsRequestedFrame(t *testing.T) 
 	obj.Write(tags.BitsStored, 8)
 	obj.Write(tags.PixelRepresentation, 0)
 
-	pixel := &DICOMTag{
+	pixel := &media.DICOMTag{
 		Group:     0x7FE0,
 		Element:   0x0010,
 		Length:    4,
@@ -454,7 +455,7 @@ func TestGetPixelData_UncompressedMultiFrameReturnsRequestedFrame(t *testing.T) 
 		Data:      []byte{10, 20, 30, 40},
 		BigEndian: false,
 	}
-	FillTag(pixel)
+	media.FillTag(pixel)
 	obj.Add(pixel)
 
 	frame0, err := obj.GetPixelData(0)
@@ -475,7 +476,7 @@ func TestGetPixelData_UncompressedMultiFrameReturnsRequestedFrame(t *testing.T) 
 }
 
 func TestGetPixelData_EncapsulatedSingleFrameWithMultipleFragments(t *testing.T) {
-	obj := NewEmptyDCMObj()
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.JPEGBaseline8Bit)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -486,11 +487,11 @@ func TestGetPixelData_EncapsulatedSingleFrameWithMultipleFragments(t *testing.T)
 	obj.Write(tags.Columns, 4)
 	obj.Write(tags.BitsAllocated, 8)
 
-	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{1, 2}, BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{3, 4}, BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{1, 2}, BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{3, 4}, BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
 
 	frame0, err := obj.GetPixelData(0)
 	if err != nil {
@@ -502,7 +503,7 @@ func TestGetPixelData_EncapsulatedSingleFrameWithMultipleFragments(t *testing.T)
 }
 
 func TestGetPixelData_EncapsulatedMultiFrameWithFragmentedFrameUsesBOT(t *testing.T) {
-	obj := NewEmptyDCMObj()
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.JPEGBaseline8Bit)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -517,12 +518,12 @@ func TestGetPixelData_EncapsulatedMultiFrameWithFragmentedFrameUsesBOT(t *testin
 	// Frame 0 starts at offset 0; frame 1 starts after two fragments (2*(8 header + 2 payload) = 20).
 	bot := []byte{0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00}
 
-	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(bot)), VR: "DL", Data: bot, BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{10, 11}, BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{12, 13}, BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{20, 21}, BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(bot)), VR: "DL", Data: bot, BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{10, 11}, BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{12, 13}, BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 2, VR: "DL", Data: []byte{20, 21}, BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
 
 	frame0, err := obj.GetPixelData(0)
 	if err != nil {
@@ -555,10 +556,10 @@ func TestRGBRoundTripViaEncapsulatedCodecs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			obj := newRGBRoundTripObject()
 
-			if err := obj.ChangeTransferSyntax(tt.ts); err != nil {
+			if err := transcoder.ChangeTransferSyntax(obj, tt.ts); err != nil {
 				t.Fatalf("ChangeTransferSyntax to %s failed: %v", tt.ts.Name, err)
 			}
-			if err := obj.ChangeTransferSyntax(transfersyntax.ExplicitVRLittleEndian); err != nil {
+			if err := transcoder.ChangeTransferSyntax(obj, transfersyntax.ExplicitVRLittleEndian); err != nil {
 				t.Fatalf("ChangeTransferSyntax back to ExplicitVRLittleEndian failed: %v", err)
 			}
 
@@ -614,8 +615,8 @@ func forceCodecBackends(t *testing.T, cfg codecs.BackendConfig) {
 	})
 }
 
-func newMonoRoundTripObject(transferSyntax *transfersyntax.TransferSyntax) DICOMObject {
-	obj := NewEmptyDCMObj()
+func newMonoRoundTripObject(transferSyntax *transfersyntax.TransferSyntax) media.DICOMObject {
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transferSyntax)
 	obj.SetExplicitVR(transferSyntax.UID != transfersyntax.ImplicitVRLittleEndian.UID)
 	obj.SetBigEndian(transferSyntax.UID == transfersyntax.ExplicitVRBigEndian.UID)
@@ -633,7 +634,7 @@ func newMonoRoundTripObject(transferSyntax *transfersyntax.TransferSyntax) DICOM
 	obj.Write(tags.BitsStored, 8)
 	obj.Write(tags.PixelRepresentation, 0)
 
-	pixel := &DICOMTag{
+	pixel := &media.DICOMTag{
 		Group:     0x7FE0,
 		Element:   0x0010,
 		Length:    4,
@@ -641,13 +642,13 @@ func newMonoRoundTripObject(transferSyntax *transfersyntax.TransferSyntax) DICOM
 		Data:      []byte{7, 17, 27, 37},
 		BigEndian: false,
 	}
-	FillTag(pixel)
+	media.FillTag(pixel)
 	obj.Add(pixel)
 	return obj
 }
 
-func newMono12BitRoundTripObject() DICOMObject {
-	obj := NewEmptyDCMObj()
+func newMono12BitRoundTripObject() media.DICOMObject {
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -663,7 +664,7 @@ func newMono12BitRoundTripObject() DICOMObject {
 	obj.Write(tags.BitsStored, 12)
 	obj.Write(tags.PixelRepresentation, 0)
 
-	pixel := &DICOMTag{
+	pixel := &media.DICOMTag{
 		Group:     0x7FE0,
 		Element:   0x0010,
 		Length:    4,
@@ -671,12 +672,12 @@ func newMono12BitRoundTripObject() DICOMObject {
 		Data:      []byte{0x34, 0x02, 0xAB, 0x03},
 		BigEndian: false,
 	}
-	FillTag(pixel)
+	media.FillTag(pixel)
 	obj.Add(pixel)
 	return obj
 }
 
-func assertPixelPrefix(t *testing.T, obj DICOMObject, want []byte) {
+func assertPixelPrefix(t *testing.T, obj media.DICOMObject, want []byte) {
 	t.Helper()
 
 	out, err := obj.GetPixelData(0)
@@ -693,7 +694,7 @@ func assertPixelPrefix(t *testing.T, obj DICOMObject, want []byte) {
 	}
 }
 
-func assertPixelPrefixWithinDelta(t *testing.T, obj DICOMObject, want []byte, maxDelta byte) {
+func assertPixelPrefixWithinDelta(t *testing.T, obj media.DICOMObject, want []byte, maxDelta byte) {
 	t.Helper()
 
 	out, err := obj.GetPixelData(0)
@@ -719,7 +720,6 @@ func assertPixelPrefixWithinDelta(t *testing.T, obj DICOMObject, want []byte, ma
 }
 
 func TestDatasetTransferSyntaxRoundTripMatrix(t *testing.T) {
-	InitDict()
 
 	tests := []struct {
 		name string
@@ -739,7 +739,7 @@ func TestDatasetTransferSyntaxRoundTripMatrix(t *testing.T) {
 				t.Fatal("expected non-empty serialized bytes")
 			}
 
-			parsed, err := NewDCMObjFromBytes(data)
+			parsed, err := media.NewDCMObjFromBytes(data)
 			if err != nil {
 				t.Fatalf("NewDCMObjFromBytes failed: %v", err)
 			}
@@ -765,7 +765,7 @@ func TestRepresentativePixelTransferSyntaxRoundTrips(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			obj := tt.newObj()
 
-			if err := obj.ChangeTransferSyntax(tt.ts); err != nil {
+			if err := transcoder.ChangeTransferSyntax(obj, tt.ts); err != nil {
 				t.Fatalf("ChangeTransferSyntax to %s failed: %v", tt.ts.Name, err)
 			}
 
@@ -781,13 +781,13 @@ func TestRepresentativePixelTransferSyntaxRoundTrips(t *testing.T) {
 			}
 
 			if tt.nativeFamily != "" {
-				if err := obj.ChangeTransferSyntax(transfersyntax.ExplicitVRLittleEndian); err == nil {
+				if err := transcoder.ChangeTransferSyntax(obj, transfersyntax.ExplicitVRLittleEndian); err == nil {
 					t.Fatalf("expected ChangeTransferSyntax back to ExplicitVRLittleEndian to fail without native %s decode backend", tt.nativeFamily)
 				}
 				return
 			}
 
-			if err := obj.ChangeTransferSyntax(transfersyntax.ExplicitVRLittleEndian); err != nil {
+			if err := transcoder.ChangeTransferSyntax(obj, transfersyntax.ExplicitVRLittleEndian); err != nil {
 				t.Fatalf("ChangeTransferSyntax back to ExplicitVRLittleEndian failed: %v", err)
 			}
 			if obj.GetTransferSyntax() == nil || obj.GetTransferSyntax().UID != transfersyntax.ExplicitVRLittleEndian.UID {
@@ -801,10 +801,10 @@ func TestRepresentativePixelTransferSyntaxRoundTrips(t *testing.T) {
 // ── DICOMTag.WriteSeq / ReadSeq ───────────────────────────────────────────────
 
 func TestDICOMTag_WriteSeq_NonEmpty(t *testing.T) {
-	inner := NewEmptyDCMObj()
+	inner := media.NewEmptyDCMObj()
 	inner.Write(tags.PatientID, "PAT001")
 
-	tag := &DICOMTag{}
+	tag := &media.DICOMTag{}
 	tag.WriteSeq(0x0040, 0xA043, inner)
 
 	if tag.Group != 0x0040 || tag.Element != 0xA043 {
@@ -819,10 +819,10 @@ func TestDICOMTag_WriteSeq_NonEmpty(t *testing.T) {
 }
 
 func TestDICOMTag_WriteSeq_FFFEGroup_HasNoVR(t *testing.T) {
-	inner := NewEmptyDCMObj()
+	inner := media.NewEmptyDCMObj()
 	inner.Write(tags.PatientID, "X")
 
-	tag := &DICOMTag{}
+	tag := &media.DICOMTag{}
 	tag.WriteSeq(0xFFFE, 0xE000, inner)
 
 	if tag.VR != "" {
@@ -831,10 +831,10 @@ func TestDICOMTag_WriteSeq_FFFEGroup_HasNoVR(t *testing.T) {
 }
 
 func TestDICOMTag_WriteSeq_EvenLength(t *testing.T) {
-	inner := NewEmptyDCMObj()
+	inner := media.NewEmptyDCMObj()
 	inner.Write(tags.PatientID, "A") // odd-length value → padding required
 
-	tag := &DICOMTag{}
+	tag := &media.DICOMTag{}
 	tag.WriteSeq(0x0010, 0x0020, inner)
 
 	if tag.Length%2 != 0 {
@@ -843,10 +843,10 @@ func TestDICOMTag_WriteSeq_EvenLength(t *testing.T) {
 }
 
 func TestDICOMTag_ReadSeq_RoundTrip(t *testing.T) {
-	inner := NewEmptyDCMObj()
+	inner := media.NewEmptyDCMObj()
 	inner.Write(tags.PatientID, "PAT123")
 
-	tag := &DICOMTag{}
+	tag := &media.DICOMTag{}
 	tag.WriteSeq(0x0040, 0xA043, inner)
 
 	result := tag.ReadSeq(false)
@@ -861,7 +861,7 @@ func TestDICOMTag_ReadSeq_RoundTrip(t *testing.T) {
 // ── GetString edge case ──────────────────────────────────────────────────────
 
 func TestGetString_ReturnsEmptyWhenTagAbsent(t *testing.T) {
-	obj := NewEmptyDCMObj()
+	obj := media.NewEmptyDCMObj()
 	got := obj.GetString(tags.SOPClassUID)
 	if got != "" {
 		t.Errorf("GetString: want empty string for absent tag, got %q", got)
@@ -876,7 +876,7 @@ func TestGetString_ReturnsEmptyWhenTagAbsent(t *testing.T) {
 // the raw compressed bytes for the requested frame without allocating the full
 // uncompressed buffer.
 func TestGetPixelData_LargeEncapsulatedTotalSizeNoLongerRejected(t *testing.T) {
-	obj := NewEmptyDCMObj()
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.JPEGBaseline8Bit)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -889,10 +889,10 @@ func TestGetPixelData_LargeEncapsulatedTotalSizeNoLongerRejected(t *testing.T) {
 	obj.Write(tags.BitsAllocated, 8)
 
 	compressedBytes := []byte{0xFF, 0xD8, 0x01, 0x02} // mock compressed frame
-	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(compressedBytes)), VR: "DL", Data: compressedBytes, BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(compressedBytes)), VR: "DL", Data: compressedBytes, BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
 
 	frame0, err := obj.GetPixelData(0)
 	if err != nil {
@@ -906,7 +906,7 @@ func TestGetPixelData_LargeEncapsulatedTotalSizeNoLongerRejected(t *testing.T) {
 // TestGetDecompressedFrame_UncompressedMultiFrame verifies that GetDecompressedFrame
 // correctly slices individual frames from flat uncompressed pixel data.
 func TestGetDecompressedFrame_UncompressedMultiFrame(t *testing.T) {
-	obj := NewEmptyDCMObj()
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -920,7 +920,7 @@ func TestGetDecompressedFrame_UncompressedMultiFrame(t *testing.T) {
 	obj.Write(tags.Rows, 2)          // rows
 	obj.Write(tags.Columns, 2)       // cols
 	obj.Write(tags.BitsAllocated, 8) // bits allocated
-	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: uint32(len(pixelData)), VR: "OB", Data: pixelData, BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: uint32(len(pixelData)), VR: "OB", Data: pixelData, BigEndian: false})
 
 	ctx := context.Background()
 
@@ -950,7 +950,7 @@ func TestGetDecompressedFrame_UncompressedMultiFrame(t *testing.T) {
 // use EncapsulatedUncompressedExplicitVRLittleEndian so decompressSingleFrame
 // can copy without needing an external codec.
 func TestGetDecompressedFrame_LargeEncapsulatedTotalSizeOK(t *testing.T) {
-	obj := NewEmptyDCMObj()
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -968,11 +968,11 @@ func TestGetDecompressedFrame_LargeEncapsulatedTotalSizeOK(t *testing.T) {
 	obj.Write(tags.Columns, cols)
 	obj.Write(tags.BitsAllocated, bits)
 
-	obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT
+	obj.Add(&media.DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT
 	// Add only one real fragment — requesting frame 0 should use the single fragment.
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(framePayload)), VR: "DL", Data: framePayload, BigEndian: false})
-	obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(framePayload)), VR: "DL", Data: framePayload, BigEndian: false})
+	obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
 
 	out, err := obj.GetDecompressedFrame(context.Background(), 0)
 	if err != nil {
@@ -1003,7 +1003,7 @@ func TestGetDecompressedFrame_NonConformantUncompressedEncapsulated(t *testing.T
 		transfersyntax.ImplicitVRLittleEndian,
 	} {
 		t.Run(ts.Name, func(t *testing.T) {
-			obj := NewEmptyDCMObj()
+			obj := media.NewEmptyDCMObj()
 			obj.SetTransferSyntax(ts)
 			obj.SetExplicitVR(ts == transfersyntax.ExplicitVRLittleEndian)
 			obj.SetBigEndian(false)
@@ -1014,10 +1014,10 @@ func TestGetDecompressedFrame_NonConformantUncompressedEncapsulated(t *testing.T
 			obj.Write(tags.Columns, cols)
 			obj.Write(tags.BitsAllocated, bits)
 
-			obj.Add(&DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
-			obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT
-			obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(framePayload)), VR: "DL", Data: framePayload, BigEndian: false})
-			obj.Add(&DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
+			obj.Add(&media.DICOMTag{Group: 0x7FE0, Element: 0x0010, Length: 0xFFFFFFFF, VR: "OB", BigEndian: false})
+			obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: 0, VR: "DL", BigEndian: false}) // empty BOT
+			obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE000, Length: uint32(len(framePayload)), VR: "DL", Data: framePayload, BigEndian: false})
+			obj.Add(&media.DICOMTag{Group: 0xFFFE, Element: 0xE0DD, Length: 0, VR: "DL", BigEndian: false})
 
 			out, err := obj.GetDecompressedFrame(context.Background(), 0)
 			if err != nil {
@@ -1040,10 +1040,9 @@ func TestGetDecompressedFrame_NonConformantUncompressedEncapsulated(t *testing.T
 // SOP classes such as Structured Reports and Key Object Selection Documents),
 // as long as both source and target TSes share the same tag encoding.
 func TestChangeTransferSyntax_NoPixelData(t *testing.T) {
-	InitDict()
 
 	// Build a minimal non-image object (no Pixel Data tag) in EVLE.
-	obj := NewEmptyDCMObj()
+	obj := media.NewEmptyDCMObj()
 	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 	obj.SetExplicitVR(true)
 	obj.SetBigEndian(false)
@@ -1062,7 +1061,7 @@ func TestChangeTransferSyntax_NoPixelData(t *testing.T) {
 	}
 	for _, ts := range compressedTargets {
 		// Clone obj so each sub-test starts fresh.
-		clone := NewEmptyDCMObj()
+		clone := media.NewEmptyDCMObj()
 		clone.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 		clone.SetExplicitVR(true)
 		clone.SetBigEndian(false)
@@ -1070,7 +1069,7 @@ func TestChangeTransferSyntax_NoPixelData(t *testing.T) {
 		clone.Write(tags.SOPInstanceUID, "1.2.3.4.5")
 		clone.Write(tags.PatientID, "P-001")
 
-		if err := clone.ChangeTransferSyntax(ts); err != nil {
+		if err := transcoder.ChangeTransferSyntax(clone, ts); err != nil {
 			t.Errorf("ChangeTransferSyntax(no-pixel-data, %s) error = %v, want nil", ts.Name, err)
 			continue
 		}
@@ -1085,15 +1084,197 @@ func TestChangeTransferSyntax_NoPixelData(t *testing.T) {
 	// EVLE → ILE changes implicit/explicit VR so it MUST still fail (we cannot
 	// re-encode VR names without the data dictionary at this level).
 	isCrossEncodingErr := false
-	crossEncObj := NewEmptyDCMObj()
+	crossEncObj := media.NewEmptyDCMObj()
 	crossEncObj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
 	crossEncObj.SetExplicitVR(true)
 	crossEncObj.SetBigEndian(false)
 	crossEncObj.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.88.11")
-	if err := crossEncObj.ChangeTransferSyntax(transfersyntax.ImplicitVRLittleEndian); err != nil {
+	if err := transcoder.ChangeTransferSyntax(crossEncObj, transfersyntax.ImplicitVRLittleEndian); err != nil {
 		isCrossEncodingErr = true
 	}
 	if !isCrossEncodingErr {
 		t.Error("ChangeTransferSyntax(EVLE→ILE, no pixel data) should fail for cross-encoding conversion")
+	}
+}
+
+func TestDICOMObject_TypeSafeWriteOverloads(t *testing.T) {
+	obj := media.NewEmptyDCMObj()
+	obj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	obj.SetExplicitVR(true)
+
+	// WriteString
+	obj.WriteString(tags.PatientID, "P-SAFE-001")
+	if got := obj.GetString(tags.PatientID); got != "P-SAFE-001" {
+		t.Errorf("WriteString: got %q, want %q", got, "P-SAFE-001")
+	}
+
+	// WriteUint16
+	obj.WriteUint16(tags.BitsAllocated, 16)
+	if got := obj.GetUint16(tags.BitsAllocated); got != 16 {
+		t.Errorf("WriteUint16: got %d, want 16", got)
+	}
+
+	// WriteUint32 — CommandGroupLength (0000,0000) is a UL tag.
+	obj.WriteUint32(tags.CommandGroupLength, 512)
+	if got := obj.GetUint32(tags.CommandGroupLength); got != 512 {
+		t.Errorf("WriteUint32: got %d, want 512", got)
+	}
+
+	// WriteTime (DA tag)
+	timeObj := media.NewEmptyDCMObj()
+	timeObj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	timeObj.SetExplicitVR(true)
+	timeObj.WriteTime(tags.StudyDate, mustParseTime(t, "20060102", "20231015"))
+	if got := timeObj.GetString(tags.StudyDate); got != "20231015" {
+		t.Errorf("WriteTime(DA): got %q, want %q", got, "20231015")
+	}
+
+	// WriteTime (TM tag)
+	timeObj.WriteTime(tags.StudyTime, mustParseTime(t, "150405", "143000"))
+	if got := timeObj.GetString(tags.StudyTime); got != "143000" {
+		t.Errorf("WriteTime(TM): got %q, want %q", got, "143000")
+	}
+
+	// WriteDateRange
+	dr := media.DateRange{
+		Start: mustParseTime(t, "20060102", "20230101"),
+		End:   mustParseTime(t, "20060102", "20231231"),
+	}
+	drObj := media.NewEmptyDCMObj()
+	drObj.SetTransferSyntax(transfersyntax.ExplicitVRLittleEndian)
+	drObj.SetExplicitVR(true)
+	drObj.WriteDateRange(tags.StudyDate, dr)
+	if got := drObj.GetString(tags.StudyDate); got != "20230101-20231231" {
+		t.Errorf("WriteDateRange: got %q, want %q", got, "20230101-20231231")
+	}
+}
+
+func mustParseTime(t *testing.T, layout, value string) time.Time {
+	t.Helper()
+	tm, err := time.Parse(layout, value)
+	if err != nil {
+		t.Fatalf("mustParseTime(%q, %q): %v", layout, value, err)
+	}
+	return tm
+}
+
+func TestDICOMObject_GetDateMethod(t *testing.T) {
+	obj := media.NewEmptyDCMObj()
+	obj.SetExplicitVR(true)
+	obj.WriteString(tags.StudyDate, "20231015")
+
+	got := obj.GetDate(tags.StudyDate)
+	want := mustParseTime(t, "20060102", "20231015")
+	if !got.Equal(want) {
+		t.Errorf("GetDate = %v, want %v", got, want)
+	}
+}
+
+func TestDICOMObject_GetTimeMethod(t *testing.T) {
+	obj := media.NewEmptyDCMObj()
+	obj.SetExplicitVR(true)
+	obj.WriteString(tags.StudyTime, "143000")
+
+	got := obj.GetTime(tags.StudyTime)
+	want := mustParseTime(t, "150405", "143000")
+	if !got.Equal(want) {
+		t.Errorf("GetTime = %v, want %v", got, want)
+	}
+}
+
+func TestDICOMObject_GetDateMethod_ZeroOnMissing(t *testing.T) {
+	obj := media.NewEmptyDCMObj()
+	if got := obj.GetDate(tags.StudyDate); !got.IsZero() {
+		t.Errorf("GetDate on missing tag = %v, want zero", got)
+	}
+}
+
+func TestDICOMObject_GetTimeMethod_ZeroOnMissing(t *testing.T) {
+	obj := media.NewEmptyDCMObj()
+	if got := obj.GetTime(tags.StudyTime); !got.IsZero() {
+		t.Errorf("GetTime on missing tag = %v, want zero", got)
+	}
+}
+
+func TestDICOMObject_WriteReadFloat32(t *testing.T) {
+	obj := media.NewEmptyDCMObj()
+	obj.SetExplicitVR(true)
+	const want float32 = 3.14
+	obj.WriteFloat32(tags.SelectorFLValue, want)
+
+	got := obj.GetFloat32(tags.SelectorFLValue)
+	if got != want {
+		t.Errorf("WriteFloat32/GetFloat32 = %v, want %v", got, want)
+	}
+}
+
+func TestDICOMObject_WriteReadFloat64(t *testing.T) {
+	obj := media.NewEmptyDCMObj()
+	obj.SetExplicitVR(true)
+	const want float64 = 2.718281828459045
+	obj.WriteFloat64(tags.SelectorFDValue, want)
+
+	got := obj.GetFloat64(tags.SelectorFDValue)
+	if got != want {
+		t.Errorf("WriteFloat64/GetFloat64 = %v, want %v", got, want)
+	}
+}
+
+func TestDICOMObject_GetFloat32_ZeroOnMissing(t *testing.T) {
+	obj := media.NewEmptyDCMObj()
+	if got := obj.GetFloat32(tags.SelectorFLValue); got != 0 {
+		t.Errorf("GetFloat32 on missing tag = %v, want 0", got)
+	}
+}
+
+func TestDICOMObject_GetFloat64_ZeroOnMissing(t *testing.T) {
+	obj := media.NewEmptyDCMObj()
+	if got := obj.GetFloat64(tags.SelectorFDValue); got != 0 {
+		t.Errorf("GetFloat64 on missing tag = %v, want 0", got)
+	}
+}
+
+func TestDICOMObject_Clone_IndependentData(t *testing.T) {
+	orig := media.NewEmptyDCMObj()
+	orig.SetExplicitVR(true)
+	orig.WriteString(tags.PatientName, "Smith^John")
+	orig.WriteUint16(tags.BitsAllocated, 16)
+
+	cloned := orig.Clone()
+
+	// Cloned object should have the same values.
+	if got := cloned.GetString(tags.PatientName); got != "Smith^John" {
+		t.Errorf("Clone PatientName = %q, want %q", got, "Smith^John")
+	}
+	if got := cloned.GetUint16(tags.BitsAllocated); got != 16 {
+		t.Errorf("Clone BitsAllocated = %d, want 16", got)
+	}
+
+	// Mutating clone must not affect original.
+	cloned.WriteString(tags.PatientName, "Doe^Jane")
+	if got := orig.GetString(tags.PatientName); got != "Smith^John" {
+		t.Errorf("Mutation of clone changed original: got %q", got)
+	}
+}
+
+func TestDICOMObject_Clone_EmptyObject(t *testing.T) {
+	orig := media.NewEmptyDCMObj()
+	cloned := orig.Clone()
+	if cloned.TagCount() != 0 {
+		t.Errorf("Clone of empty object has %d tags, want 0", cloned.TagCount())
+	}
+}
+
+func TestDICOMObject_Clone_PreservesMetadata(t *testing.T) {
+	orig := media.NewEmptyDCMObj()
+	orig.SetBigEndian(true)
+	orig.SetExplicitVR(true)
+
+	cloned := orig.Clone()
+	if !cloned.IsBigEndian() {
+		t.Error("Clone did not preserve BigEndian=true")
+	}
+	if !cloned.IsExplicitVR() {
+		t.Error("Clone did not preserve ExplicitVR=true")
 	}
 }

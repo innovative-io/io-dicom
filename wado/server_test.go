@@ -73,7 +73,6 @@ func (m *mockStore) SearchInstances(_ context.Context, studyUID, _ string, _ url
 
 func loadSampleDICOM(t *testing.T) media.DICOMObject {
 	t.Helper()
-	media.InitDict()
 	obj, err := media.NewDCMObjFromFile("../testdata/test.dcm")
 	if err != nil {
 		t.Skipf("sample DICOM unavailable: %v", err)

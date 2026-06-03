@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/innovative-io/io-dicom/dictionary"
 )
 
 // tagPool recycles DICOMTag allocations in the read hot path.
@@ -165,7 +167,7 @@ func (tag *DICOMTag) ReadSeq(ExplicitVR bool) DICOMObject {
 		}
 
 		if !ExplicitVR {
-			temptag.VR = GetDictionaryVR(tag.Group, tag.Element)
+			temptag.VR = dictionary.GetDictionaryVR(tag.Group, tag.Element)
 		}
 		seq.Add(temptag)
 	}

@@ -30,7 +30,6 @@ type mockPDU struct {
 }
 
 func newMockPDU(sopClassUID string) *mockPDU {
-	media.InitDict()
 	pc := network.NewPresentationContext()
 	pc.SetPresentationContextID(1)
 	pc.SetAbstractSyntax(sopClassUID)
@@ -62,7 +61,7 @@ func (m *mockPDU) GetTransferSyntax(_ byte) *transfersyntax.TransferSyntax {
 func (m *mockPDU) SetTimeout(_ int)                                                {}
 func (m *mockPDU) Connect(_ context.Context, _, _ string) error                    { return nil }
 func (m *mockPDU) ConnectTLS(_ context.Context, _, _ string, _ *tls.Config) error  { return nil }
-func (m *mockPDU) Close()                                                          {}
+func (m *mockPDU) Close() error                                                    { return nil }
 func (m *mockPDU) GetCalledAE() string                                             { return "CALLED" }
 func (m *mockPDU) GetCallingAE() string                                            { return "CALLING" }
 func (m *mockPDU) GetRemoteAddress() string                                        { return "127.0.0.1:104" }

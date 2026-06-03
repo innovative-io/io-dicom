@@ -1,65 +1,21 @@
 package media
 
 import (
-	"encoding/xml"
-	"os"
-	"strconv"
-	"sync"
-
-	"github.com/innovative-io/io-dicom/dictionary/tags"
+	"github.com/innovative-io/io-dicom/dictionary"
 )
 
-type privateDictionaryXML struct {
-	XMLName xml.Name               `xml:"dictionary"`
-	Tags    []privateDictionaryTag `xml:"tag"`
-}
+// InitDict initializes the DICOM dictionary. It is safe to call from multiple
+// goroutines.
+//
+// Deprecated: the dictionary is now initialized automatically when the
+// dictionary package is imported. This function is a no-op kept for backward
+// compatibility and can be removed from existing code.
+func InitDict() { dictionary.InitDict() }
 
-type privateDictionaryTag struct {
-	Group       string `xml:"group,attr"`
-	Element     string `xml:"element,attr"`
-	Name        string `xml:"keyword,attr"`
-	VR          string `xml:"vr,attr"`
-	VM          string `xml:"vm,attr"`
-	Description string `xml:",chardata"`
-}
-
-var codes []*tags.Tag
-var codeByKey map[uint32]*tags.Tag
-var codeVRByKey map[uint32]string
-var initOnce sync.Once
-var mu sync.Mutex
-
-// unknownTag is a package-level sentinel returned by GetDictionaryTag for
-// unrecognised group/element pairs. Using a single shared instance avoids
-// a heap allocation on every cache miss in the hot tag-parsing loop.
-var unknownTag = &tags.Tag{
-	Group:       0,
-	Element:     0,
-	VR:          "UN",
-	VM:          "",
-	Name:        "Unknown",
-	Description: "Unknown",
-}
-
-func dictionaryKey(group uint16, element uint16) uint32 {
-	return uint32(group)<<16 | uint32(element)
-}
-
-func buildDictionaryIndex() {
-	codeByKey = make(map[uint32]*tags.Tag, len(codes))
-	codeVRByKey = make(map[uint32]string, len(codes))
-	for i := 0; i < len(codes); i++ {
-		key := dictionaryKey(codes[i].Group, codes[i].Element)
-		if _, exists := codeByKey[key]; !exists {
-			codeByKey[key] = codes[i]
-			codeVRByKey[key] = codes[i].VR
-		}
-	}
-}
-
-// FillTag - Populates with data from dictionary
+// FillTag populates tag fields from the dictionary. Name, Description, VR, and
+// VM are only written when the tag's existing value is empty.
 func FillTag(tag *DICOMTag) {
-	dt := GetDictionaryTag(tag.Group, tag.Element)
+	dt := dictionary.GetDictionaryTag(tag.Group, tag.Element)
 	if tag.Name == "" {
 		tag.Name = dt.Name
 	}
@@ -72,77 +28,4 @@ func FillTag(tag *DICOMTag) {
 	if tag.VM == "" {
 		tag.VM = dt.VM
 	}
-}
-
-// GetDictionaryTag - get tag from Dictionary
-func GetDictionaryTag(group uint16, element uint16) *tags.Tag {
-	InitDict()
-	if tag, ok := codeByKey[dictionaryKey(group, element)]; ok {
-		return tag
-	}
-	return unknownTag
-}
-
-// GetDictionaryVR - get info from Dictionary
-func GetDictionaryVR(group uint16, element uint16) string {
-	InitDict()
-	if vr, ok := codeVRByKey[dictionaryKey(group, element)]; ok {
-		return vr
-	}
-	return "UN"
-}
-
-func loadPrivateDictionaryFromPath(path string) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-
-	dict := new(privateDictionaryXML)
-	err = xml.Unmarshal(data, dict)
-	if err != nil {
-		return
-	}
-
-	for _, t := range dict.Tags {
-		g, err := strconv.Atoi(t.Group)
-		if err != nil {
-			continue
-		}
-		e, err := strconv.Atoi(t.Element)
-		if err != nil {
-			continue
-		}
-
-		codes = append(codes, &tags.Tag{
-			Group:       uint16(g),
-			Element:     uint16(e),
-			Name:        t.Name,
-			Description: t.Description,
-			VR:          t.VR,
-			VM:          t.VM,
-		})
-	}
-}
-
-// LoadPrivateDictionary parses the private-tag XML file at path and merges its
-// entries into the dictionary. InitDict must be called first. Calling this
-// multiple times with different files is supported; duplicate group/element
-// pairs are silently skipped.
-func LoadPrivateDictionary(path string) {
-	InitDict()
-	loadPrivateDictionaryFromPath(path)
-	mu.Lock()
-	buildDictionaryIndex()
-	mu.Unlock()
-}
-
-// InitDict initializes the DICOM dictionary from the standard tag set. It is
-// safe to call from multiple goroutines; initialization happens at most once.
-// To load private tags call LoadPrivateDictionary after InitDict.
-func InitDict() {
-	initOnce.Do(func() {
-		codes = tags.GetTags()
-		buildDictionaryIndex()
-	})
 }

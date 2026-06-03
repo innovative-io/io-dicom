@@ -16,8 +16,6 @@ var version string
 func main() {
 	log.Printf("Starting compare %s\n\n", version)
 
-	media.InitDict()
-
 	sourceFile := flag.String("s", "", "Source DICOM file")
 	destinationFile := flag.String("d", "", "Destination DICOM file to compare against")
 

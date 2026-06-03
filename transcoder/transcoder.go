@@ -1,0 +1,585 @@
+// Package transcoder provides pixel data transcoding between DICOM transfer
+// syntaxes. The primary entry points are ChangeTransferSyntax and
+// ChangeTransferSyntaxContext, which accept any media.DICOMObject and
+// re-encode its pixel data to the requested output transfer syntax.
+//
+// Usage:
+//
+//	err := transcoder.ChangeTransferSyntax(obj, transfersyntax.ExplicitVRLittleEndian)
+//	err := transcoder.ChangeTransferSyntaxContext(ctx, obj, transfersyntax.JPEGBaseline8Bit)
+package transcoder
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/innovative-io/io-dicom/codecs"
+	"github.com/innovative-io/io-dicom/codecs/deflate"
+	"github.com/innovative-io/io-dicom/codecs/jpeg"
+	"github.com/innovative-io/io-dicom/codecs/jpeg2000"
+	"github.com/innovative-io/io-dicom/codecs/jpegls"
+	"github.com/innovative-io/io-dicom/codecs/jpegxl"
+	"github.com/innovative-io/io-dicom/codecs/jpip"
+	"github.com/innovative-io/io-dicom/codecs/mpeg"
+	"github.com/innovative-io/io-dicom/codecs/rle"
+	"github.com/innovative-io/io-dicom/codecs/smpte2110"
+	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
+	"github.com/innovative-io/io-dicom/media"
+)
+
+// maxPixelDataBytes is the upper bound for a single pixel data allocation (512 MiB).
+const maxPixelDataBytes = 512 * 1024 * 1024
+
+// ChangeTransferSyntax re-encodes obj's pixel data to outTS using a
+// background context. It is a convenience wrapper around
+// ChangeTransferSyntaxContext.
+func ChangeTransferSyntax(obj media.DICOMObject, outTS *transfersyntax.TransferSyntax) error {
+	return ChangeTransferSyntaxContext(context.Background(), obj, outTS)
+}
+
+// ChangeTransferSyntaxContext re-encodes obj's pixel data to outTS, honouring
+// ctx for cancellation during codec operations. When source and destination
+// transfer syntaxes share the same tag-level wire encoding and no pixel data
+// tag is present, only the transfer syntax header is updated.
+func ChangeTransferSyntaxContext(ctx context.Context, obj media.DICOMObject, outTS *transfersyntax.TransferSyntax) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	flag := false
+
+	var i int
+	var rows, cols, bitss, bitsa, planar, pixelrep uint16
+	var PhotoInt string
+	sq := 0
+	frames := uint32(0)
+	RGB := false
+	icon := false
+
+	if obj.GetTransferSyntax().UID == outTS.UID {
+		return nil
+	}
+
+	if !transfersyntax.SupportedTransferSyntax(outTS.UID) {
+		return fmt.Errorf("unsupported transfer syntax %s", outTS.Name)
+	}
+
+	for i = 0; i < obj.TagCount(); i++ {
+		tag := obj.GetTagAt(i)
+		if ((tag.VR == "SQ") && (tag.Length == 0xFFFFFFFF)) || ((tag.Group == 0xFFFE) && (tag.Element == 0xE000) && (tag.Length == 0xFFFFFFFF)) {
+			sq++
+		}
+		if sq == 0 {
+			if (tag.Group == 0x0028) && (!icon) {
+				switch tag.Element {
+				case 0x04:
+					PhotoInt = tag.GetString()
+					if !strings.Contains(PhotoInt, "MONO") {
+						RGB = true
+					}
+				case 0x06:
+					planar = tag.GetUint16()
+				case 0x08:
+					uframes, err := strconv.Atoi(tag.GetString())
+					if err != nil {
+						frames = 0
+					} else {
+						frames = uint32(uframes)
+					}
+				case 0x10:
+					rows = tag.GetUint16()
+				case 0x11:
+					cols = tag.GetUint16()
+				case 0x0100:
+					bitsa = tag.GetUint16()
+				case 0x0101:
+					bitss = tag.GetUint16()
+				case 0x0103:
+					pixelrep = tag.GetUint16()
+				}
+			}
+			if (tag.Group == 0x0088) && (tag.Element == 0x0200) && (tag.Length == 0xFFFFFFFF) {
+				icon = true
+			}
+			if (tag.Group == 0x6003) && (tag.Element == 0x1010) && (tag.Length == 0xFFFFFFFF) {
+				icon = true
+			}
+			if (tag.Group == 0x7FE0) && (tag.Element == 0x0010) && (!icon) {
+				sizePx := uint64(cols) * uint64(rows) * uint64(bitsa) / 8
+				if RGB {
+					sizePx = 3 * sizePx
+				}
+				var size uint32
+				if frames > 0 {
+					sizePx *= uint64(frames)
+				} else {
+					frames = 1
+				}
+				if sizePx == 0 || sizePx > uint64(maxPixelDataBytes) {
+					return fmt.Errorf("DICOMObject::ConvertTransferSyntax, invalid pixel data size %d", sizePx)
+				}
+				size = uint32(sizePx)
+				img := make([]byte, size)
+				if tag.Length == 0xFFFFFFFF {
+					if err := uncompress(ctx, obj, i, img, size, frames, bitsa, PhotoInt); err != nil {
+						return fmt.Errorf("DICOMObject::ConvertTransferSyntax, decompress failed: %w", err)
+					}
+				} else { // Uncompressed
+					if RGB && (planar == 1) { // change from planar=1 to planar=0
+						deplanarizeRGBFrames(img, tag.Data, size/frames, frames)
+						planar = 0
+					} else {
+						copy(img, tag.Data)
+					}
+				}
+				if err := compress(ctx, obj, &i, img, RGB, cols, rows, bitss, bitsa, pixelrep, planar, frames, outTS.UID); err != nil {
+					return err
+				}
+				flag = true
+			}
+		}
+		if ((tag.Group == 0xFFFE) && (tag.Element == 0xE00D)) || ((tag.Group == 0xFFFE) && (tag.Element == 0xE0DD)) {
+			sq--
+		}
+	}
+	if flag {
+		obj.SetTransferSyntax(outTS)
+		return nil
+	}
+	// No pixel data element found. For non-image SOP classes and any object
+	// without pixel data, the tag encoding (explicit vs implicit VR, endianness)
+	// is the only thing that differs between transfer syntaxes. When both the
+	// source and target TS use the same tag encoding, we can just update the TS
+	// header without re-encoding any bytes — the resulting PDV will be identical.
+	srcExplicit, srcBig := tsTagEncoding(obj.GetTransferSyntax().UID)
+	dstExplicit, dstBig := tsTagEncoding(outTS.UID)
+	if srcExplicit == dstExplicit && srcBig == dstBig {
+		obj.SetTransferSyntax(outTS)
+		return nil
+	}
+	return fmt.Errorf("pixel data (7FE0,0010) not found: cannot convert from %s to %s", obj.GetTransferSyntax().UID, outTS.UID)
+}
+
+// tsTagEncoding returns the tag-level wire encoding properties for the given
+// transfer syntax UID. All DICOM transfer syntaxes except the two below use
+// explicit VR little-endian encoding for non-pixel-data elements.
+func tsTagEncoding(uid string) (explicitVR, bigEndian bool) {
+	switch uid {
+	case "1.2.840.10008.1.2": // Implicit VR Little Endian
+		return false, false
+	case "1.2.840.10008.1.2.2": // Explicit VR Big Endian (Retired)
+		return true, true
+	default:
+		return true, false
+	}
+}
+
+func beginEncapsulatedPixelData(obj media.DICOMObject, index int) int {
+	tag := obj.GetTagAt(index)
+	tag.VR = "OB"
+	tag.Length = 0xFFFFFFFF
+	tag.Data = nil
+	obj.SetTag(index, tag)
+
+	index++
+	obj.InsertTag(index, &media.DICOMTag{
+		Group:     0xFFFE,
+		Element:   0xE000,
+		Length:    0,
+		VR:        "DL",
+		Data:      nil,
+		BigEndian: obj.IsBigEndian(),
+	})
+	return index
+}
+
+func appendEncapsulatedFrame(obj media.DICOMObject, index int, payload []byte) int {
+	index++
+	obj.InsertTag(index, &media.DICOMTag{
+		Group:     0xFFFE,
+		Element:   0xE000,
+		Length:    uint32(len(payload)),
+		VR:        "DL",
+		Data:      payload,
+		BigEndian: obj.IsBigEndian(),
+	})
+	return index
+}
+
+func endEncapsulatedPixelData(obj media.DICOMObject, index int) int {
+	index++
+	obj.InsertTag(index, &media.DICOMTag{
+		Group:     0xFFFE,
+		Element:   0xE0DD,
+		Length:    0,
+		VR:        "DL",
+		Data:      nil,
+		BigEndian: obj.IsBigEndian(),
+	})
+	return index
+}
+
+func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RGB bool, cols uint16, rows uint16, bitss uint16, bitsa uint16, pixelrep uint16, planar uint16, frames uint32, outTS string) error {
+	var offset, size, j uint32
+	var JPEGData []byte
+	var JPEGBytes int
+
+	single := uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+	frameSize := single
+	size = frameSize * frames
+	if RGB {
+		frameSize = 3 * frameSize
+		size = frameSize * frames
+	}
+
+	index := *i
+	tag := obj.GetTagAt(index)
+
+	switch outTS {
+	case transfersyntax.DeflatedImageFrameCompression.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+
+		for j = 0; j < frames; j++ {
+			offset = j * frameSize
+			deflated, err := deflate.DeflateFrame(img[offset : offset+frameSize])
+			if err != nil {
+				return err
+			}
+			index = appendEncapsulatedFrame(obj, index, deflated)
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.EncapsulatedUncompressedExplicitVRLittleEndian.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+
+		for j = 0; j < frames; j++ {
+			offset = j * frameSize
+			frameData := make([]byte, frameSize)
+			copy(frameData, img[offset:offset+frameSize])
+			index = appendEncapsulatedFrame(obj, index, frameData)
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.RLELossless.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+
+		samplesPerPixel := uint16(1)
+		if RGB {
+			samplesPerPixel = 3
+		}
+
+		for j = 0; j < frames; j++ {
+			offset = j * frameSize
+			rleData, err := rle.RLEencode(img[offset:offset+frameSize], rows, cols, bitsa, samplesPerPixel)
+			if err != nil {
+				return err
+			}
+			index = appendEncapsulatedFrame(obj, index, rleData)
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.JPEGLosslessSV1.UID:
+		fallthrough
+	case transfersyntax.JPEGLossless.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+		for j = 0; j < frames; j++ {
+			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+			if RGB {
+				offset = 3 * offset
+			}
+			if bitsa == 8 {
+				if RGB {
+					if err := jpeg.EIJG8encode(img[offset:], cols, rows, 3, &JPEGData, &JPEGBytes, 4); err != nil {
+						return err
+					}
+				} else {
+					if err := jpeg.EIJG8encode(img[offset:], cols, rows, 1, &JPEGData, &JPEGBytes, 4); err != nil {
+						return err
+					}
+				}
+			} else {
+				if err := jpeg.EIJG16encodeContext(ctx, img[offset/2:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
+					return err
+				}
+			}
+			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			JPEGData = nil
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.JPEGBaseline8Bit.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+		for j = 0; j < frames; j++ {
+			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+			if RGB {
+				offset = 3 * offset
+				if err := jpeg.EIJG8encode(img[offset:], cols, rows, 3, &JPEGData, &JPEGBytes, 0); err != nil {
+					return err
+				}
+			} else {
+				if bitsa == 8 {
+					if err := jpeg.EIJG8encode(img[offset:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
+						return err
+					}
+				} else {
+					if err := jpeg.EIJG12encodeContext(ctx, img[offset:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
+						return err
+					}
+				}
+			}
+			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			JPEGData = nil
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.JPEGExtended12Bit.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+		for j = 0; j < frames; j++ {
+			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+			if err := jpeg.EIJG12encodeContext(ctx, img[offset/2:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
+				return err
+			}
+			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			JPEGData = nil
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.JPEGLSLossless.UID:
+		fallthrough
+	case transfersyntax.JPEGLSNearLossless.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+		for j = 0; j < frames; j++ {
+			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+			if RGB {
+				offset = 3 * offset
+				if err := jpegls.JLSencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGLSNearLossless.UID); err != nil {
+					return err
+				}
+			} else {
+				if err := jpegls.JLSencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGLSNearLossless.UID); err != nil {
+					return err
+				}
+			}
+			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			JPEGData = nil
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.JPEG2000Lossless.UID:
+		fallthrough
+	case transfersyntax.JPEG2000MCLossless.UID:
+		fallthrough
+	case transfersyntax.HTJ2KLossless.UID:
+		fallthrough
+	case transfersyntax.HTJ2KLosslessRPCL.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+		for j = 0; j < frames; j++ {
+			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+			if RGB {
+				offset = 3 * offset
+				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, 0); err != nil {
+					return err
+				}
+			} else {
+				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, 0); err != nil {
+					return err
+				}
+			}
+			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			JPEGData = nil
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.JPEG2000.UID:
+		fallthrough
+	case transfersyntax.JPEG2000MC.UID:
+		fallthrough
+	case transfersyntax.HTJ2K.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+		for j = 0; j < frames; j++ {
+			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+			if RGB {
+				offset = 3 * offset
+				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, 10); err != nil {
+					return err
+				}
+			} else {
+				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, 10); err != nil {
+					return err
+				}
+			}
+			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			JPEGData = nil
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.JPEGXLLossless.UID:
+		fallthrough
+	case transfersyntax.JPEGXLJPEGRecompression.UID:
+		fallthrough
+	case transfersyntax.JPEGXL.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+		for j = 0; j < frames; j++ {
+			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+			if RGB {
+				offset = 3 * offset
+				if err := jpegxl.JXLencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGXLLossless.UID); err != nil {
+					return err
+				}
+			} else {
+				if err := jpegxl.JXLencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGXLLossless.UID); err != nil {
+					return err
+				}
+			}
+			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			JPEGData = nil
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.JPIPHTJ2KReferenced.UID:
+		fallthrough
+	case transfersyntax.JPIPHTJ2KReferencedDeflate.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+		for j = 0; j < frames; j++ {
+			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+			if RGB {
+				offset = 3 * offset
+				if err := jpip.JPIPencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+					return err
+				}
+			} else {
+				if err := jpip.JPIPencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+					return err
+				}
+			}
+			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			JPEGData = nil
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.MPEG2MPML.UID:
+		fallthrough
+	case transfersyntax.MPEG2MPMLF.UID:
+		fallthrough
+	case transfersyntax.MPEG2MPHL.UID:
+		fallthrough
+	case transfersyntax.MPEG2MPHLF.UID:
+		fallthrough
+	case transfersyntax.MPEG4HP41.UID:
+		fallthrough
+	case transfersyntax.MPEG4HP41F.UID:
+		fallthrough
+	case transfersyntax.MPEG4HP41BD.UID:
+		fallthrough
+	case transfersyntax.MPEG4HP41BDF.UID:
+		fallthrough
+	case transfersyntax.MPEG4HP422D.UID:
+		fallthrough
+	case transfersyntax.MPEG4HP422DF.UID:
+		fallthrough
+	case transfersyntax.MPEG4HP423D.UID:
+		fallthrough
+	case transfersyntax.MPEG4HP423DF.UID:
+		fallthrough
+	case transfersyntax.MPEG4HP42STEREO.UID:
+		fallthrough
+	case transfersyntax.MPEG4HP42STEREOF.UID:
+		fallthrough
+	case transfersyntax.HEVCMP51.UID:
+		fallthrough
+	case transfersyntax.HEVCM10P51.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+		for j = 0; j < frames; j++ {
+			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+			if RGB {
+				offset = 3 * offset
+				if err := mpeg.MPEGencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+					return err
+				}
+			} else {
+				if err := mpeg.MPEGencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+					return err
+				}
+			}
+			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			JPEGData = nil
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	case transfersyntax.SMPTEST211020UncompressedProgressiveActiveVideo.UID:
+		fallthrough
+	case transfersyntax.SMPTEST211020UncompressedInterlacedActiveVideo.UID:
+		fallthrough
+	case transfersyntax.SMPTEST211030PCMDigitalAudio.UID:
+		index = beginEncapsulatedPixelData(obj, index)
+		for j = 0; j < frames; j++ {
+			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+			if RGB {
+				offset = 3 * offset
+				if err := smpte2110.SMPTE2110encodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+					return err
+				}
+			} else {
+				if err := smpte2110.SMPTE2110encodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+					return err
+				}
+			}
+			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			JPEGData = nil
+		}
+		index = endEncapsulatedPixelData(obj, index)
+		*i = index
+	default:
+		if bitss == 8 {
+			tag.VR = "OB"
+		} else {
+			tag.VR = "OW"
+		}
+		tag.Length = size
+		if tag.Data != nil {
+			tag.Data = nil
+		}
+		tag.Data = make([]byte, tag.Length)
+		copy(tag.Data, img)
+		obj.SetTag(index, tag)
+	}
+	return nil
+}
+
+func uncompress(ctx context.Context, obj media.DICOMObject, i int, img []byte, size uint32, frames uint32, bitsa uint16, PhotoInt string) error {
+	single := size / frames
+	tsUID := obj.GetTransferSyntax().UID
+
+	obj.DelTag(i + 1) // Delete offset table.
+	for j := uint32(0); j < frames; j++ {
+		offset := j * single
+		tag := obj.GetTagAt(i + 1)
+		if tag == nil {
+			return fmt.Errorf("transcoder: missing frame %d for transfer syntax %s", j, tsUID)
+		}
+		if err := codecs.DecompressFrame(ctx, tsUID, tag.Data, bitsa, PhotoInt, img[offset:offset+single]); err != nil {
+			return fmt.Errorf("transcoder: frame %d: %w", j, err)
+		}
+		obj.DelTag(i + 1)
+	}
+	obj.DelTag(i + 1) // Delete sequence delimiter.
+	return nil
+}
+
+// deplanarizeRGBFrames converts RGB pixel data from planar format (all R
+// values followed by all G followed by all B, per frame) to interleaved RGB
+// in dst. src and dst may overlap or be the same slice. frameSize is the byte
+// count of one frame (rows * cols * 3).
+func deplanarizeRGBFrames(dst, src []byte, frameSize, frames uint32) {
+	for f := uint32(0); f < frames; f++ {
+		off := frameSize * f
+		pixels := frameSize / 3
+		for j := uint32(0); j < pixels; j++ {
+			dst[3*j+off] = src[j+off]
+			dst[3*j+1+off] = src[j+pixels+off]
+			dst[3*j+2+off] = src[j+2*pixels+off]
+		}
+	}
+}
