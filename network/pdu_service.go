@@ -132,6 +132,15 @@ func NewPDUService(opts ...PDUServiceOption) PDUService {
 
 const maxPduLength uint32 = 16384
 
+// maxIncomingPDULength is an absolute ceiling on the byte length of any PDU we
+// will read off the wire, enforced before allocating the receive buffer. It is
+// deliberately far larger than the negotiated P-DATA-TF maximum (maxPduLength)
+// so legitimate association PDUs carrying many presentation contexts still fit,
+// while a hostile or buggy peer advertising a near-4 GiB PDU length cannot force
+// a multi-gigabyte allocation (DoS). 16 MiB is orders of magnitude above any
+// conformant PDU yet trivially bounded.
+const maxIncomingPDULength uint32 = 16 << 20
+
 const releaseHandshakeTimeout = 5 * time.Second
 
 // resolveImplClass returns the implementation class UID and version to use
@@ -593,6 +602,9 @@ func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
 	}
 	if pduLength < 4 {
 		return 0, nil, fmt.Errorf("pdu: malformed PDU length %d (minimum is 4)", pduLength)
+	}
+	if pduLength > maxIncomingPDULength {
+		return 0, nil, fmt.Errorf("pdu: PDU length %d exceeds maximum %d", pduLength, maxIncomingPDULength)
 	}
 
 	remaining := int(pduLength) - 4

@@ -48,6 +48,15 @@ func (pd *PresentationDataTransfer) ReadDynamic(buf *media.DICOMBuffer) (err err
 			return err
 		}
 
+		// Guard against malformed PDV lengths before any uint32 arithmetic.
+		// pdv.Length counts the 2 header bytes (PCID + MsgHeader) plus payload,
+		// so it must be at least 2. It must also fit within the bytes the
+		// enclosing PDU claimed to carry (count), otherwise the subtractions
+		// below would underflow and spin this loop on a huge wrapped value.
+		if pd.pdv.Length < 2 || uint64(pd.pdv.Length)+4 > uint64(count) {
+			return fmt.Errorf("pdata: malformed PDV length %d (remaining %d)", pd.pdv.Length, count)
+		}
+
 		// ReadSlice returns a zero-copy view into buf's backing array —
 		// buf is freshly allocated per PDU and never reused, so the slice
 		// is stable for the lifetime of this call.

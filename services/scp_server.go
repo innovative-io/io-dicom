@@ -39,9 +39,29 @@ func (s *scp) Start(ctx context.Context) error {
 		s.listener.Close()
 	}()
 
+	// When a concurrency limit is configured, sem is a counting semaphore that
+	// caps the number of in-flight association goroutines. Acquiring before
+	// Accept returns the next connection applies TCP backpressure on a flood
+	// instead of spawning unbounded goroutines. A nil sem means unlimited.
+	var sem chan struct{}
+	if s.maxAssociations > 0 {
+		sem = make(chan struct{}, s.maxAssociations)
+	}
+
 	for {
+		if sem != nil {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return nil
+			}
+		}
+
 		conn, err := s.listener.Accept()
 		if err != nil {
+			if sem != nil {
+				<-sem
+			}
 			if errors.Is(err, net.ErrClosed) {
 				return nil
 			}
@@ -52,6 +72,9 @@ func (s *scp) Start(ctx context.Context) error {
 		s.wg.Add(1)
 		go func(c net.Conn) {
 			defer s.wg.Done()
+			if sem != nil {
+				defer func() { <-sem }()
+			}
 			s.handleConnection(ctx, c)
 		}(conn)
 	}

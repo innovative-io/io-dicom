@@ -119,12 +119,13 @@ type scp struct {
 	onRawPDU             func(event network.RawPDUEvent)
 	canceledMessageIDs   map[uint16]struct{}
 
-	bufSize      int
-	cancelPoll   time.Duration
-	cancelGrace  time.Duration
-	implClassUID string
-	implVersion  string
-	timeout      int
+	bufSize         int
+	cancelPoll      time.Duration
+	cancelGrace     time.Duration
+	implClassUID    string
+	implVersion     string
+	timeout         int
+	maxAssociations int
 }
 
 // SCPOption configures an SCP at construction time.
@@ -160,6 +161,17 @@ func WithCancelGraceWindow(d time.Duration) SCPOption {
 		if d > 0 {
 			s.cancelGrace = d
 		}
+	}
+}
+
+// WithMaxAssociations bounds the number of associations the SCP will service
+// concurrently. Connections accepted beyond the limit block in the accept loop
+// (applying TCP backpressure) until an in-flight association completes, rather
+// than spawning an unbounded number of goroutines under a connection flood.
+// A value <= 0 (the default) means unlimited.
+func WithMaxAssociations(n int) SCPOption {
+	return func(s *scp) {
+		s.maxAssociations = n
 	}
 }
 
