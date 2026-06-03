@@ -339,23 +339,20 @@ func (c *wadoClient) DeleteInstance(ctx context.Context, studyUID, seriesUID, so
 	return nil
 }
 
-// retrieveMultipartBytes fetches a WADO-RS URL and returns each part as raw bytes.
-// Used for frame retrieval where each part is pixel data, not a DICOM object.
-func (c *wadoClient) retrieveMultipartBytes(ctx context.Context, rawURL string) ([][]byte, error) {
+// eachMultipartPart fetches a WADO-RS URL and calls fn for each successfully read part.
+func (c *wadoClient) eachMultipartPart(ctx context.Context, rawURL string, fn func([]byte)) error {
 	resp, err := c.doRequest(ctx, http.MethodGet, rawURL, "", nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
 	mediaType, mparams, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
-		return nil, fmt.Errorf("wado: expected multipart response, got %q",
-			resp.Header.Get("Content-Type"))
+		return fmt.Errorf("wado: expected multipart response, got %q", resp.Header.Get("Content-Type"))
 	}
 
 	mr := multipart.NewReader(resp.Body, mparams["boundary"])
-	var results [][]byte
 	for {
 		part, partErr := mr.NextPart()
 		if partErr != nil {
@@ -365,43 +362,30 @@ func (c *wadoClient) retrieveMultipartBytes(ctx context.Context, rawURL string) 
 		if readErr != nil {
 			continue
 		}
-		results = append(results, data)
+		fn(data)
 	}
-	return results, nil
+	return nil
+}
+
+// retrieveMultipartBytes fetches a WADO-RS URL and returns each part as raw bytes.
+// Used for frame retrieval where each part is pixel data, not a DICOM object.
+func (c *wadoClient) retrieveMultipartBytes(ctx context.Context, rawURL string) ([][]byte, error) {
+	var results [][]byte
+	err := c.eachMultipartPart(ctx, rawURL, func(data []byte) {
+		results = append(results, data)
+	})
+	return results, err
 }
 
 // retrieveMultipart fetches a WADO-RS URL and returns parsed DICOM objects.
 func (c *wadoClient) retrieveMultipart(ctx context.Context, rawURL string) ([]media.DICOMObject, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, rawURL, "", nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	mediaType, mparams, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
-		return nil, fmt.Errorf("wado: expected multipart response, got %q",
-			resp.Header.Get("Content-Type"))
-	}
-
-	mr := multipart.NewReader(resp.Body, mparams["boundary"])
 	var objects []media.DICOMObject
-	for {
-		part, partErr := mr.NextPart()
-		if partErr != nil {
-			break
+	err := c.eachMultipartPart(ctx, rawURL, func(data []byte) {
+		if obj, parseErr := media.NewDCMObjFromBytes(data); parseErr == nil {
+			objects = append(objects, obj)
 		}
-		data, readErr := io.ReadAll(part)
-		if readErr != nil {
-			continue
-		}
-		obj, parseErr := media.NewDCMObjFromBytes(data)
-		if parseErr != nil {
-			continue
-		}
-		objects = append(objects, obj)
-	}
-	return objects, nil
+	})
+	return objects, err
 }
 
 // searchJSON performs a QIDO-RS GET and decodes the JSON response.

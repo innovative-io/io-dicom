@@ -574,12 +574,12 @@ func (pdu *pduService) emitRawPDU(direction RawPDUDirection, pduType byte, data 
 }
 
 func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
-	header := make([]byte, 10)
-	if _, err := io.ReadFull(pdu.readWriter, header); err != nil {
+	var header [10]byte
+	if _, err := io.ReadFull(pdu.readWriter, header[:]); err != nil {
 		return 0, nil, err
 	}
 
-	headerStream := media.NewDICOMBufferFromBytes(header)
+	headerStream := media.NewDICOMBufferFromBytes(header[:])
 	itemType, err := headerStream.GetByte()
 	if err != nil {
 		return 0, nil, err
@@ -596,10 +596,10 @@ func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
 	}
 
 	remaining := int(pduLength) - 4
-	data := make([]byte, len(header)+remaining)
-	copy(data, header)
+	data := make([]byte, 10+remaining)
+	copy(data, header[:])
 	if remaining > 0 {
-		if _, err := io.ReadFull(pdu.readWriter, data[len(header):]); err != nil {
+		if _, err := io.ReadFull(pdu.readWriter, data[10:]); err != nil {
 			return 0, nil, err
 		}
 	}
@@ -615,20 +615,32 @@ func (pdu *pduService) writeEncodedPDU(pduType byte, writer func(rw *bufio.ReadW
 		return errors.New("pduservice::writeEncodedPDU - nil readWriter")
 	}
 
+	// Fast path: no raw PDU listener — encode directly into the connection writer,
+	// avoiding the intermediate bytes.Buffer and fake read-side bufio.Reader entirely.
+	if pdu.onRawPDU == nil {
+		if err := writer(pdu.readWriter); err != nil {
+			return err
+		}
+		return pdu.readWriter.Flush()
+	}
+
+	// Slow path: buffer the encoded PDU so we can hand a copy to the listener.
 	var buffer bytes.Buffer
 	tempRW := bufio.NewReadWriter(bufio.NewReader(bytes.NewReader(nil)), bufio.NewWriter(&buffer))
 	if err := writer(tempRW); err != nil {
 		return err
 	}
-
-	data := append([]byte(nil), buffer.Bytes()...)
-	if _, err := pdu.readWriter.Write(data); err != nil {
+	if err := tempRW.Flush(); err != nil {
+		return err
+	}
+	if _, err := pdu.readWriter.Write(buffer.Bytes()); err != nil {
 		return err
 	}
 	if err := pdu.readWriter.Flush(); err != nil {
 		return err
 	}
-	pdu.emitRawPDU(RawPDUDirectionOutbound, pduType, data)
+	// emitRawPDU copies the slice internally, so buffer.Bytes() is safe to pass directly.
+	pdu.emitRawPDU(RawPDUDirectionOutbound, pduType, buffer.Bytes())
 	return nil
 }
 

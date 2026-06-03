@@ -176,6 +176,9 @@ func (d *scu) cfindSCU(ctx context.Context, abstractSyntax string, Query media.D
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return results, status, err
+		}
 		ddo, s, err := dimse.CFindReadRSP(pdu)
 		status = s
 		if err != nil {
@@ -209,6 +212,9 @@ func (d *scu) MoveSCU(ctx context.Context, destAET string, Query media.DICOMObje
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return dicomstatus.FailureProcessingFailure, err
+		}
 		ddo, status, err := dimse.CMoveReadRSP(pdu, &pending)
 		if err != nil {
 			return dicomstatus.FailureProcessingFailure, err
@@ -247,6 +253,9 @@ func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject) (uint16, erro
 	// The C-GET SCP sends C-STORE-RQ sub-operations back over the same
 	// association before sending the final C-GET-RSP. Handle both message types.
 	for {
+		if err := ctx.Err(); err != nil {
+			return dicomstatus.FailureProcessingFailure, err
+		}
 		dco, err := pdu.NextPDU()
 		if err != nil {
 			return dicomstatus.FailureProcessingFailure, err

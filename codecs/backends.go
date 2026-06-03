@@ -47,44 +47,40 @@ type BackendConfig struct {
 	SMPTE2110 string
 }
 
-// UseBackends applies backend selections across codec families.
-func UseBackends(cfg BackendConfig) error {
-	if cfg.JPEG != "" {
-		if err := jpegcodec.UseBackend(cfg.JPEG); err != nil {
-			return fmt.Errorf("jpeg backend: %w", err)
+// applyBackendConfig iterates over every codec family in cfg. When validateOnly
+// is true it calls ValidateBackend; otherwise it calls UseBackend.
+func applyBackendConfig(cfg BackendConfig, validateOnly bool) error {
+	for _, b := range []struct {
+		name     string
+		value    string
+		use      func(string) error
+		validate func(string) error
+	}{
+		{"jpeg", cfg.JPEG, jpegcodec.UseBackend, jpegcodec.ValidateBackend},
+		{"jpegls", cfg.JPEGLS, jpeglscodec.UseBackend, jpeglscodec.ValidateBackend},
+		{"jpeg2000", cfg.JPEG2000, jpeg2000codec.UseBackend, jpeg2000codec.ValidateBackend},
+		{"jpegxl", cfg.JPEGXL, jpegxlcodec.UseBackend, jpegxlcodec.ValidateBackend},
+		{"mpeg", cfg.MPEG, mpegcodec.UseBackend, mpegcodec.ValidateBackend},
+		{"jpip", cfg.JPIP, jpipcodec.UseBackend, jpipcodec.ValidateBackend},
+		{"smpte2110", cfg.SMPTE2110, smptecodec.UseBackend, smptecodec.ValidateBackend},
+	} {
+		if b.value == "" {
+			continue
 		}
-	}
-	if cfg.JPEGLS != "" {
-		if err := jpeglscodec.UseBackend(cfg.JPEGLS); err != nil {
-			return fmt.Errorf("jpegls backend: %w", err)
+		fn := b.use
+		if validateOnly {
+			fn = b.validate
 		}
-	}
-	if cfg.JPEG2000 != "" {
-		if err := jpeg2000codec.UseBackend(cfg.JPEG2000); err != nil {
-			return fmt.Errorf("jpeg2000 backend: %w", err)
-		}
-	}
-	if cfg.JPEGXL != "" {
-		if err := jpegxlcodec.UseBackend(cfg.JPEGXL); err != nil {
-			return fmt.Errorf("jpegxl backend: %w", err)
-		}
-	}
-	if cfg.MPEG != "" {
-		if err := mpegcodec.UseBackend(cfg.MPEG); err != nil {
-			return fmt.Errorf("mpeg backend: %w", err)
-		}
-	}
-	if cfg.JPIP != "" {
-		if err := jpipcodec.UseBackend(cfg.JPIP); err != nil {
-			return fmt.Errorf("jpip backend: %w", err)
-		}
-	}
-	if cfg.SMPTE2110 != "" {
-		if err := smptecodec.UseBackend(cfg.SMPTE2110); err != nil {
-			return fmt.Errorf("smpte2110 backend: %w", err)
+		if err := fn(b.value); err != nil {
+			return fmt.Errorf("%s backend: %w", b.name, err)
 		}
 	}
 	return nil
+}
+
+// UseBackends applies backend selections across codec families.
+func UseBackends(cfg BackendConfig) error {
+	return applyBackendConfig(cfg, false)
 }
 
 // AvailableBackends returns currently registered backend names for each codec family.
@@ -154,42 +150,7 @@ func UseNativeDefaults() error {
 
 // ValidateBackends probes the supplied backend names for readiness.
 func ValidateBackends(cfg BackendConfig) error {
-	if cfg.JPEG != "" {
-		if err := jpegcodec.ValidateBackend(cfg.JPEG); err != nil {
-			return fmt.Errorf("jpeg backend: %w", err)
-		}
-	}
-	if cfg.JPEGLS != "" {
-		if err := jpeglscodec.ValidateBackend(cfg.JPEGLS); err != nil {
-			return fmt.Errorf("jpegls backend: %w", err)
-		}
-	}
-	if cfg.JPEG2000 != "" {
-		if err := jpeg2000codec.ValidateBackend(cfg.JPEG2000); err != nil {
-			return fmt.Errorf("jpeg2000 backend: %w", err)
-		}
-	}
-	if cfg.JPEGXL != "" {
-		if err := jpegxlcodec.ValidateBackend(cfg.JPEGXL); err != nil {
-			return fmt.Errorf("jpegxl backend: %w", err)
-		}
-	}
-	if cfg.MPEG != "" {
-		if err := mpegcodec.ValidateBackend(cfg.MPEG); err != nil {
-			return fmt.Errorf("mpeg backend: %w", err)
-		}
-	}
-	if cfg.JPIP != "" {
-		if err := jpipcodec.ValidateBackend(cfg.JPIP); err != nil {
-			return fmt.Errorf("jpip backend: %w", err)
-		}
-	}
-	if cfg.SMPTE2110 != "" {
-		if err := smptecodec.ValidateBackend(cfg.SMPTE2110); err != nil {
-			return fmt.Errorf("smpte2110 backend: %w", err)
-		}
-	}
-	return nil
+	return applyBackendConfig(cfg, true)
 }
 
 // ValidateCurrentBackends probes the active backend for each codec family.

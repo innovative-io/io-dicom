@@ -6,6 +6,8 @@ import (
 	"os"
 	"sync"
 	"testing"
+
+	"github.com/innovative-io/io-dicom/dictionary/tags"
 )
 
 var benchmarkLogOnce sync.Once
@@ -155,3 +157,43 @@ func BenchmarkParseIndexFromBytes_Test2(b *testing.B) {
 func BenchmarkParseIndexFromBytes_JPEG8(b *testing.B) {
 	benchmarkParseIndexFromBytes(b, "../testdata/jpeg8.dcm")
 }
+
+// --- GetTag benchmarks ---
+
+func benchmarkGetTag(b *testing.B, fileName string) {
+	b.Helper()
+	muteParserLogsForBenchmarks()
+	obj, err := NewDCMObjFromFile(fileName)
+	if err != nil {
+		b.Fatalf("NewDCMObjFromFile(%s) failed: %v", fileName, err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = obj.GetTag(tags.PatientName)
+		_ = obj.GetTag(tags.StudyInstanceUID)
+		_ = obj.GetTag(tags.SOPInstanceUID)
+	}
+}
+
+func BenchmarkGetTag_Test2(b *testing.B) { benchmarkGetTag(b, "../testdata/test2.dcm") }
+func BenchmarkGetTag_JPEG8(b *testing.B) { benchmarkGetTag(b, "../testdata/jpeg8.dcm") }
+
+// --- DumpTags benchmarks ---
+
+func benchmarkDumpTags(b *testing.B, fileName string) {
+	b.Helper()
+	muteParserLogsForBenchmarks()
+	obj, err := NewDCMObjFromFile(fileName)
+	if err != nil {
+		b.Fatalf("NewDCMObjFromFile(%s) failed: %v", fileName, err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		obj.DumpTags(io.Discard)
+	}
+}
+
+func BenchmarkDumpTags_Test2(b *testing.B) { benchmarkDumpTags(b, "../testdata/test2.dcm") }
+func BenchmarkDumpTags_JPEG8(b *testing.B) { benchmarkDumpTags(b, "../testdata/jpeg8.dcm") }

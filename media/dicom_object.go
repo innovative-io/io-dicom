@@ -1,6 +1,7 @@
 package media
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -249,8 +250,15 @@ func (obj *dicomObject) GetTag(dictTag *tags.Tag) *DICOMTag {
 func (obj *dicomObject) SetTag(index int, tag *DICOMTag) {
 	FillTag(tag)
 	if index >= 0 && index < obj.TagCount() {
+		if obj.tagIndex != nil {
+			old := obj.Tags[index]
+			delete(obj.tagIndex, tagKey(old.Group, old.Element))
+			k := tagKey(tag.Group, tag.Element)
+			if _, exists := obj.tagIndex[k]; !exists {
+				obj.tagIndex[k] = tag
+			}
+		}
 		obj.Tags[index] = tag
-		obj.tagIndex = nil // invalidate; rebuilt on next lookup
 	}
 }
 
@@ -262,7 +270,11 @@ func (obj *dicomObject) InsertTag(index int, tag *DICOMTag) {
 	obj.Tags = append(obj.Tags, nil)
 	copy(obj.Tags[index+1:], obj.Tags[index:])
 	obj.Tags[index] = tag
-	obj.tagIndex = nil // invalidate; rebuilt on next lookup
+	if obj.tagIndex != nil {
+		// DICOM tags are unique by (group,element); unconditionally update so the
+		// index always points to the correct (possibly newly-inserted) tag.
+		obj.tagIndex[tagKey(tag.Group, tag.Element)] = tag
+	}
 }
 
 func (obj *dicomObject) GetTags() []*DICOMTag {
@@ -270,23 +282,41 @@ func (obj *dicomObject) GetTags() []*DICOMTag {
 }
 
 func (obj *dicomObject) DelTag(index int) {
+	if obj.tagIndex != nil {
+		deleted := obj.Tags[index]
+		delete(obj.tagIndex, tagKey(deleted.Group, deleted.Element))
+	}
 	obj.Tags = append(obj.Tags[:index], obj.Tags[index+1:]...)
-	obj.tagIndex = nil // invalidate; rebuilt on next lookup
 }
 
 func (obj *dicomObject) DumpTags(w io.Writer) {
+	bw := bufio.NewWriter(w)
 	ts := "<none>"
 	if obj.TransferSyntax != nil {
 		ts = obj.TransferSyntax.Name
 	}
-	_, _ = fmt.Fprintf(w, "Transfer Syntax : %s\n", ts)
-	_, _ = fmt.Fprintf(w, "Tags            : %d\n", len(obj.Tags))
-	obj.dumpSeq(w, 0)
-	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintf(bw, "Transfer Syntax : %s\n", ts)
+	_, _ = fmt.Fprintf(bw, "Tags            : %d\n", len(obj.Tags))
+	obj.dumpSeq(bw, 0)
+	_, _ = fmt.Fprintln(bw)
+	_ = bw.Flush()
+}
+
+// dumpIndents covers the nesting depths seen in practice; deeper levels fall back to strings.Repeat.
+var dumpIndents = [8]string{
+	"", "  ", "    ", "      ", "        ",
+	"          ", "            ", "              ",
+}
+
+func dumpIndent(n int) string {
+	if n < len(dumpIndents) {
+		return dumpIndents[n]
+	}
+	return strings.Repeat("  ", n)
 }
 
 func (obj *dicomObject) dumpSeq(writer io.Writer, indent int) {
-	prefix := strings.Repeat("  ", indent)
+	prefix := dumpIndent(indent)
 
 	for _, tag := range obj.Tags {
 		// Sequence delimiter / item boundary tags — print a visual separator
