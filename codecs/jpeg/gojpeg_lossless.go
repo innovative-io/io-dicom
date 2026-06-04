@@ -500,13 +500,19 @@ func (gojpegBackend) Decode16(encoded []byte, output []byte) error {
 	return gojpegDecodeInto(encoded, output)
 }
 
-// Encode12/Encode16 produce lossless SOF3 JPEG (predictor 1), matching what the
-// libjpeg backend's lossless encode emits. The output round-trips exactly
-// through any conforming decoder.
+// Encode12 produces JPEG Extended Sequential (SOF1, lossy DCT) for the DICOM
+// JPEG Extended 12-bit transfer syntax — the correct encoding for that syntax.
+// Grayscale only (the transcoder always encodes a single component here); a
+// 3-component request falls back to the lossless encoder.
 func (gojpegBackend) Encode12(raw []byte, width uint16, height uint16, samples uint16, _ int) ([]byte, error) {
+	if samples == 1 {
+		return encodeDCTJPEG(raw, int(width), int(height), 12, defaultDCTQuality)
+	}
 	return encodeLosslessJPEG(raw, int(width), int(height), int(samples), 12)
 }
 
+// Encode16 produces lossless SOF3 JPEG (predictor 1) for JPEG Lossless 16-bit,
+// matching the libjpeg backend's lossless encode; it round-trips exactly.
 func (gojpegBackend) Encode16(raw []byte, width uint16, height uint16, samples uint16, _ int) ([]byte, error) {
 	return encodeLosslessJPEG(raw, int(width), int(height), int(samples), 16)
 }

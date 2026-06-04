@@ -167,3 +167,42 @@ func TestGoJPEGEncodeDecodesInLibjpeg(t *testing.T) {
 		})
 	}
 }
+
+// TestGoJPEGDCTEncodeDecodesInLibjpeg confirms the pure-Go 12-bit DCT encoder
+// emits standard-conformant JPEG Extended by decoding it with libjpeg within a
+// small tolerance.
+func TestGoJPEGDCTEncodeDecodesInLibjpeg(t *testing.T) {
+	t.Cleanup(func() { SetBackend(nil) })
+	const w, h, p = 48, 40, 12
+	maxv := (1 << p) - 1
+	raw := make([]byte, w*h*2)
+	for i := 0; i < w*h; i++ {
+		v := (i*5 + (i*i)%19) % (maxv + 1)
+		raw[i*2] = byte(v)
+		raw[i*2+1] = byte(v >> 8)
+	}
+	enc, err := encodeDCTJPEG(raw, w, h, p, defaultDCTQuality)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if err := UseBackend("libjpeg"); err != nil {
+		t.Skipf("libjpeg unavailable: %v", err)
+	}
+	out := make([]byte, len(raw))
+	if err := DIJG12decode(enc, uint32(len(enc)), out, uint32(len(out))); err != nil {
+		t.Fatalf("libjpeg decode of pure-Go DCT output: %v", err)
+	}
+	maxDiff := 0
+	for i := 0; i < w*h; i++ {
+		a := int(raw[i*2]) | int(raw[i*2+1])<<8
+		b := int(out[i*2]) | int(out[i*2+1])<<8
+		if d := a - b; d > maxDiff {
+			maxDiff = d
+		} else if -d > maxDiff {
+			maxDiff = -d
+		}
+	}
+	if maxDiff > 30 {
+		t.Fatalf("libjpeg round-trip of pure-Go DCT output max diff %d too large", maxDiff)
+	}
+}
