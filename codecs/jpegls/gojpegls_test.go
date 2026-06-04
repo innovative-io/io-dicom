@@ -146,11 +146,77 @@ func TestGoJLSEncodeRoundTrip(t *testing.T) {
 	}
 }
 
-// TestGoJLSEncodeRejectsUnsupported confirms multi-component encode is reported
+// TestGoJLSEncodeRejectsUnsupported confirms invalid geometry is reported
 // unsupported rather than producing invalid output.
 func TestGoJLSEncodeRejectsUnsupported(t *testing.T) {
-	if _, err := encodeJLS(make([]byte, 3*4*4), 4, 4, 3, 8, 0); err == nil {
-		t.Fatal("expected 3-component encode to be unsupported")
+	if _, err := encodeJLS(make([]byte, 4*4), 4, 4, 0, 8, 0); err == nil {
+		t.Fatal("expected 0-component encode to be unsupported")
+	}
+	if _, err := encodeJLS(make([]byte, 3*4*4-1), 4, 4, 3, 8, 0); err == nil {
+		t.Fatal("expected mismatched raw length to be unsupported")
+	}
+}
+
+// TestGoJLSMultiComponentEncodeRoundTrip encodes synthetic multi-component images
+// with the pure-Go encoder (line-interleaved) and decodes them back with the
+// pure-Go decoder, requiring an exact (lossless) match for NEAR=0 and within-NEAR
+// fidelity for NEAR>0.
+func TestGoJLSMultiComponentEncodeRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		w, h, comps, p, near int
+	}{
+		{16, 16, 3, 8, 0}, {20, 12, 3, 8, 1}, {17, 9, 3, 12, 0},
+		{32, 8, 3, 16, 2}, {10, 10, 4, 8, 0}, {13, 11, 4, 12, 1},
+	} {
+		bps := 1
+		if tc.p > 8 {
+			bps = 2
+		}
+		maxv := (1 << tc.p) - 1
+		n := tc.w * tc.h * tc.comps
+		raw := make([]byte, n*bps)
+		get := func(i int) int {
+			if bps == 1 {
+				return int(raw[i])
+			}
+			return int(raw[i*2]) | int(raw[i*2+1])<<8
+		}
+		for i := 0; i < n; i++ {
+			v := (i*7 + (i*i)%29 + (i%tc.comps)*11) % (maxv + 1)
+			if bps == 1 {
+				raw[i] = byte(v)
+			} else {
+				raw[i*2] = byte(v)
+				raw[i*2+1] = byte(v >> 8)
+			}
+		}
+		enc, err := encodeJLS(raw, tc.w, tc.h, tc.comps, tc.p, tc.near)
+		if err != nil {
+			t.Fatalf("%dc p%d near%d encode: %v", tc.comps, tc.p, tc.near, err)
+		}
+		f, _, err := parseJLS(enc)
+		if err != nil {
+			t.Fatalf("%dc parse own stream: %v", tc.comps, err)
+		}
+		if f.ilv != 1 || len(f.comps) != tc.comps {
+			t.Fatalf("%dc expected ILV=1 with %d comps, got ilv=%d comps=%d", tc.comps, tc.comps, f.ilv, len(f.comps))
+		}
+		out := make([]byte, len(raw))
+		if err := decodeJLSInto(enc, out); err != nil {
+			t.Fatalf("%dc decode: %v", tc.comps, err)
+		}
+		for i := 0; i < n; i++ {
+			o := get(i)
+			var g int
+			if bps == 1 {
+				g = int(out[i])
+			} else {
+				g = int(out[i*2]) | int(out[i*2+1])<<8
+			}
+			if d := o - g; d < -tc.near || d > tc.near {
+				t.Fatalf("%dc p%d near%d sample %d: got %d want within %d of %d", tc.comps, tc.p, tc.near, i, g, tc.near, o)
+			}
+		}
 	}
 }
 

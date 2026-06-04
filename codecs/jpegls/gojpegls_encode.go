@@ -182,74 +182,106 @@ func (d *jlsDecoder) encodeRunInterruption(w *jlsBitWriter, ra, rb, sample int) 
 	return d.computeRecon(px, sign*errval)
 }
 
-// encodePlane encodes one component plane using regular + run mode. Each encoded
-// sample's slot in plane is overwritten with the value the decoder reconstructs,
-// so subsequent samples use reconstructed neighbors (required for near-lossless;
-// a no-op for NEAR==0 where reconstructed == original).
+// encodeScalarLine encodes one scan line of a single component. cur holds the
+// input samples and is overwritten in place with the values the decoder will
+// reconstruct (so later samples — and, in near-lossless, later lines — use
+// reconstructed neighbors); prev is the reconstructed line above; rcLeft is Rc at
+// line start. Returns rcLeft for the next line. Context state and d.runIndex are
+// shared; line-interleaved scans save/restore d.runIndex per component.
+func (d *jlsDecoder) encodeScalarLine(w *jlsBitWriter, cur, prev []int, y, rcLeft int) int {
+	W := d.f.width
+	lineRb0 := 0
+	if y > 0 {
+		lineRb0 = prev[0]
+	}
+	x := 0
+	for x < W {
+		var a, b, c, dd int
+		if y == 0 {
+			b, c, dd = 0, 0, 0
+		} else {
+			b = prev[x]
+			if x+1 < W {
+				dd = prev[x+1]
+			} else {
+				dd = b
+			}
+		}
+		if x == 0 {
+			a = lineRb0
+			c = rcLeft
+		} else {
+			a = cur[x-1]
+			if y > 0 {
+				c = prev[x-1]
+			}
+		}
+
+		q1 := d.quantize(dd - b)
+		q2 := d.quantize(b - c)
+		q3 := d.quantize(c - a)
+
+		if q1 == 0 && q2 == 0 && q3 == 0 {
+			x = d.encodeRun(w, cur, prev, y, a, x, W)
+			continue
+		}
+		q := 81*q1 + 9*q2 + q3
+		sign := 1
+		if q < 0 {
+			q = -q
+			sign = -1
+		}
+		px := predict(a, b, c)
+		if sign > 0 {
+			px += d.c[q]
+		} else {
+			px -= d.c[q]
+		}
+		if px < 0 {
+			px = 0
+		} else if px > d.f.maxval {
+			px = d.f.maxval
+		}
+		cur[x] = d.encodeRegular(w, q, sign, px, cur[x])
+		x++
+	}
+	return lineRb0
+}
+
+// encodePlane encodes one component plane (ILV=0) using regular + run mode.
 func (d *jlsDecoder) encodePlane(w *jlsBitWriter, plane []int) {
 	W, H := d.f.width, d.f.height
 	d.runIndex = 0
 	prev := make([]int, W)
 	rcLeft := 0
 	for y := 0; y < H; y++ {
-		lineRb0 := 0
-		if y > 0 {
-			lineRb0 = prev[0]
-		}
 		cur := plane[y*W : y*W+W]
-		x := 0
-		for x < W {
-			var a, b, c, dd int
-			if y == 0 {
-				b, c, dd = 0, 0, 0
-			} else {
-				b = prev[x]
-				if x+1 < W {
-					dd = prev[x+1]
-				} else {
-					dd = b
-				}
-			}
-			if x == 0 {
-				a = lineRb0
-				c = rcLeft
-			} else {
-				a = cur[x-1]
-				if y > 0 {
-					c = prev[x-1]
-				}
-			}
-
-			q1 := d.quantize(dd - b)
-			q2 := d.quantize(b - c)
-			q3 := d.quantize(c - a)
-
-			if q1 == 0 && q2 == 0 && q3 == 0 {
-				x = d.encodeRun(w, cur, prev, y, a, x, W)
-				continue
-			}
-			q := 81*q1 + 9*q2 + q3
-			sign := 1
-			if q < 0 {
-				q = -q
-				sign = -1
-			}
-			px := predict(a, b, c)
-			if sign > 0 {
-				px += d.c[q]
-			} else {
-				px -= d.c[q]
-			}
-			if px < 0 {
-				px = 0
-			} else if px > d.f.maxval {
-				px = d.f.maxval
-			}
-			cur[x] = d.encodeRegular(w, q, sign, px, cur[x])
-			x++
-		}
-		rcLeft = lineRb0
+		rcLeft = d.encodeScalarLine(w, cur, prev, y, rcLeft)
 		copy(prev, cur)
+	}
+}
+
+// encodeLineInterleaved encodes multiple component planes as an ILV=1
+// (line-interleaved) scan: for each line, every component's line is encoded in
+// turn. Each component keeps its own reconstructed line above and run index; the
+// regular/run context statistics are shared (CharLS encode_lines, line mode).
+func (d *jlsDecoder) encodeLineInterleaved(w *jlsBitWriter, planes [][]int) {
+	W, H := d.f.width, d.f.height
+	nc := len(planes)
+	prev := make([][]int, nc)
+	rcLeft := make([]int, nc)
+	runIdx := make([]int, nc)
+	for c := 0; c < nc; c++ {
+		prev[c] = make([]int, W)
+	}
+	for y := 0; y < H; y++ {
+		for c := 0; c < nc; c++ {
+			cur := planes[c][y*W : y*W+W]
+			d.runIndex = runIdx[c]
+			rcLeft[c] = d.encodeScalarLine(w, cur, prev[c], y, rcLeft[c])
+			runIdx[c] = d.runIndex
+			copy(prev[c], cur)
+		}
 	}
 }
 
@@ -303,9 +335,9 @@ func (d *jlsDecoder) encodeRun(w *jlsBitWriter, cur, prev []int, y, ra, x, W int
 // encodeJLS encodes raw samples (LE if precision>8) as JPEG-LS. NEAR==0 yields
 // lossless output; NEAR>0 yields near-lossless output with the given error bound.
 func encodeJLS(raw []byte, width, height, samples, precision, near int) ([]byte, error) {
-	// Single-component only: multi-component ILV=0 is not validated against the
-	// reference and charls rejects it, so it is left to charls.
-	if width <= 0 || height <= 0 || samples != 1 || precision < 2 || precision > 16 {
+	// Single-component is written non-interleaved (ILV=0); multi-component is
+	// written line-interleaved (ILV=1), matching the charls backend.
+	if width <= 0 || height <= 0 || samples < 1 || samples > 255 || precision < 2 || precision > 16 {
 		return nil, errJLSUnsupported
 	}
 	// NEAR is written as a single byte in the SOS scan header and must not exceed
@@ -322,7 +354,11 @@ func encodeJLS(raw []byte, width, height, samples, precision, near int) ([]byte,
 	if width*height*samples*bps != len(raw) {
 		return nil, errJLSUnsupported
 	}
-	f := jlsFrame{precision: precision, width: width, height: height, near: near, ilv: 0}
+	ilv := 0
+	if samples > 1 {
+		ilv = 1 // line-interleaved for multi-component (matches charls)
+	}
+	f := jlsFrame{precision: precision, width: width, height: height, near: near, ilv: ilv}
 	f.comps = make([]jlsComponent, samples)
 	for c := range f.comps {
 		f.comps[c] = jlsComponent{id: byte(c + 1), h: 1, v: 1}
@@ -340,7 +376,7 @@ func encodeJLS(raw []byte, width, height, samples, precision, near int) ([]byte,
 	for c := 0; c < samples; c++ {
 		sos = append(sos, byte(c+1), 0x00)
 	}
-	sos = append(sos, byte(near), 0x00, 0x00) // NEAR, ILV=0, point transform=0
+	sos = append(sos, byte(near), byte(ilv), 0x00) // NEAR, ILV, point transform=0
 	out = appendJLSMarker(out, jlsSOS, sos)
 
 	// planes
@@ -359,13 +395,12 @@ func encodeJLS(raw []byte, width, height, samples, precision, near int) ([]byte,
 		}
 	}
 
-	// samples == 1 here (multi-component is rejected above), so this encodes the
-	// single component's plane; encodePlane resets only the run index, mirroring
-	// the decoder's decodePlane.
 	d := newJLSDecoder(&f, nil)
 	w := &jlsBitWriter{out: out}
-	for c := 0; c < samples; c++ {
-		d.encodePlane(w, planes[c])
+	if samples == 1 {
+		d.encodePlane(w, planes[0])
+	} else {
+		d.encodeLineInterleaved(w, planes)
 	}
 	w.flush()
 	out = w.out
