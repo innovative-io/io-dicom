@@ -174,5 +174,6 @@ func (charlsBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 }
 
 func registerNativeBackends() {
-	_ = RegisterBackend("charls", func() Backend { return charlsBackend{} })
+	// Priority above the pure-Go gojpegls backend so charls wins when built in.
+	_ = mgr.RegisterWithPriority("charls", func() Backend { return charlsBackend{} }, 10)
 }
