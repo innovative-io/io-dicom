@@ -149,7 +149,7 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			name:     "Should change transfer syntax to JPEGLSNearLossless",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGLSNearLossless},
-			wantErr:  true, // no pure-Go JPEG-LS near-lossless encoder
+			wantErr:  false, // pure-Go JPEG-LS near-lossless encoder
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000Lossless",
