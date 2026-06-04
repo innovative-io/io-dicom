@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
-	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	implementation "github.com/innovative-io/io-dicom/internal/implclass"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
@@ -197,15 +196,21 @@ func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 
 		switch TempByte {
 		case pdutype.ApplicationContextItem:
-			aaac.AppContext.ReadDynamic(buf)
+			if err := aaac.AppContext.ReadDynamic(buf); err != nil {
+				return err
+			}
 			Count = Count - int(aaac.AppContext.GetSize())
 		case pdutype.PresentationContextAcceptItem:
 			PresContextAccept := NewPresentationContextAccept()
-			PresContextAccept.ReadDynamic(buf)
+			if err := PresContextAccept.ReadDynamic(buf); err != nil {
+				return err
+			}
 			Count = Count - int(PresContextAccept.Size())
 			aaac.PresContextAccepts = append(aaac.PresContextAccepts, PresContextAccept)
 		case pdutype.UserInformationItem: // User Information
-			aaac.UserInfo.ReadDynamic(buf)
+			if err := aaac.UserInfo.ReadDynamic(buf); err != nil {
+				return err
+			}
 			Count = Count - int(aaac.UserInfo.Size())
 		default:
 			Count = -1
@@ -221,13 +226,13 @@ func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 		"their_impl_class", aaac.UserInfo.GetImplementationClass().GetUID(),
 		"their_impl_version", aaac.UserInfo.GetImplementationVersion().GetUID(),
 		"app_context", aaac.AppContext.GetUID(),
-		"app_context_description", sopclass.GetSOPClassFromUID(aaac.AppContext.GetUID()).Description,
+		"app_context_description", sopClassDescription(aaac.AppContext.GetUID()),
 		"our_max_pdu_length", maxPduLength, "their_max_pdu_length", aaac.GetMaxSubLength())
 	for presIndex, presContextAccept := range aaac.PresContextAccepts {
 		aaLog.Debug("accepted presentation context",
 			"index", presIndex+1, "pcid", presContextAccept.GetPresentationContextID(),
 			"transfer_syntax", presContextAccept.GetTrnSyntax().GetUID(),
-			"transfer_syntax_description", transfersyntax.GetTransferSyntaxFromUID(presContextAccept.GetTrnSyntax().GetUID()).Description)
+			"transfer_syntax_description", transferSyntaxDescription(presContextAccept.GetTrnSyntax().GetUID()))
 	}
 	if Count == 0 {
 		return nil

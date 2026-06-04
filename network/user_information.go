@@ -129,20 +129,30 @@ func (ui *userInformation) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 
 		switch TempByte {
 		case pdutype.MaximumSubLengthItem:
-			ui.MaxSubLength.ReadDynamic(buf)
+			if err := ui.MaxSubLength.ReadDynamic(buf); err != nil {
+				return err
+			}
 			Count = Count - int(ui.MaxSubLength.Size())
 		case pdutype.ImplementationClassUIDItem:
-			ui.ImpClass.ReadDynamic(buf)
+			if err := ui.ImpClass.ReadDynamic(buf); err != nil {
+				return err
+			}
 			Count = Count - int(ui.ImpClass.GetSize())
 		case pdutype.AsyncOperationsWindowItem:
-			ui.AsyncOpWindow.ReadDynamic(buf)
+			if err := ui.AsyncOpWindow.ReadDynamic(buf); err != nil {
+				return err
+			}
 			Count = Count - int(ui.AsyncOpWindow.Size())
 		case pdutype.SCPSCURoleSelectionItem:
-			ui.SCPSCURole.ReadDynamic(buf)
+			if err := ui.SCPSCURole.ReadDynamic(buf); err != nil {
+				return err
+			}
 			Count = Count - int(ui.SCPSCURole.Size())
 			ui.UserInfoBaggage += uint32(ui.SCPSCURole.Size())
 		case pdutype.ImplementationVersionNameItem:
-			ui.ImpVersion.ReadDynamic(buf)
+			if err := ui.ImpVersion.ReadDynamic(buf); err != nil {
+				return err
+			}
 			Count = Count - int(ui.ImpVersion.GetSize())
 		default:
 			ui.UserInfoBaggage = uint32(Count)
