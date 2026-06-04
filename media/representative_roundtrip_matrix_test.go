@@ -25,6 +25,10 @@ type representativeRoundTripCase struct {
 	nativeBackend     string
 	nativeMode        roundTripAssertionMode
 	nativeToolingHint string
+	// passthroughCannotEncode marks codecs with no pure-Go encoder (JPEG 2000,
+	// JPEG XL): with passthrough backends the forward transcode to this syntax
+	// must fail rather than emit raw bytes as a fake compressed stream.
+	passthroughCannotEncode bool
 }
 
 func representativePixelRoundTripCases() []representativeRoundTripCase {
@@ -87,37 +91,40 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 			nativeToolingHint: "tooling is unavailable",
 		},
 		{
-			name:              "JPEG2000Lossless",
-			ts:                transfersyntax.JPEG2000Lossless,
-			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
-			want:              []byte{7, 17, 27, 37},
-			passthroughMode:   roundTripAssertionExact,
-			nativeFamily:      "jpeg2000",
-			nativeBackend:     "openjpeg",
-			nativeMode:        roundTripAssertionExact,
-			nativeToolingHint: "tooling is unavailable",
+			name:                    "JPEG2000Lossless",
+			ts:                      transfersyntax.JPEG2000Lossless,
+			newObj:                  func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			want:                    []byte{7, 17, 27, 37},
+			passthroughMode:         roundTripAssertionExact,
+			nativeFamily:            "jpeg2000",
+			nativeBackend:           "openjpeg",
+			nativeMode:              roundTripAssertionExact,
+			nativeToolingHint:       "tooling is unavailable",
+			passthroughCannotEncode: true,
 		},
 		{
-			name:              "JPEGXL",
-			ts:                transfersyntax.JPEGXL,
-			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
-			want:              []byte{7, 17, 27, 37},
-			passthroughMode:   roundTripAssertionExact,
-			nativeFamily:      "jpegxl",
-			nativeBackend:     "libjxl",
-			nativeMode:        roundTripAssertionDelta3,
-			nativeToolingHint: "tooling is unavailable",
+			name:                    "JPEGXL",
+			ts:                      transfersyntax.JPEGXL,
+			newObj:                  func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			want:                    []byte{7, 17, 27, 37},
+			passthroughMode:         roundTripAssertionExact,
+			nativeFamily:            "jpegxl",
+			nativeBackend:           "libjxl",
+			nativeMode:              roundTripAssertionDelta3,
+			nativeToolingHint:       "tooling is unavailable",
+			passthroughCannotEncode: true,
 		},
 		{
-			name:              "JPEGXLLossless",
-			ts:                transfersyntax.JPEGXLLossless,
-			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
-			want:              []byte{7, 17, 27, 37},
-			passthroughMode:   roundTripAssertionExact,
-			nativeFamily:      "jpegxl",
-			nativeBackend:     "libjxl",
-			nativeMode:        roundTripAssertionExact,
-			nativeToolingHint: "tooling is unavailable",
+			name:                    "JPEGXLLossless",
+			ts:                      transfersyntax.JPEGXLLossless,
+			newObj:                  func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			want:                    []byte{7, 17, 27, 37},
+			passthroughMode:         roundTripAssertionExact,
+			nativeFamily:            "jpegxl",
+			nativeBackend:           "libjxl",
+			nativeMode:              roundTripAssertionExact,
+			nativeToolingHint:       "tooling is unavailable",
+			passthroughCannotEncode: true,
 		},
 		{
 			name:              "JPIPHTJ2KReferenced",

@@ -161,7 +161,7 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			name:     "Should change transfer syntax to JPEG2000",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEG2000},
-			wantErr:  false,
+			wantErr:  true, // no pure-Go JPEG 2000 encoder
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000MCLossless",
@@ -173,7 +173,7 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			name:     "Should change transfer syntax to JPEG2000MC",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEG2000MC},
-			wantErr:  false,
+			wantErr:  true, // no pure-Go JPEG 2000 encoder
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2KLossless",
@@ -191,25 +191,25 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			name:     "Should change transfer syntax to HTJ2K",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.HTJ2K},
-			wantErr:  false,
+			wantErr:  true, // no pure-Go HTJ2K encoder
 		},
 		{
 			name:     "Should change transfer syntax to JPEGXLLossless",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGXLLossless},
-			wantErr:  false,
+			wantErr:  true, // no pure-Go JPEG XL encoder
 		},
 		{
 			name:     "Should change transfer syntax to JPEGXLJPEGRecompression",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGXLJPEGRecompression},
-			wantErr:  false,
+			wantErr:  true, // no pure-Go JPEG XL encoder
 		},
 		{
 			name:     "Should change transfer syntax to JPEGXL",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGXL},
-			wantErr:  false,
+			wantErr:  true, // no pure-Go JPEG XL encoder
 		},
 		{
 			name:     "Should change transfer syntax to MPEG2MPML",
@@ -296,8 +296,10 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := transcoder.ChangeTransferSyntax(dicomObject, tt.args.outTS); (err != nil) != tt.wantErr {
-				t.Errorf("dicomObject.ChangeTransferSyntax() error = %v, wantErr %v", err, tt.wantErr)
+			gotErr := transcoder.ChangeTransferSyntax(dicomObject, tt.args.outTS)
+			t.Logf("MAP %-50s want=%v err=%v", tt.name, tt.wantErr, gotErr != nil)
+			if (gotErr != nil) != tt.wantErr {
+				t.Errorf("dicomObject.ChangeTransferSyntax() error = %v, wantErr %v", gotErr, tt.wantErr)
 			}
 		})
 	}
@@ -764,6 +766,15 @@ func TestRepresentativePixelTransferSyntaxRoundTrips(t *testing.T) {
 	for _, tt := range representativePixelRoundTripCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			obj := tt.newObj()
+
+			if tt.passthroughCannotEncode {
+				// No pure-Go encoder for this syntax: the forward transcode must
+				// fail rather than emit raw bytes as a fake compressed stream.
+				if err := transcoder.ChangeTransferSyntax(obj, tt.ts); err == nil {
+					t.Fatalf("expected ChangeTransferSyntax to %s to fail without a pure-Go encoder", tt.ts.Name)
+				}
+				return
+			}
 
 			if err := transcoder.ChangeTransferSyntax(obj, tt.ts); err != nil {
 				t.Fatalf("ChangeTransferSyntax to %s failed: %v", tt.ts.Name, err)

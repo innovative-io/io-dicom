@@ -49,15 +49,14 @@ func TestJ2KPassthroughDecodeFails(t *testing.T) {
 	raw := []byte{1, 2, 3, 4}
 	var out []byte
 	var outSize int
-	if err := J2Kencode(raw, 2, 2, 1, 8, &out, &outSize, 10); err != nil {
-		t.Fatalf("unexpected J2Kencode error: %v", err)
-	}
-	if outSize != len(raw) {
-		t.Fatalf("unexpected J2K encoded size: got %d, want %d", outSize, len(raw))
+	// There is no pure-Go JPEG 2000 encoder, so without the native backend
+	// encode must fail rather than emit the raw bytes as a fake stream.
+	if err := J2Kencode(raw, 2, 2, 1, 8, &out, &outSize, 10); err == nil {
+		t.Fatal("expected J2Kencode to fail without native backend")
 	}
 
 	decoded := make([]byte, len(raw))
-	if err := J2Kdecode(out, uint32(outSize), decoded); err == nil {
+	if err := J2Kdecode([]byte{1, 2, 3, 4}, 4, decoded); err == nil {
 		t.Fatal("expected J2Kdecode to fail without native backend")
 	}
 }
