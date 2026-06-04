@@ -163,13 +163,36 @@ func TestSelectDefault_OneNativeBecomesActive(t *testing.T) {
 	}
 }
 
-func TestSelectDefault_MultipleNativesStaysPassthrough(t *testing.T) {
+func TestSelectDefault_EqualPriorityPicksDeterministically(t *testing.T) {
 	m := New(newPassthrough)
-	_ = m.Register("native1", newNative)
 	_ = m.Register("native2", newNative)
+	_ = m.Register("native1", newNative)
 	m.SelectDefault()
-	if m.BackendName() != "passthrough" {
-		t.Fatalf("want passthrough with multiple natives, got %s", m.BackendName())
+	// Equal priority: ties break by name, so the alphabetically-first wins
+	// regardless of registration order.
+	if m.BackendName() != "native1" {
+		t.Fatalf("want native1 on equal-priority tie, got %s", m.BackendName())
+	}
+}
+
+func TestSelectDefault_HigherPriorityWins(t *testing.T) {
+	m := New(newPassthrough)
+	_ = m.RegisterWithPriority("purego", newNative, 0)
+	_ = m.RegisterWithPriority("cgo", newNative, 10)
+	m.SelectDefault()
+	if m.BackendName() != "cgo" {
+		t.Fatalf("want cgo (higher priority) selected, got %s", m.BackendName())
+	}
+}
+
+func TestSelectDefault_LowerPriorityWinsWhenAlone(t *testing.T) {
+	// Models charls being removed: only the pure-Go backend remains, so it is
+	// selected even though it registered at the lower priority.
+	m := New(newPassthrough)
+	_ = m.RegisterWithPriority("purego", newNative, 0)
+	m.SelectDefault()
+	if m.BackendName() != "purego" {
+		t.Fatalf("want purego selected when alone, got %s", m.BackendName())
 	}
 }
 
