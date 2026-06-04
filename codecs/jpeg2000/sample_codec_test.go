@@ -124,6 +124,58 @@ func TestJ2KdecodeSampleSignedCT(t *testing.T) {
 	}
 }
 
+// TestJ2KdecodeSignedCTIsLittleEndian pins the decoder's 16-bit output byte
+// order to little-endian, matching the DICOM uncompressed convention and the
+// other native codecs (libjpeg, charls, ffmpeg). Round-trip tests cannot catch
+// a byte-order regression because encode and decode swap together; this checks
+// against real CT pixel data instead. Interpreting the decoded frame as
+// little-endian signed 16-bit yields values overwhelmingly within the plausible
+// CT stored-value range, whereas a big-endian (byte-swapped) reading scatters
+// values across the full int16 range and falls outside it far more often.
+func TestJ2KdecodeSignedCTIsLittleEndian(t *testing.T) {
+	if !CGOEnabled {
+		t.Skip("requires the openjpeg native backend")
+	}
+	SetBackend(nil)
+	t.Cleanup(func() { SetBackend(nil) })
+	if err := UseBackend("openjpeg"); err != nil {
+		t.Fatalf("expected openjpeg backend to be registered: %v", err)
+	}
+
+	dcmData := loadBytesFromFile("../../testdata/cornerstone-CTImage-jpeg2000-lossless.dcm", t)
+	j2kFrame := extractFirstDICOMEncapsulatedFrame(t, dcmData)
+
+	const width, height = 512, 512
+	out := make([]byte, width*height*2)
+	if err := J2Kdecode(j2kFrame, uint32(len(j2kFrame)), out); err != nil {
+		t.Fatalf("J2Kdecode signed CT: %v", err)
+	}
+
+	// Plausible stored-value window for a CT slice (signed). Real images sit
+	// well inside this; a byte-swapped reading does not.
+	const lo, hi = -2048, 4096
+	inRange := func(order binary.ByteOrder) int {
+		n := 0
+		for i := 0; i+1 < len(out); i += 2 {
+			v := int(int16(order.Uint16(out[i : i+2])))
+			if v >= lo && v <= hi {
+				n++
+			}
+		}
+		return n
+	}
+	total := len(out) / 2
+	le := inRange(binary.LittleEndian)
+	be := inRange(binary.BigEndian)
+
+	if frac := float64(le) / float64(total); frac < 0.90 {
+		t.Fatalf("little-endian in-range fraction too low: %d/%d (%.3f); decoder may not be emitting little-endian", le, total, frac)
+	}
+	if le <= be {
+		t.Fatalf("expected little-endian to be more plausible than big-endian, got le=%d be=%d (total=%d)", le, be, total)
+	}
+}
+
 func TestJ2KencodeSample(t *testing.T) {
 	if CGOEnabled {
 		SetBackend(nil)

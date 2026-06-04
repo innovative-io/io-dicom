@@ -46,7 +46,9 @@ func TestLibJXLBackendSelection16Bit(t *testing.T) {
 		t.Fatalf("expected libjxl backend to be registered: %v", err)
 	}
 
-	raw := []byte{0x00, 0x10, 0x01, 0x00, 0x07, 0xFF, 0x0F, 0xFF}
+	// Little-endian 16-bit samples (the DICOM uncompressed convention):
+	// 16, 256, 2047, 4095 — all within the 12-bit precision encoded below.
+	raw := []byte{0x10, 0x00, 0x00, 0x01, 0xFF, 0x07, 0xFF, 0x0F}
 	var out []byte
 	var outSize int
 	if err := JXLencode(raw, 2, 2, 1, 12, &out, &outSize, true); err != nil {
