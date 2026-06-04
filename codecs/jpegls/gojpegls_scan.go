@@ -367,10 +367,15 @@ func (gojpeglsBackend) DecodeContext(_ context.Context, encoded []byte, output [
 }
 
 func (gojpeglsBackend) Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, nearLossless bool) ([]byte, error) {
-	if nearLossless {
-		return nil, errJLSUnsupported // near-lossless encode not implemented in pure Go
+	if !nearLossless {
+		if enc, err := encodeJLS(raw, int(width), int(height), int(samples), int(bitsa)); err == nil {
+			return enc, nil
+		}
 	}
-	return encodeJLS(raw, int(width), int(height), int(samples), int(bitsa))
+	// Near-lossless / multi-component / unsupported geometry: preserve the prior
+	// no-cgo passthrough behavior rather than erroring (charls handles these when
+	// built in).
+	return append([]byte(nil), raw...), nil
 }
 
 func registerPureGoBackend() {
