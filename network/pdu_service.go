@@ -389,7 +389,9 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 	switch itemType {
 	case pdutype.AssociationAccept:
 		pdu.buf.SetPosition(1)
-		pdu.AssocAC.ReadDynamic(pdu.buf)
+		if err := pdu.AssocAC.ReadDynamic(pdu.buf); err != nil {
+			return err
+		}
 		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		if !pdu.interogateAAssociateAC() {
 			return errors.New("pduservice::Connect - No accepted presentation contexts found")
@@ -428,12 +430,16 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 		return nil
 	case pdutype.AssociationReject:
 		pdu.buf.SetPosition(1)
-		pdu.AssocRJ.ReadDynamic(pdu.buf)
+		if err := pdu.AssocRJ.ReadDynamic(pdu.buf); err != nil {
+			return err
+		}
 		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		return fmt.Errorf("pduservice::Connect - Association rejected - %s", pdu.AssocRJ.GetReason())
 	case pdutype.AssociationAbortRequest:
 		pdu.buf.SetPosition(1)
-		pdu.AbortRQ.ReadDynamic(pdu.buf)
+		if err := pdu.AbortRQ.ReadDynamic(pdu.buf); err != nil {
+			return err
+		}
 		pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 		return fmt.Errorf("pduservice::Connect - Association aborted - %s", pdu.AbortRQ.GetReason())
 	default:
@@ -494,7 +500,9 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 	pdu.Pdata.MsgStatus = 0
 	if pdu.Pdata.Length != 0 {
 		DCO := media.NewEmptyDCMObj()
-		pdu.Pdata.ReadDynamic(pdu.buf)
+		if err := pdu.Pdata.ReadDynamic(pdu.buf); err != nil {
+			return nil, err
+		}
 		if pdu.Pdata.MsgStatus > 0 {
 			if !pdu.parseRawVRIntoDCM(DCO) {
 				pdu.AbortRQ.Write(pdu.readWriter)
@@ -546,7 +554,9 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 			pdu.logger.Debug("A-RELEASE-RQ received")
 			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 			pdu.buf.SetPosition(1)
-			pdu.ReleaseRQ.ReadDynamic(pdu.buf)
+			if err := pdu.ReleaseRQ.ReadDynamic(pdu.buf); err != nil {
+				return nil, err
+			}
 			if err := pdu.writeEncodedPDU(byte(pdutype.AssociationReleaseResponse), func(rw *bufio.ReadWriter) error {
 				return pdu.ReleaseRP.Write(rw)
 			}); err != nil {

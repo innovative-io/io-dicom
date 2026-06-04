@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
-	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	implementation "github.com/innovative-io/io-dicom/internal/implclass"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
@@ -190,6 +189,7 @@ func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 	Count := int(aaac.Length - 4 - 16 - 16 - 32)
 
 	for Count > 0 {
+		startPos := buf.GetPosition()
 		TempByte, err := buf.GetByte()
 		if err != nil {
 			return err
@@ -197,20 +197,25 @@ func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 
 		switch TempByte {
 		case pdutype.ApplicationContextItem:
-			aaac.AppContext.ReadDynamic(buf)
-			Count = Count - int(aaac.AppContext.GetSize())
+			if err := aaac.AppContext.ReadDynamic(buf); err != nil {
+				return err
+			}
 		case pdutype.PresentationContextAcceptItem:
 			PresContextAccept := NewPresentationContextAccept()
-			PresContextAccept.ReadDynamic(buf)
-			Count = Count - int(PresContextAccept.Size())
+			if err := PresContextAccept.ReadDynamic(buf); err != nil {
+				return err
+			}
 			aaac.PresContextAccepts = append(aaac.PresContextAccepts, PresContextAccept)
 		case pdutype.UserInformationItem: // User Information
-			aaac.UserInfo.ReadDynamic(buf)
-			Count = Count - int(aaac.UserInfo.Size())
+			if err := aaac.UserInfo.ReadDynamic(buf); err != nil {
+				return err
+			}
 		default:
-			Count = -1
 			return errors.New("aaac::ReadDynamic, unknown Item " + strconv.Itoa(int(TempByte)))
 		}
+		// Decrement by bytes actually consumed; the per-item uint16 Size()/GetSize()
+		// could wrap on a malformed large length and corrupt the accounting.
+		Count -= buf.GetPosition() - startPos
 	}
 
 	aaLog := loggerOrDefault(aaac.logger)
@@ -221,13 +226,13 @@ func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 		"their_impl_class", aaac.UserInfo.GetImplementationClass().GetUID(),
 		"their_impl_version", aaac.UserInfo.GetImplementationVersion().GetUID(),
 		"app_context", aaac.AppContext.GetUID(),
-		"app_context_description", sopclass.GetSOPClassFromUID(aaac.AppContext.GetUID()).Description,
+		"app_context_description", sopClassDescription(aaac.AppContext.GetUID()),
 		"our_max_pdu_length", maxPduLength, "their_max_pdu_length", aaac.GetMaxSubLength())
 	for presIndex, presContextAccept := range aaac.PresContextAccepts {
 		aaLog.Debug("accepted presentation context",
 			"index", presIndex+1, "pcid", presContextAccept.GetPresentationContextID(),
 			"transfer_syntax", presContextAccept.GetTrnSyntax().GetUID(),
-			"transfer_syntax_description", transfersyntax.GetTransferSyntaxFromUID(presContextAccept.GetTrnSyntax().GetUID()).Description)
+			"transfer_syntax_description", transferSyntaxDescription(presContextAccept.GetTrnSyntax().GetUID()))
 	}
 	if Count == 0 {
 		return nil

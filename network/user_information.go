@@ -122,6 +122,7 @@ func (ui *userInformation) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 
 	Count := int(ui.Length)
 	for Count > 0 {
+		startPos := buf.GetPosition()
 		TempByte, err := buf.GetByte()
 		if err != nil {
 			return err
@@ -129,26 +130,34 @@ func (ui *userInformation) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 
 		switch TempByte {
 		case pdutype.MaximumSubLengthItem:
-			ui.MaxSubLength.ReadDynamic(buf)
-			Count = Count - int(ui.MaxSubLength.Size())
+			if err := ui.MaxSubLength.ReadDynamic(buf); err != nil {
+				return err
+			}
 		case pdutype.ImplementationClassUIDItem:
-			ui.ImpClass.ReadDynamic(buf)
-			Count = Count - int(ui.ImpClass.GetSize())
+			if err := ui.ImpClass.ReadDynamic(buf); err != nil {
+				return err
+			}
 		case pdutype.AsyncOperationsWindowItem:
-			ui.AsyncOpWindow.ReadDynamic(buf)
-			Count = Count - int(ui.AsyncOpWindow.Size())
+			if err := ui.AsyncOpWindow.ReadDynamic(buf); err != nil {
+				return err
+			}
 		case pdutype.SCPSCURoleSelectionItem:
-			ui.SCPSCURole.ReadDynamic(buf)
-			Count = Count - int(ui.SCPSCURole.Size())
+			if err := ui.SCPSCURole.ReadDynamic(buf); err != nil {
+				return err
+			}
 			ui.UserInfoBaggage += uint32(ui.SCPSCURole.Size())
 		case pdutype.ImplementationVersionNameItem:
-			ui.ImpVersion.ReadDynamic(buf)
-			Count = Count - int(ui.ImpVersion.GetSize())
+			if err := ui.ImpVersion.ReadDynamic(buf); err != nil {
+				return err
+			}
 		default:
 			ui.UserInfoBaggage = uint32(Count)
-			Count = -1
 			return errors.New("user::ReadDynamic, unknown TempByte: " + strconv.Itoa(int(TempByte)))
 		}
+		// Decrement by bytes actually consumed (GetByte advances by at least one
+		// each iteration, so this terminates). The per-item uint16 Size()/GetSize()
+		// could wrap on a malformed large length and corrupt the accounting.
+		Count -= buf.GetPosition() - startPos
 	}
 
 	if Count == 0 {

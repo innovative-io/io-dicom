@@ -7,7 +7,6 @@ import (
 	"log/slog"
 
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
-	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
@@ -202,7 +201,7 @@ func (aarq *associationRequest) Write(rw *bufio.ReadWriter) error {
 		return err
 	}
 
-	aaLog.Debug("application context", "uid", aarq.AppContext.GetUID(), "description", sopclass.GetSOPClassFromUID(aarq.AppContext.GetUID()).Description)
+	aaLog.Debug("application context", "uid", aarq.AppContext.GetUID(), "description", sopClassDescription(aarq.AppContext.GetUID()))
 	if err := aarq.AppContext.Write(rw); err != nil {
 		return err
 	}
@@ -210,10 +209,10 @@ func (aarq *associationRequest) Write(rw *bufio.ReadWriter) error {
 		aaLog.Debug("proposed presentation context",
 			"index", presIndex+1, "pcid", presContext.GetPresentationContextID(),
 			"abstract_syntax", presContext.GetAbstractSyntax().GetUID(),
-			"abstract_syntax_description", sopclass.GetSOPClassFromUID(presContext.GetAbstractSyntax().GetUID()).Description)
+			"abstract_syntax_description", sopClassDescription(presContext.GetAbstractSyntax().GetUID()))
 		for _, transSyntax := range presContext.GetTransferSyntaxes() {
 			aaLog.Debug("proposed transfer syntax",
-				"uid", transSyntax.GetUID(), "description", transfersyntax.GetTransferSyntaxFromUID(transSyntax.GetUID()).Description)
+				"uid", transSyntax.GetUID(), "description", transferSyntaxDescription(transSyntax.GetUID()))
 		}
 		if err := presContext.Write(rw); err != nil {
 			return err
@@ -236,6 +235,7 @@ func (aarq *associationRequest) Read(buf *media.DICOMBuffer) (err error) {
 
 	Count := int(buf.GetSize() - 4 - 16 - 16 - 32)
 	for Count > 0 {
+		startPos := buf.GetPosition()
 		TempByte, err := buf.GetByte()
 		if err != nil {
 			return err
@@ -244,20 +244,24 @@ func (aarq *associationRequest) Read(buf *media.DICOMBuffer) (err error) {
 		switch TempByte {
 		case pdutype.ApplicationContextItem:
 			aarq.AppContext.SetType(TempByte)
-			aarq.AppContext.ReadDynamic(buf)
-			Count = Count - int(aarq.AppContext.GetSize())
+			if err := aarq.AppContext.ReadDynamic(buf); err != nil {
+				return err
+			}
 		case pdutype.PresentationContextItem:
 			PresContext := NewPresentationContext()
-			PresContext.ReadDynamic(buf)
-			Count = Count - int(PresContext.Size())
+			if err := PresContext.ReadDynamic(buf); err != nil {
+				return err
+			}
 			aarq.PresContexts = append(aarq.PresContexts, PresContext)
 		case pdutype.UserInformationItem: // User Information
-			aarq.UserInfo.ReadDynamic(buf)
-			return nil
+			return aarq.UserInfo.ReadDynamic(buf)
 		default:
 			loggerOrDefault(aarq.logger).Error("unknown A-ASSOCIATE-RQ item", "item_type", TempByte)
-			Count = -1
+			return errors.New("aarq::ReadDynamic, unknown item type")
 		}
+		// Decrement by bytes actually consumed; the per-item uint16 Size()/GetSize()
+		// could wrap on a malformed large length and corrupt the accounting.
+		Count -= buf.GetPosition() - startPos
 	}
 
 	if Count == 0 {
