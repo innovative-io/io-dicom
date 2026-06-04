@@ -3,7 +3,9 @@ package jpegxl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"sync/atomic"
 
 	"github.com/innovative-io/io-dicom/codecs/internal/backendmgr"
 )
@@ -11,6 +13,36 @@ import (
 var CGOEnabled = nativeBackendEnabled
 
 const maxCodecPayloadBytes = 512 << 20
+
+// libjxl encoder effort bounds: 1 = fastest/largest, 10 = slowest/smallest.
+// The default matches libjxl's own default so behavior is unchanged unless a
+// caller opts in via SetEncodeEffort. Only the libjxl native backend honors
+// this; other backends ignore it.
+const (
+	minEncodeEffort     = 1
+	maxEncodeEffort     = 10
+	defaultEncodeEffort = 7
+)
+
+var jxlEncodeEffort = func() *atomic.Int32 {
+	v := new(atomic.Int32)
+	v.Store(defaultEncodeEffort)
+	return v
+}()
+
+// SetEncodeEffort sets the libjxl encoder effort (1 = fastest, largest output;
+// 10 = slowest, smallest output). It returns an error for out-of-range values.
+// Effort does not affect correctness: lossless encodes stay lossless.
+func SetEncodeEffort(effort int) error {
+	if effort < minEncodeEffort || effort > maxEncodeEffort {
+		return fmt.Errorf("jpegxl: encode effort %d out of range [%d,%d]", effort, minEncodeEffort, maxEncodeEffort)
+	}
+	jxlEncodeEffort.Store(int32(effort))
+	return nil
+}
+
+// EncodeEffort returns the current libjxl encoder effort.
+func EncodeEffort() int { return int(jxlEncodeEffort.Load()) }
 
 var errInvalidJXLPayload = errors.New("invalid JPEG XL payload size")
 var errBackendUnavailable = errors.New("jpeg xl decode requires the libjxl native backend (build with -tags libjxl)")

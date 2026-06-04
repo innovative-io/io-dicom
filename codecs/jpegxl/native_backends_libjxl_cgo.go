@@ -3,7 +3,7 @@
 package jpegxl
 
 /*
-#cgo pkg-config: libjxl
+#cgo pkg-config: libjxl libjxl_threads
 
 #include <stdint.h>
 #include <stdio.h>
@@ -14,6 +14,7 @@ package jpegxl
 #include <jxl/color_encoding.h>
 #include <jxl/decode.h>
 #include <jxl/encode.h>
+#include <jxl/thread_parallel_runner.h>
 #include <jxl/types.h>
 
 static void io_libjxl_set_error(char* err, size_t err_len, const char* msg) {
@@ -64,9 +65,9 @@ static int io_libjxl_configure_basic_info(JxlBasicInfo* info, uint16_t width, ui
 	return 1;
 }
 
-static int io_libjxl_encode(const uint8_t* src, size_t src_size,
+static int io_libjxl_encode_impl(const uint8_t* src, size_t src_size,
 		uint16_t width, uint16_t height, uint16_t samples, uint16_t bitsa, int lossless,
-		uint8_t** out_data, size_t* out_size, char* err, size_t err_len) {
+		uint8_t** out_data, size_t* out_size, char* err, size_t err_len, void* runner, int effort) {
 	JxlEncoder* enc = NULL;
 	JxlEncoderFrameSettings* frame_settings = NULL;
 	uint8_t* encoded = NULL;
@@ -90,6 +91,13 @@ static int io_libjxl_encode(const uint8_t* src, size_t src_size,
 	enc = JxlEncoderCreate(NULL);
 	if (!enc) {
 		io_libjxl_set_error(err, err_len, "JxlEncoderCreate failed");
+		return -1;
+	}
+	// A NULL runner means pool creation failed; fall back to single-threaded.
+	if (runner != NULL &&
+		JxlEncoderSetParallelRunner(enc, JxlThreadParallelRunner, runner) != JXL_ENC_SUCCESS) {
+		io_libjxl_set_error(err, err_len, "JxlEncoderSetParallelRunner failed");
+		JxlEncoderDestroy(enc);
 		return -1;
 	}
 	if (!io_libjxl_configure_basic_info(&info, width, height, samples, bitsa)) {
@@ -116,6 +124,11 @@ static int io_libjxl_encode(const uint8_t* src, size_t src_size,
 		JxlEncoderDestroy(enc);
 		return -1;
 	}
+	if (JxlEncoderFrameSettingsSetOption(frame_settings, JXL_ENC_FRAME_SETTING_EFFORT, (int64_t)effort) != JXL_ENC_SUCCESS) {
+		io_libjxl_set_error(err, err_len, "JxlEncoderFrameSettingsSetOption(effort) failed");
+		JxlEncoderDestroy(enc);
+		return -1;
+	}
 	if (lossless) {
 		if (JxlEncoderSetFrameLossless(frame_settings, JXL_TRUE) != JXL_ENC_SUCCESS) {
 			io_libjxl_set_error(err, err_len, "JxlEncoderSetFrameLossless failed");
@@ -131,7 +144,9 @@ static int io_libjxl_encode(const uint8_t* src, size_t src_size,
 	memset(&format, 0, sizeof(format));
 	format.num_channels = samples;
 	format.data_type = bitsa > 8 ? JXL_TYPE_UINT16 : JXL_TYPE_UINT8;
-	format.endianness = bitsa > 8 ? JXL_BIG_ENDIAN : JXL_NATIVE_ENDIAN;
+	// Little-endian matches the DICOM uncompressed convention and the other
+	// 16-bit codecs (libjpeg, charls, ffmpeg, openjpeg).
+	format.endianness = bitsa > 8 ? JXL_LITTLE_ENDIAN : JXL_NATIVE_ENDIAN;
 	format.align = 0;
 
 	if (bitsa != 8) {
@@ -156,6 +171,10 @@ static int io_libjxl_encode(const uint8_t* src, size_t src_size,
 	}
 
 	JxlEncoderCloseInput(enc);
+	// The output loop below uses *out_size as the running write offset into
+	// `encoded`; reset it so we never index past the buffer if a caller passed
+	// a non-zero or uninitialized value.
+	*out_size = 0;
 	encoded_capacity = 4096;
 	encoded = (uint8_t*)malloc(encoded_capacity);
 	if (!encoded) {
@@ -184,7 +203,6 @@ static int io_libjxl_encode(const uint8_t* src, size_t src_size,
 		}
 
 		status = JxlEncoderProcessOutput(enc, &next_out, &avail_out);
-		*out_size = encoded_capacity - avail_out - (size_t)(encoded != NULL ? 0 : 0);
 		if (status == JXL_ENC_SUCCESS) {
 			*out_size = (size_t)(next_out - encoded);
 			break;
@@ -219,8 +237,8 @@ static int io_libjxl_encode(const uint8_t* src, size_t src_size,
 	return 0;
 }
 
-static int io_libjxl_decode(const uint8_t* src, size_t src_size,
-		uint8_t* dst, size_t dst_size, char* err, size_t err_len) {
+static int io_libjxl_decode_impl(const uint8_t* src, size_t src_size,
+		uint8_t* dst, size_t dst_size, char* err, size_t err_len, void* runner) {
 	JxlDecoder* dec = NULL;
 	JxlBasicInfo info;
 	JxlPixelFormat format;
@@ -235,6 +253,13 @@ static int io_libjxl_decode(const uint8_t* src, size_t src_size,
 	dec = JxlDecoderCreate(NULL);
 	if (!dec) {
 		io_libjxl_set_error(err, err_len, "JxlDecoderCreate failed");
+		return -1;
+	}
+	// A NULL runner means pool creation failed; fall back to single-threaded.
+	if (runner != NULL &&
+		JxlDecoderSetParallelRunner(dec, JxlThreadParallelRunner, runner) != JXL_DEC_SUCCESS) {
+		io_libjxl_set_error(err, err_len, "JxlDecoderSetParallelRunner failed");
+		JxlDecoderDestroy(dec);
 		return -1;
 	}
 	if (JxlDecoderSubscribeEvents(dec, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS) {
@@ -269,7 +294,9 @@ static int io_libjxl_decode(const uint8_t* src, size_t src_size,
 			memset(&format, 0, sizeof(format));
 			format.num_channels = info.num_color_channels;
 			format.data_type = info.bits_per_sample > 8 ? JXL_TYPE_UINT16 : JXL_TYPE_UINT8;
-			format.endianness = info.bits_per_sample > 8 ? JXL_BIG_ENDIAN : JXL_NATIVE_ENDIAN;
+			// Little-endian matches the DICOM uncompressed convention and the other
+			// 16-bit codecs (libjpeg, charls, ffmpeg, openjpeg).
+			format.endianness = info.bits_per_sample > 8 ? JXL_LITTLE_ENDIAN : JXL_NATIVE_ENDIAN;
 			format.align = 0;
 
 			if (JxlDecoderImageOutBufferSize(dec, &format, &required_size) != JXL_DEC_SUCCESS) {
@@ -327,6 +354,33 @@ static int io_libjxl_decode(const uint8_t* src, size_t src_size,
 			return -1;
 		}
 	}
+}
+
+// Thin wrappers that own a multithreaded runner for the lifetime of a single
+// encode/decode. The runner is created here and destroyed only after the impl
+// returns (which has already torn down its encoder/decoder), so it always
+// outlives the libjxl object that uses it. A NULL runner degrades gracefully
+// to single-threaded operation inside the impl.
+static int io_libjxl_encode(const uint8_t* src, size_t src_size,
+		uint16_t width, uint16_t height, uint16_t samples, uint16_t bitsa, int lossless,
+		uint8_t** out_data, size_t* out_size, char* err, size_t err_len, int effort) {
+	void* runner = JxlThreadParallelRunnerCreate(NULL, JxlThreadParallelRunnerDefaultNumWorkerThreads());
+	int rc = io_libjxl_encode_impl(src, src_size, width, height, samples, bitsa, lossless,
+		out_data, out_size, err, err_len, runner, effort);
+	if (runner != NULL) {
+		JxlThreadParallelRunnerDestroy(runner);
+	}
+	return rc;
+}
+
+static int io_libjxl_decode(const uint8_t* src, size_t src_size,
+		uint8_t* dst, size_t dst_size, char* err, size_t err_len) {
+	void* runner = JxlThreadParallelRunnerCreate(NULL, JxlThreadParallelRunnerDefaultNumWorkerThreads());
+	int rc = io_libjxl_decode_impl(src, src_size, dst, dst_size, err, err_len, runner);
+	if (runner != NULL) {
+		JxlThreadParallelRunnerDestroy(runner);
+	}
+	return rc;
 }
 */
 import "C"
@@ -440,6 +494,7 @@ func (libjxlBackend) EncodeContext(_ context.Context, raw []byte, width uint16, 
 		&outSize,
 		(*C.char)(unsafe.Pointer(&errBuf[0])),
 		C.size_t(len(errBuf)),
+		C.int(EncodeEffort()),
 	)
 	if rc != 0 {
 		if msg := C.GoString((*C.char)(unsafe.Pointer(&errBuf[0]))); msg != "" {

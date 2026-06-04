@@ -192,6 +192,12 @@ static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst,
 		opj_destroy_codec(codec);
 		return -1;
 	}
+	if (opj_has_thread_support()) {
+		int num_threads = opj_get_num_cpus();
+		if (num_threads > 1) {
+			opj_codec_set_threads(codec, num_threads);
+		}
+	}
 
 	stream = opj_stream_create(1024, OPJ_TRUE);
 	if (!stream) {
@@ -273,12 +279,20 @@ static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst,
 	}
 
 	size_t pixels = (size_t)width * (size_t)height;
+	// min_val/max_val depend only on prec/sgnd, which are constant for the whole
+	// image; hoist them out of the per-sample loop. Cache the component data
+	// pointers too so the inner loop avoids the image->comps[comp].data
+	// indirection on every sample (numcomps is validated to be 1 or 3 above).
+	OPJ_INT32 min_val = sgnd ? -(OPJ_INT32)(1u << (prec - 1)) : 0;
+	OPJ_INT32 max_val = sgnd ? (OPJ_INT32)((1u << (prec - 1)) - 1) : (OPJ_INT32)((1u << prec) - 1);
+	OPJ_INT32* comp_data[3];
+	for (OPJ_UINT32 comp = 0; comp < numcomps; ++comp) {
+		comp_data[comp] = image->comps[comp].data;
+	}
 	if (bytes_per_sample == 1) {
 		for (size_t i = 0; i < pixels; ++i) {
 			for (OPJ_UINT32 comp = 0; comp < numcomps; ++comp) {
-				OPJ_INT32 sample = image->comps[comp].data[i];
-				OPJ_INT32 min_val = sgnd ? -(OPJ_INT32)(1u << (prec - 1)) : 0;
-				OPJ_INT32 max_val = sgnd ? (OPJ_INT32)((1u << (prec - 1)) - 1) : (OPJ_INT32)((1u << prec) - 1);
+				OPJ_INT32 sample = comp_data[comp][i];
 				if (sample < min_val || sample > max_val) {
 					io_openjpeg_set_error(err, err_len, "decoded sample out of range");
 					opj_stream_destroy(stream);
@@ -294,9 +308,7 @@ static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst,
 	} else {
 		for (size_t i = 0; i < pixels; ++i) {
 			for (OPJ_UINT32 comp = 0; comp < numcomps; ++comp) {
-				OPJ_INT32 sample = image->comps[comp].data[i];
-				OPJ_INT32 min_val = sgnd ? -(OPJ_INT32)(1u << (prec - 1)) : 0;
-				OPJ_INT32 max_val = sgnd ? (OPJ_INT32)((1u << (prec - 1)) - 1) : (OPJ_INT32)((1u << prec) - 1);
+				OPJ_INT32 sample = comp_data[comp][i];
 				if (sample < min_val || sample > max_val) {
 					io_openjpeg_set_error(err, err_len, "decoded sample out of range");
 					opj_stream_destroy(stream);
@@ -304,12 +316,15 @@ static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst,
 					opj_image_destroy(image);
 					return -1;
 				}
-				// Use OPJ_UINT32 cast to get defined big-endian byte extraction
+				// Use OPJ_UINT32 cast to get defined little-endian byte extraction
 				// for both signed and unsigned samples (preserves bit pattern).
-				OPJ_UINT32 uval = (OPJ_UINT32)(OPJ_INT32)sample;
+				// Little-endian matches the DICOM uncompressed convention and the
+				// other 16-bit codecs (libjpeg, charls, ffmpeg) so decoded frames
+				// are interpreted consistently regardless of source codec.
+				OPJ_UINT32 uval = (OPJ_UINT32)sample;
 				size_t offset = (i * numcomps + comp) * 2;
-				dst[offset] = (uint8_t)((uval >> 8) & 0xFF);
-				dst[offset + 1] = (uint8_t)(uval & 0xFF);
+				dst[offset] = (uint8_t)(uval & 0xFF);
+				dst[offset + 1] = (uint8_t)((uval >> 8) & 0xFF);
 			}
 		}
 	}
@@ -387,7 +402,8 @@ static int io_openjpeg_encode(const uint8_t* src, size_t src_size,
 		for (size_t i = 0; i < pixels; ++i) {
 			for (uint16_t comp = 0; comp < samples; ++comp) {
 				size_t offset = (i * samples + comp) * 2;
-				image->comps[comp].data[i] = ((OPJ_INT32)src[offset] << 8) | src[offset + 1];
+				// Little-endian input to match the DICOM uncompressed convention.
+				image->comps[comp].data[i] = (OPJ_INT32)src[offset] | ((OPJ_INT32)src[offset + 1] << 8);
 			}
 		}
 	}
@@ -404,6 +420,12 @@ static int io_openjpeg_encode(const uint8_t* src, size_t src_size,
 		opj_destroy_codec(codec);
 		opj_image_destroy(image);
 		return -1;
+	}
+	if (opj_has_thread_support()) {
+		int num_threads = opj_get_num_cpus();
+		if (num_threads > 1) {
+			opj_codec_set_threads(codec, num_threads);
+		}
 	}
 
 	stream = opj_stream_create(1024, OPJ_FALSE);
