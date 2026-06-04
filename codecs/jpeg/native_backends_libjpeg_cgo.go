@@ -673,7 +673,9 @@ func (libjpegBackend) Encode16Context(_ context.Context, raw []byte, width uint1
 }
 
 func registerNativeBackends() {
-	_ = RegisterBackend("libjpeg", func() Backend { return libjpegBackend{} })
+	// Priority above the pure-Go "gojpeg" backend so libjpeg is the default when
+	// compiled in (it covers DCT profiles and odd 8-bit variants gojpeg doesn't).
+	_ = RegisterBackendWithPriority("libjpeg", func() Backend { return libjpegBackend{} }, 10)
 }
 
 // Decode8Context decodes an 8-bit JPEG (baseline, progressive, or extended)

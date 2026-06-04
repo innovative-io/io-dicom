@@ -1,0 +1,65 @@
+//go:build libjpeg && cgo
+
+package jpeg
+
+import (
+	"bytes"
+	"testing"
+)
+
+// TestGoJPEGLosslessMatchesLibjpeg proves the pure-Go lossless decoder is
+// byte-for-byte identical to libjpeg on the lossless SOF3 fixtures. Lossless
+// means there is exactly one correct answer, so any mismatch is a real bug.
+func TestGoJPEGLosslessMatchesLibjpeg(t *testing.T) {
+	cases := []string{
+		"../../testdata/cornerstone-CTImage-jpeg-process14.dcm",
+		"../../testdata/cornerstone-CTImage-jpeg-process14sv1.dcm",
+	}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			dcm := loadBytesFromFile(path, t)
+			frame := extractFirstDICOMEncapsulatedFrame(t, dcm)
+
+			f, _, err := decodeLossless(frame)
+			if err != nil {
+				t.Fatalf("decodeLossless: %v", err)
+			}
+			bps := 1
+			if f.precision > 8 {
+				bps = 2
+			}
+			size := f.width * f.height * len(f.comps) * bps
+
+			decode := func(backend string) []byte {
+				if err := UseBackend(backend); err != nil {
+					t.Skipf("backend %s unavailable: %v", backend, err)
+				}
+				out := make([]byte, size)
+				var derr error
+				switch bps {
+				case 1:
+					derr = DIJG8decode(frame, uint32(len(frame)), out, uint32(size))
+				default:
+					derr = DIJG16decode(frame, uint32(len(frame)), out, uint32(size))
+				}
+				if derr != nil {
+					t.Fatalf("%s decode: %v", backend, derr)
+				}
+				return out
+			}
+
+			t.Cleanup(func() { SetBackend(nil) })
+			want := decode("libjpeg")
+			got := decode("gojpeg")
+			if !bytes.Equal(want, got) {
+				n := 0
+				for i := range want {
+					if want[i] != got[i] {
+						n++
+					}
+				}
+				t.Fatalf("pure-Go decode differs from libjpeg in %d/%d bytes", n, len(want))
+			}
+		})
+	}
+}
