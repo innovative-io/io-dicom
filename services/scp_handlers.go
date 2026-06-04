@@ -115,9 +115,6 @@ type subopResult struct {
 // writeSubopRSP is the function signature shared by CGetWriteRSP and CMoveWriteRSP.
 type writeSubopRSP func(pdu network.PDUService, req media.DICOMObject, status uint16, remaining, completed, failed, warnings uint16) error
 
-// runSubopLoop is the shared C-GET / C-MOVE event loop. It drives the
-// progress and result channels, handles C-CANCEL, polls for interleaved
-// commands, and writes DIMSE responses via writeRSP.
 // runSubopLoop drives the SCP-side event loop shared by C-GET and C-MOVE: it
 // streams Pending progress responses, enforces cancellation, forwards
 // interleaved commands, and writes the final response.
