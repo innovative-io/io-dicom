@@ -165,7 +165,7 @@ static int io_openjpeg_resolution_count(uint16_t width, uint16_t height) {
 	return resolutions;
 }
 
-static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst, size_t dst_size, char* err, size_t err_len) {
+static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst, size_t dst_size, char* err, size_t err_len, int threads) {
 	opj_codec_t* codec = NULL;
 	opj_stream_t* stream = NULL;
 	opj_image_t* image = NULL;
@@ -193,7 +193,9 @@ static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst,
 		return -1;
 	}
 	if (opj_has_thread_support()) {
-		int num_threads = opj_get_num_cpus();
+		// threads <= 0 means auto (all cores); otherwise honor the caller's
+		// request, e.g. 1 when frames are decoded concurrently elsewhere.
+		int num_threads = threads > 0 ? threads : opj_get_num_cpus();
 		if (num_threads > 1) {
 			opj_codec_set_threads(codec, num_threads);
 		}
@@ -337,7 +339,7 @@ static int io_openjpeg_decode(const uint8_t* src, size_t src_size, uint8_t* dst,
 
 static int io_openjpeg_encode(const uint8_t* src, size_t src_size,
 		uint16_t width, uint16_t height, uint16_t samples, uint16_t bitsa, int ratio,
-		uint8_t** out_data, size_t* out_size, char* err, size_t err_len) {
+		uint8_t** out_data, size_t* out_size, char* err, size_t err_len, int threads) {
 	opj_codec_t* codec = NULL;
 	opj_stream_t* stream = NULL;
 	opj_image_t* image = NULL;
@@ -429,7 +431,9 @@ static int io_openjpeg_encode(const uint8_t* src, size_t src_size,
 		return -1;
 	}
 	if (opj_has_thread_support()) {
-		int num_threads = opj_get_num_cpus();
+		// threads <= 0 means auto (all cores); otherwise honor the caller's
+		// request, e.g. 1 when frames are encoded concurrently elsewhere.
+		int num_threads = threads > 0 ? threads : opj_get_num_cpus();
 		if (num_threads > 1) {
 			opj_codec_set_threads(codec, num_threads);
 		}
@@ -472,6 +476,8 @@ import (
 	"fmt"
 	"math/bits"
 	"unsafe"
+
+	"github.com/innovative-io/io-dicom/codecs/internal/codecctx"
 )
 
 const nativeBackendEnabled = true
@@ -499,7 +505,7 @@ func (openjpegBackend) Decode(encoded []byte, output []byte) error {
 	return openjpegBackend{}.DecodeContext(context.Background(), encoded, output)
 }
 
-func (openjpegBackend) DecodeContext(_ context.Context, encoded []byte, output []byte) error {
+func (openjpegBackend) DecodeContext(ctx context.Context, encoded []byte, output []byte) error {
 	if len(encoded) == 0 || len(output) == 0 {
 		return errInvalidJ2KPayload
 	}
@@ -515,6 +521,7 @@ func (openjpegBackend) DecodeContext(_ context.Context, encoded []byte, output [
 		C.size_t(len(output)),
 		(*C.char)(unsafe.Pointer(&errBuf[0])),
 		C.size_t(len(errBuf)),
+		C.int(codecctx.Threads(ctx)),
 	)
 	if rc != 0 {
 		if msg := C.GoString((*C.char)(unsafe.Pointer(&errBuf[0]))); msg != "" {
@@ -532,7 +539,7 @@ func (openjpegBackend) Encode(raw []byte, width uint16, height uint16, samples u
 	return openjpegBackend{}.EncodeContext(context.Background(), raw, width, height, samples, bitsa, ratio)
 }
 
-func (openjpegBackend) EncodeContext(_ context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, ratio int) ([]byte, error) {
+func (openjpegBackend) EncodeContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, ratio int) ([]byte, error) {
 	if len(raw) == 0 {
 		return nil, errInvalidJ2KPayload
 	}
@@ -568,6 +575,7 @@ func (openjpegBackend) EncodeContext(_ context.Context, raw []byte, width uint16
 		&outSize,
 		(*C.char)(unsafe.Pointer(&errBuf[0])),
 		C.size_t(len(errBuf)),
+		C.int(codecctx.Threads(ctx)),
 	)
 	if rc != 0 {
 		if msg := C.GoString((*C.char)(unsafe.Pointer(&errBuf[0]))); msg != "" {

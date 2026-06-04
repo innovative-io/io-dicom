@@ -356,15 +356,29 @@ static int io_libjxl_decode_impl(const uint8_t* src, size_t src_size,
 	}
 }
 
+// io_libjxl_worker_count maps a requested thread count to a libjxl worker
+// count: threads <= 0 means auto (libjxl's default, ~all cores), otherwise the
+// caller's request. A return of 1 means single-threaded, for which the wrappers
+// below skip creating a thread pool entirely.
+static size_t io_libjxl_worker_count(int threads) {
+	if (threads > 0) {
+		return (size_t)threads;
+	}
+	return JxlThreadParallelRunnerDefaultNumWorkerThreads();
+}
+
 // Thin wrappers that own a multithreaded runner for the lifetime of a single
 // encode/decode. The runner is created here and destroyed only after the impl
 // returns (which has already torn down its encoder/decoder), so it always
-// outlives the libjxl object that uses it. A NULL runner degrades gracefully
-// to single-threaded operation inside the impl.
+// outlives the libjxl object that uses it. When only one worker is requested no
+// runner is created and the impl runs single-threaded (a NULL runner degrades
+// gracefully), which also avoids per-call thread-pool setup when frames are
+// parallelized by the caller.
 static int io_libjxl_encode(const uint8_t* src, size_t src_size,
 		uint16_t width, uint16_t height, uint16_t samples, uint16_t bitsa, int lossless,
-		uint8_t** out_data, size_t* out_size, char* err, size_t err_len, int effort) {
-	void* runner = JxlThreadParallelRunnerCreate(NULL, JxlThreadParallelRunnerDefaultNumWorkerThreads());
+		uint8_t** out_data, size_t* out_size, char* err, size_t err_len, int effort, int threads) {
+	size_t workers = io_libjxl_worker_count(threads);
+	void* runner = workers > 1 ? JxlThreadParallelRunnerCreate(NULL, workers) : NULL;
 	int rc = io_libjxl_encode_impl(src, src_size, width, height, samples, bitsa, lossless,
 		out_data, out_size, err, err_len, runner, effort);
 	if (runner != NULL) {
@@ -374,8 +388,9 @@ static int io_libjxl_encode(const uint8_t* src, size_t src_size,
 }
 
 static int io_libjxl_decode(const uint8_t* src, size_t src_size,
-		uint8_t* dst, size_t dst_size, char* err, size_t err_len) {
-	void* runner = JxlThreadParallelRunnerCreate(NULL, JxlThreadParallelRunnerDefaultNumWorkerThreads());
+		uint8_t* dst, size_t dst_size, char* err, size_t err_len, int threads) {
+	size_t workers = io_libjxl_worker_count(threads);
+	void* runner = workers > 1 ? JxlThreadParallelRunnerCreate(NULL, workers) : NULL;
 	int rc = io_libjxl_decode_impl(src, src_size, dst, dst_size, err, err_len, runner);
 	if (runner != NULL) {
 		JxlThreadParallelRunnerDestroy(runner);
@@ -391,6 +406,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/innovative-io/io-dicom/codecs/internal/codecctx"
 	"github.com/innovative-io/io-dicom/codecs/internal/nativeenv"
 )
 
@@ -423,7 +439,7 @@ func (libjxlBackend) Decode(encoded []byte, output []byte) error {
 	return libjxlBackend{}.DecodeContext(context.Background(), encoded, output)
 }
 
-func (libjxlBackend) DecodeContext(_ context.Context, encoded []byte, output []byte) error {
+func (libjxlBackend) DecodeContext(ctx context.Context, encoded []byte, output []byte) error {
 	if len(encoded) == 0 || len(output) == 0 {
 		return errInvalidJXLPayload
 	}
@@ -438,6 +454,7 @@ func (libjxlBackend) DecodeContext(_ context.Context, encoded []byte, output []b
 		C.size_t(len(output)),
 		(*C.char)(unsafe.Pointer(&errBuf[0])),
 		C.size_t(len(errBuf)),
+		C.int(codecctx.Threads(ctx)),
 	)
 	if rc != 0 {
 		if msg := C.GoString((*C.char)(unsafe.Pointer(&errBuf[0]))); msg != "" {
@@ -455,7 +472,7 @@ func (libjxlBackend) Encode(raw []byte, width uint16, height uint16, samples uin
 	return libjxlBackend{}.EncodeContext(context.Background(), raw, width, height, samples, bitsa, lossless)
 }
 
-func (libjxlBackend) EncodeContext(_ context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, lossless bool) ([]byte, error) {
+func (libjxlBackend) EncodeContext(ctx context.Context, raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, lossless bool) ([]byte, error) {
 	if len(raw) == 0 {
 		return nil, errInvalidJXLPayload
 	}
@@ -495,6 +512,7 @@ func (libjxlBackend) EncodeContext(_ context.Context, raw []byte, width uint16, 
 		(*C.char)(unsafe.Pointer(&errBuf[0])),
 		C.size_t(len(errBuf)),
 		C.int(EncodeEffort()),
+		C.int(codecctx.Threads(ctx)),
 	)
 	if rc != 0 {
 		if msg := C.GoString((*C.char)(unsafe.Pointer(&errBuf[0]))); msg != "" {
