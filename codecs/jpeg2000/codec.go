@@ -65,7 +65,7 @@ func init() {
 	registerNativeBackends()
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
-		slog.Warn("jpeg2000: no native backend available; encode will pass raw bytes unchanged (build with -tags openjpeg)")
+		slog.Warn("jpeg2000: no native backend available; decode and encode will fail (build with -tags openjpeg)")
 	}
 }
 

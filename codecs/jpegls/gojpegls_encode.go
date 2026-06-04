@@ -2,8 +2,8 @@ package jpegls
 
 // Pure-Go JPEG-LS lossless encoder — the inverse of the decoder in gojpegls.go.
 // It lets CGO_ENABLED=0 builds produce valid lossless JPEG-LS (e.g. for
-// transcoding) instead of passing raw bytes through. Single-component or
-// non-interleaved multi-component, 2–16 bit, NEAR=0.
+// transcoding) instead of passing raw bytes through. Single-component
+// (grayscale), 2–16 bit, NEAR=0.
 
 // jlsBitWriter writes MSB-first bits with JPEG-LS bit stuffing: after a 0xFF
 // byte is emitted, the next byte carries a stuffed 0 in its MSB (7 data bits).
@@ -323,13 +323,12 @@ func encodeJLS(raw []byte, width, height, samples, precision int) ([]byte, error
 		}
 	}
 
+	// samples == 1 here (multi-component is rejected above), so this encodes the
+	// single component's plane; encodePlane resets only the run index, mirroring
+	// the decoder's decodePlane.
 	d := newJLSDecoder(&f, nil)
 	w := &jlsBitWriter{out: out}
 	for c := 0; c < samples; c++ {
-		// reset context per component (matches decode, which decodes each plane
-		// with a fresh decoder state via decodePlane's runIndex reset; contexts
-		// are shared per scan in ILV=0 but reset between components here to match
-		// the per-plane decode loop).
 		d.encodePlane(w, planes[c])
 	}
 	w.flush()

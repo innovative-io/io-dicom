@@ -93,7 +93,7 @@ func init() {
 	registerNativeBackends()
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
-		slog.Warn("jpegxl: no native backend available; encode will pass raw bytes unchanged (build with -tags libjxl)")
+		slog.Warn("jpegxl: no native backend available; decode and encode will fail (build with -tags libjxl)")
 	}
 }
 

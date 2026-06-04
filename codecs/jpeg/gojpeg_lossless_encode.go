@@ -10,7 +10,7 @@ import "errors"
 
 var errGoJPEGEncodeInput = errors.New("gojpeg: invalid input for lossless JPEG encode")
 
-// jlsBitWriter writes MSB-first bits and applies JPEG byte stuffing (a 0x00 is
+// jpegBitWriter writes MSB-first bits and applies JPEG byte stuffing (a 0x00 is
 // inserted after every 0xFF emitted to the entropy stream).
 type jpegBitWriter struct {
 	out   []byte
