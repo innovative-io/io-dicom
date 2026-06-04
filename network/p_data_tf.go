@@ -2,11 +2,28 @@ package network
 
 import (
 	"bufio"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/innovative-io/io-dicom/media"
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
+
+// writePDVHeader writes the 12-byte P-DATA-TF + PDV header (big-endian) straight
+// to rw. Building it on the stack avoids allocating a fresh DICOMBuffer for every
+// PDV — the previous approach allocated a 4 KiB buffer per fragment, which adds
+// up across the many fragments of a large pixel-data transfer.
+func writePDVHeader(rw *bufio.ReadWriter, itemType, reserved1 byte, pduLength, pdvLength uint32, pcid, msgHeader byte) error {
+	var hdr [12]byte
+	hdr[0] = itemType
+	hdr[1] = reserved1
+	binary.BigEndian.PutUint32(hdr[2:6], pduLength)
+	binary.BigEndian.PutUint32(hdr[6:10], pdvLength)
+	hdr[10] = pcid
+	hdr[11] = msgHeader
+	_, err := rw.Write(hdr[:])
+	return err
+}
 
 // PresentationDataTransfer - PresentationDataTransfer
 type PresentationDataTransfer struct {
@@ -102,15 +119,7 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 		pd.Length = pd.pdv.Length + 4
 		pd.ItemType = pdutype.PDUDataTransfer
 		pd.Reserved1 = 0
-		buf := media.NewDICOMBuffer()
-		buf.SetBigEndian(true)
-		buf.WriteByte(pd.ItemType)
-		buf.WriteByte(pd.Reserved1)
-		buf.WriteUint32(pd.Length)
-		buf.WriteUint32(pd.pdv.Length)
-		buf.WriteByte(pd.pdv.PresentationContextID)
-		buf.WriteByte(pd.MsgHeader)
-		if err := buf.Send(rw); err != nil {
+		if err := writePDVHeader(rw, pd.ItemType, pd.Reserved1, pd.Length, pd.pdv.Length, pd.pdv.PresentationContextID, pd.MsgHeader); err != nil {
 			return fmt.Errorf("pdata::Write: %w", err)
 		}
 		rw.Flush()
@@ -134,21 +143,14 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 		pd.Length = pd.pdv.Length + 4
 		pd.ItemType = pdutype.PDUDataTransfer
 		pd.Reserved1 = 0
-		buf := media.NewDICOMBuffer()
-
-		buf.SetBigEndian(true)
-		buf.WriteByte(pd.ItemType)
-		buf.WriteByte(pd.Reserved1)
-		buf.WriteUint32(pd.Length)
-		buf.WriteUint32(pd.pdv.Length)
-		buf.WriteByte(pd.pdv.PresentationContextID)
-		buf.WriteByte(pd.MsgHeader)
-
-		if err := buf.Send(rw); err != nil {
+		if err := writePDVHeader(rw, pd.ItemType, pd.Reserved1, pd.Length, pd.pdv.Length, pd.pdv.PresentationContextID, pd.MsgHeader); err != nil {
 			return fmt.Errorf("pdata::Write: %w", err)
 		}
 
-		buff, err := pd.Buffer.Read(int(pd.BlockSize))
+		// Zero-copy view into the send buffer: rw.Write copies these bytes into
+		// the bufio buffer immediately, and the send buffer is only read (never
+		// mutated) during Write, so the slice cannot be clobbered.
+		buff, err := pd.Buffer.ReadSlice(int(pd.BlockSize))
 		if err != nil {
 			return fmt.Errorf("pdata::Write: %w", err)
 		}
