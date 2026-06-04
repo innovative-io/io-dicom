@@ -171,6 +171,10 @@ static int io_libjxl_encode_impl(const uint8_t* src, size_t src_size,
 	}
 
 	JxlEncoderCloseInput(enc);
+	// The output loop below uses *out_size as the running write offset into
+	// `encoded`; reset it so we never index past the buffer if a caller passed
+	// a non-zero or uninitialized value.
+	*out_size = 0;
 	encoded_capacity = 4096;
 	encoded = (uint8_t*)malloc(encoded_capacity);
 	if (!encoded) {

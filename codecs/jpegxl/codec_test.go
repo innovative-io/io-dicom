@@ -166,3 +166,47 @@ func TestJXLNativeBackendRegistrationMatchesFlag(t *testing.T) {
 		t.Fatal("did not expect libjxl backend when CGOEnabled is false")
 	}
 }
+
+func TestEncodeEffort(t *testing.T) {
+	t.Cleanup(func() { _ = SetEncodeEffort(defaultEncodeEffort) })
+
+	if got := EncodeEffort(); got != defaultEncodeEffort {
+		t.Fatalf("default effort = %d, want %d", got, defaultEncodeEffort)
+	}
+
+	cases := []struct {
+		name    string
+		effort  int
+		wantErr bool
+	}{
+		{"below min", minEncodeEffort - 1, true},
+		{"min", minEncodeEffort, false},
+		{"default", defaultEncodeEffort, false},
+		{"max", maxEncodeEffort, false},
+		{"above max", maxEncodeEffort + 1, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Start from a known value so a rejected set is observably unchanged.
+			if err := SetEncodeEffort(defaultEncodeEffort); err != nil {
+				t.Fatalf("seeding default effort: %v", err)
+			}
+			err := SetEncodeEffort(tc.effort)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("SetEncodeEffort(%d) = nil, want error", tc.effort)
+				}
+				if got := EncodeEffort(); got != defaultEncodeEffort {
+					t.Fatalf("effort changed to %d after rejected set, want %d", got, defaultEncodeEffort)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SetEncodeEffort(%d) = %v, want nil", tc.effort, err)
+			}
+			if got := EncodeEffort(); got != tc.effort {
+				t.Fatalf("EncodeEffort() = %d after set, want %d", got, tc.effort)
+			}
+		})
+	}
+}
