@@ -66,23 +66,25 @@ func (d *jlsDecoder) encodeValue(w *jlsBitWriter, merr, k, limit int) {
 }
 
 // encodeRegular encodes one regular-mode sample (inverse of decodeRegular).
-func (d *jlsDecoder) encodeRegular(w *jlsBitWriter, q, sign, px, sample int) {
+func (d *jlsDecoder) encodeRegular(w *jlsBitWriter, q, sign, px, sample int) int {
 	k := 0
 	for (d.n[q] << k) < d.a[q] {
 		k++
 	}
-	// errval such that the decoder reconstructs `sample` from px.
-	errval := sign * (sample - px)
-	// reduce into [-RANGE/2, RANGE/2) consistently with decode (NEAR=0 here).
+	// errval such that the decoder reconstructs an in-tolerance sample from px.
+	// For near-lossless the prediction error is quantized (CharLS quantize), then
+	// reduced modulo RANGE consistently with the decoder.
+	errval := d.quantizeError(sign * (sample - px))
 	half := d.range_ / 2
 	if errval < -half {
 		errval += d.range_
 	} else if errval >= d.range_-half {
 		errval -= d.range_
 	}
-	// inverse of the k==0 bias flip
+	// inverse of the k==0 bias flip; applies in pure-lossless mode only (NEAR==0),
+	// matching the decoder / CharLS get_error_correction(near_lossless).
 	mapped := errval
-	if k == 0 && 2*d.b[q]+d.n[q]-1 < 0 {
+	if k == 0 && d.f.near == 0 && 2*d.b[q]+d.n[q]-1 < 0 {
 		mapped = -errval - 1
 	}
 	var merr int
@@ -93,11 +95,27 @@ func (d *jlsDecoder) encodeRegular(w *jlsBitWriter, q, sign, px, sample int) {
 	}
 	d.encodeValue(w, merr, k, d.limit)
 	d.updateRegular(q, errval)
+	// Return the value the decoder will reconstruct, so the encoder feeds
+	// reconstructed (not original) neighbors — required for near-lossless.
+	return d.computeRecon(px, sign*errval)
+}
+
+// quantizeError quantizes a signed prediction error for the configured NEAR
+// (CharLS quantize). For NEAR==0 it is the identity.
+func (d *jlsDecoder) quantizeError(e int) int {
+	near := d.f.near
+	if near == 0 {
+		return e
+	}
+	if e > 0 {
+		return (e + near) / (2*near + 1)
+	}
+	return -((near - e) / (2*near + 1))
 }
 
 // encodeRunInterruption encodes the sample that ended a run (inverse of
 // decodeRunInterruption).
-func (d *jlsDecoder) encodeRunInterruption(w *jlsBitWriter, ra, rb, sample int) {
+func (d *jlsDecoder) encodeRunInterruption(w *jlsBitWriter, ra, rb, sample int) int {
 	var q, nRItype, px, sign int
 	if abs(ra-rb) <= d.f.near {
 		q, nRItype, px, sign = 366, 1, ra, 1
@@ -109,7 +127,7 @@ func (d *jlsDecoder) encodeRunInterruption(w *jlsBitWriter, ra, rb, sample int) 
 			sign = -1
 		}
 	}
-	errval := sign * (sample - px)
+	errval := d.quantizeError(sign * (sample - px))
 	half := d.range_ / 2
 	if errval < -half {
 		errval += d.range_
@@ -159,9 +177,15 @@ func (d *jlsDecoder) encodeRunInterruption(w *jlsBitWriter, ra, rb, sample int) 
 		d.nn[q] >>= 1
 	}
 	d.n[q]++
+	// The decoder reconstructs the interrupting sample from px and the signed
+	// error; return it so the encoder feeds reconstructed neighbors.
+	return d.computeRecon(px, sign*errval)
 }
 
-// encodePlane encodes one component plane (NEAR=0) using regular + run mode.
+// encodePlane encodes one component plane using regular + run mode. Each encoded
+// sample's slot in plane is overwritten with the value the decoder reconstructs,
+// so subsequent samples use reconstructed neighbors (required for near-lossless;
+// a no-op for NEAR==0 where reconstructed == original).
 func (d *jlsDecoder) encodePlane(w *jlsBitWriter, plane []int) {
 	W, H := d.f.width, d.f.height
 	d.runIndex = 0
@@ -221,7 +245,7 @@ func (d *jlsDecoder) encodePlane(w *jlsBitWriter, plane []int) {
 			} else if px > d.f.maxval {
 				px = d.f.maxval
 			}
-			d.encodeRegular(w, q, sign, px, cur[x])
+			cur[x] = d.encodeRegular(w, q, sign, px, cur[x])
 			x++
 		}
 		rcLeft = lineRb0
@@ -232,10 +256,14 @@ func (d *jlsDecoder) encodePlane(w *jlsBitWriter, plane []int) {
 // encodeRun encodes a run starting at x (inverse of decodeRun).
 func (d *jlsDecoder) encodeRun(w *jlsBitWriter, cur, prev []int, y, ra, x, W int) int {
 	runVal := ra
-	// measure run length: samples equal to runVal (NEAR=0) up to end of line.
+	// measure run length: samples within NEAR of runVal up to end of line. Every
+	// run sample reconstructs to runVal, so write that back as the neighbor value.
 	runLen := 0
-	for x+runLen < W && cur[x+runLen] == runVal {
+	for x+runLen < W && abs(cur[x+runLen]-runVal) <= d.f.near {
 		runLen++
+	}
+	for i := 0; i < runLen; i++ {
+		cur[x+i] = runVal
 	}
 	remaining := W - x
 	reachedEOL := x+runLen == W
@@ -265,18 +293,26 @@ func (d *jlsDecoder) encodeRun(w *jlsBitWriter, cur, prev []int, y, ra, x, W int
 	if y > 0 {
 		rb = prev[pos]
 	}
-	d.encodeRunInterruption(w, runVal, rb, cur[pos])
+	cur[pos] = d.encodeRunInterruption(w, runVal, rb, cur[pos])
 	if d.runIndex > 0 {
 		d.runIndex--
 	}
 	return pos + 1
 }
 
-// encodeJLS encodes raw samples (LE if precision>8) as lossless JPEG-LS.
-func encodeJLS(raw []byte, width, height, samples, precision int) ([]byte, error) {
+// encodeJLS encodes raw samples (LE if precision>8) as JPEG-LS. NEAR==0 yields
+// lossless output; NEAR>0 yields near-lossless output with the given error bound.
+func encodeJLS(raw []byte, width, height, samples, precision, near int) ([]byte, error) {
 	// Single-component only: multi-component ILV=0 is not validated against the
 	// reference and charls rejects it, so it is left to charls.
 	if width <= 0 || height <= 0 || samples != 1 || precision < 2 || precision > 16 {
+		return nil, errJLSUnsupported
+	}
+	// NEAR is written as a single byte in the SOS scan header and must not exceed
+	// MAXVAL (T.87 C.2.4.1.1). Reject out-of-range values rather than truncating
+	// them into a non-conformant stream.
+	maxval := (1 << precision) - 1
+	if near < 0 || near > 255 || near > maxval {
 		return nil, errJLSUnsupported
 	}
 	bps := 1
@@ -286,7 +322,7 @@ func encodeJLS(raw []byte, width, height, samples, precision int) ([]byte, error
 	if width*height*samples*bps != len(raw) {
 		return nil, errJLSUnsupported
 	}
-	f := jlsFrame{precision: precision, width: width, height: height, near: 0, ilv: 0}
+	f := jlsFrame{precision: precision, width: width, height: height, near: near, ilv: 0}
 	f.comps = make([]jlsComponent, samples)
 	for c := range f.comps {
 		f.comps[c] = jlsComponent{id: byte(c + 1), h: 1, v: 1}
@@ -304,7 +340,7 @@ func encodeJLS(raw []byte, width, height, samples, precision int) ([]byte, error
 	for c := 0; c < samples; c++ {
 		sos = append(sos, byte(c+1), 0x00)
 	}
-	sos = append(sos, 0x00, 0x00, 0x00) // NEAR=0, ILV=0, point transform=0
+	sos = append(sos, byte(near), 0x00, 0x00) // NEAR, ILV=0, point transform=0
 	out = appendJLSMarker(out, jlsSOS, sos)
 
 	// planes

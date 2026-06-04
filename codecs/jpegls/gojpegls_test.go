@@ -72,13 +72,27 @@ func TestGoJLSDecodesLosslessFixture(t *testing.T) {
 	}
 }
 
-// TestGoJLSDefersNearLossless confirms the pure-Go decoder reports near-lossless
-// as unsupported (so charls handles it), rather than producing wrong pixels.
-func TestGoJLSDefersNearLossless(t *testing.T) {
+// TestGoJLSDecodesNearLossless confirms the pure-Go decoder now handles a
+// near-lossless (.81) stream: it parses the NEAR>0 scan header and decodes a
+// full-size frame without error. Byte-exact fidelity against charls is covered
+// by TestGoJLSNearLosslessMatchesCharls (cgo-tagged).
+func TestGoJLSDecodesNearLossless(t *testing.T) {
 	dcm := loadDCM(t, "../../testdata/cornerstone-CTImage-jpegls-lossy.dcm")
 	frame := extractFirstFrame(t, dcm)
-	if _, _, err := parseJLS(frame); err == nil {
-		t.Fatal("expected near-lossless to be reported unsupported by the pure-Go decoder")
+	f, _, err := parseJLS(frame)
+	if err != nil {
+		t.Fatalf("parseJLS near-lossless: %v", err)
+	}
+	if f.near == 0 {
+		t.Fatal("expected NEAR>0 for the lossy fixture")
+	}
+	bps := 1
+	if f.precision > 8 {
+		bps = 2
+	}
+	out := make([]byte, f.width*f.height*len(f.comps)*bps)
+	if err := decodeJLSInto(frame, out); err != nil {
+		t.Fatalf("decode near-lossless: %v", err)
 	}
 }
 
@@ -118,7 +132,7 @@ func TestGoJLSEncodeRoundTrip(t *testing.T) {
 				raw[i*2+1] = byte(v >> 8)
 			}
 		}
-		enc, err := encodeJLS(raw, tc.w, tc.h, 1, tc.p)
+		enc, err := encodeJLS(raw, tc.w, tc.h, 1, tc.p, 0)
 		if err != nil {
 			t.Fatalf("p%d encode: %v", tc.p, err)
 		}
@@ -132,10 +146,63 @@ func TestGoJLSEncodeRoundTrip(t *testing.T) {
 	}
 }
 
-// TestGoJLSEncodeRejectsUnsupported confirms multi-component and near-lossless
-// encode are reported unsupported rather than producing invalid output.
+// TestGoJLSEncodeRejectsUnsupported confirms multi-component encode is reported
+// unsupported rather than producing invalid output.
 func TestGoJLSEncodeRejectsUnsupported(t *testing.T) {
-	if _, err := encodeJLS(make([]byte, 3*4*4), 4, 4, 3, 8); err == nil {
+	if _, err := encodeJLS(make([]byte, 3*4*4), 4, 4, 3, 8, 0); err == nil {
 		t.Fatal("expected 3-component encode to be unsupported")
+	}
+}
+
+// TestGoJLSNearLosslessEncodeRoundTrip encodes synthetic images with the pure-Go
+// near-lossless encoder (NEAR=1) and decodes them with the pure-Go decoder,
+// requiring every sample to be within NEAR of the original (the near-lossless
+// guarantee) and the decode to reproduce the encoder's own reconstruction.
+func TestGoJLSNearLosslessEncodeRoundTrip(t *testing.T) {
+	const near = 1
+	for _, tc := range []struct{ w, h, p int }{
+		{16, 16, 8}, {40, 30, 8}, {50, 40, 12}, {64, 64, 16}, {33, 17, 10},
+	} {
+		bps := 1
+		if tc.p > 8 {
+			bps = 2
+		}
+		maxv := (1 << tc.p) - 1
+		raw := make([]byte, tc.w*tc.h*bps)
+		sample := func(i int) int {
+			if bps == 1 {
+				return int(raw[i])
+			}
+			return int(raw[i*2]) | int(raw[i*2+1])<<8
+		}
+		for i := 0; i < tc.w*tc.h; i++ {
+			v := (i*7 + (i*i)%29 + (i*i*i)%17) % (maxv + 1)
+			if bps == 1 {
+				raw[i] = byte(v)
+			} else {
+				raw[i*2] = byte(v)
+				raw[i*2+1] = byte(v >> 8)
+			}
+		}
+		enc, err := encodeJLS(raw, tc.w, tc.h, 1, tc.p, near)
+		if err != nil {
+			t.Fatalf("p%d near-lossless encode: %v", tc.p, err)
+		}
+		out := make([]byte, len(raw))
+		if err := decodeJLSInto(enc, out); err != nil {
+			t.Fatalf("p%d decode: %v", tc.p, err)
+		}
+		for i := 0; i < tc.w*tc.h; i++ {
+			orig := sample(i)
+			var got int
+			if bps == 1 {
+				got = int(out[i])
+			} else {
+				got = int(out[i*2]) | int(out[i*2+1])<<8
+			}
+			if d := orig - got; d < -near || d > near {
+				t.Fatalf("p%d sample %d: got %d, want within %d of %d", tc.p, i, got, near, orig)
+			}
+		}
 	}
 }

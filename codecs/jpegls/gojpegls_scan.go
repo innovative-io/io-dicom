@@ -122,10 +122,10 @@ func parseJLSScan(seg []byte, f *jlsFrame) error {
 	if f.ilv != 0 {
 		return errJLSUnsupported // interleaved scans not yet supported
 	}
-	if f.near != 0 {
-		// Near-lossless (.81): a context-modeling edge case still diverges from
-		// the reference, so defer to charls when available rather than risk
-		// silently wrong pixels.
+	// tail[2] is the point-transform field (Al). The decoder does not apply a
+	// point transform, so a non-zero value would silently yield wrong pixels —
+	// reject it as unsupported.
+	if tail[2] != 0 {
 		return errJLSUnsupported
 	}
 	return nil
@@ -367,14 +367,14 @@ func (gojpeglsBackend) DecodeContext(_ context.Context, encoded []byte, output [
 }
 
 func (gojpeglsBackend) Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, nearLossless bool) ([]byte, error) {
+	// NEAR=1 matches the charls backend's near-lossless setting; NEAR=0 is
+	// lossless. encodeJLS errors for unsupported geometry (e.g. multi-component),
+	// which is correct — better than producing an invalid stream that reports success.
+	near := 0
 	if nearLossless {
-		// No pure-Go near-lossless encoder; error rather than emit raw bytes as
-		// a fake compressed stream (charls handles this when built with -tags charls).
-		return nil, errJLSUnsupported
+		near = 1
 	}
-	// encodeJLS errors for unsupported geometry (e.g. multi-component), which is
-	// correct — better than producing an invalid stream that reports success.
-	return encodeJLS(raw, int(width), int(height), int(samples), int(bitsa))
+	return encodeJLS(raw, int(width), int(height), int(samples), int(bitsa), near)
 }
 
 func registerPureGoBackend() {

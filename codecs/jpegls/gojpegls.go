@@ -255,7 +255,10 @@ func (d *jlsDecoder) decodeRegular(q, sign, px int) int {
 	}
 	errval := unmapErrval(d.decodeValue(k, d.limit))
 	// k==0 bias flip (GetErrorCorrection: ErrVal ^= -1 when 2B+N-1 < 0).
-	if k == 0 && 2*d.b[q]+d.n[q]-1 < 0 {
+	// CharLS calls get_error_correction(near_lossless), which returns 0 whenever
+	// its argument is nonzero — so the flip applies in pure-lossless mode only
+	// (NEAR==0). In near-lossless mode the correction is never applied.
+	if k == 0 && d.f.near == 0 && 2*d.b[q]+d.n[q]-1 < 0 {
 		errval = -errval - 1
 	}
 	rx := d.computeRecon(px, sign*errval)
