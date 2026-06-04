@@ -1,6 +1,7 @@
 package jpegls
 
 import (
+	"bytes"
 	"encoding/binary"
 	"os"
 	"testing"
@@ -93,4 +94,48 @@ func FuzzGoJLS(f *testing.F) {
 		out := make([]byte, 1<<16)
 		_ = decodeJLSInto(data, out) // must not panic
 	})
+}
+
+// TestGoJLSEncodeRoundTrip encodes synthetic single-component images with the
+// pure-Go encoder and decodes them back with the pure-Go decoder, requiring an
+// exact (lossless) match.
+func TestGoJLSEncodeRoundTrip(t *testing.T) {
+	for _, tc := range []struct{ w, h, p int }{
+		{16, 12, 8}, {40, 30, 12}, {50, 40, 16}, {64, 64, 12},
+	} {
+		bps := 1
+		if tc.p > 8 {
+			bps = 2
+		}
+		maxv := (1 << tc.p) - 1
+		raw := make([]byte, tc.w*tc.h*bps)
+		for i := 0; i < tc.w*tc.h; i++ {
+			v := (i*5 + (i*i)%13) % (maxv + 1)
+			if bps == 1 {
+				raw[i] = byte(v)
+			} else {
+				raw[i*2] = byte(v)
+				raw[i*2+1] = byte(v >> 8)
+			}
+		}
+		enc, err := encodeJLS(raw, tc.w, tc.h, 1, tc.p)
+		if err != nil {
+			t.Fatalf("p%d encode: %v", tc.p, err)
+		}
+		out := make([]byte, len(raw))
+		if err := decodeJLSInto(enc, out); err != nil {
+			t.Fatalf("p%d decode: %v", tc.p, err)
+		}
+		if !bytes.Equal(out, raw) {
+			t.Fatalf("p%d round trip not lossless", tc.p)
+		}
+	}
+}
+
+// TestGoJLSEncodeRejectsUnsupported confirms multi-component and near-lossless
+// encode are reported unsupported rather than producing invalid output.
+func TestGoJLSEncodeRejectsUnsupported(t *testing.T) {
+	if _, err := encodeJLS(make([]byte, 3*4*4), 4, 4, 3, 8); err == nil {
+		t.Fatal("expected 3-component encode to be unsupported")
+	}
 }

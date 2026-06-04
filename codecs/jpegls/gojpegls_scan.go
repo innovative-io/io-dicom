@@ -366,8 +366,11 @@ func (gojpeglsBackend) DecodeContext(_ context.Context, encoded []byte, output [
 	return decodeJLSInto(encoded, output)
 }
 
-func (gojpeglsBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uint16, _ bool) ([]byte, error) {
-	return append([]byte(nil), raw...), nil // decode-focused; encode stays passthrough
+func (gojpeglsBackend) Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, nearLossless bool) ([]byte, error) {
+	if nearLossless {
+		return nil, errJLSUnsupported // near-lossless encode not implemented in pure Go
+	}
+	return encodeJLS(raw, int(width), int(height), int(samples), int(bitsa))
 }
 
 func registerPureGoBackend() {
