@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/innovative-io/io-dicom/codecs/deflate"
+	"github.com/innovative-io/io-dicom/codecs/internal/codecctx"
 	jpegcodec "github.com/innovative-io/io-dicom/codecs/jpeg"
 	jpeg2000codec "github.com/innovative-io/io-dicom/codecs/jpeg2000"
 	jpeglscodec "github.com/innovative-io/io-dicom/codecs/jpegls"
@@ -16,6 +17,18 @@ import (
 	smptecodec "github.com/innovative-io/io-dicom/codecs/smpte2110"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
 )
+
+// WithCodecThreads returns a context requesting that native codec backends use
+// n intra-frame worker threads for decode/encode. n <= 0 means auto (all
+// cores), the default. Pass n == 1 when decoding or encoding many independent
+// frames concurrently so each call stays single-threaded and the frames
+// themselves provide the parallelism, avoiding thread oversubscription.
+//
+// Only the native JPEG 2000 (OpenJPEG) and JPEG XL (libjxl) backends honor the
+// hint; all other codecs ignore it.
+func WithCodecThreads(ctx context.Context, n int) context.Context {
+	return codecctx.WithThreads(ctx, n)
+}
 
 // DecompressFrame decodes a single compressed frame payload into out. The
 // caller must pre-allocate out with the exact uncompressed frame byte size.

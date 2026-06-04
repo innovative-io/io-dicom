@@ -12,8 +12,10 @@ package transcoder
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/innovative-io/io-dicom/codecs"
 	"github.com/innovative-io/io-dicom/codecs/deflate"
@@ -221,6 +223,153 @@ func endEncapsulatedPixelData(obj media.DICOMObject, index int) int {
 	return index
 }
 
+// runFrameJobs runs work for each frame index in [0, frames) across a bounded
+// pool of goroutines, returning the first error encountered (annotated with the
+// frame number). Frames in a multi-frame image are independent, so decoding or
+// encoding them concurrently fills the CPU far better than the old one-at-a-time
+// loop.
+//
+// The context handed to work carries a per-frame intra-frame thread count
+// (codecs.WithCodecThreads) chosen so workers*threadsPerFrame stays near
+// GOMAXPROCS — this gives inter-frame parallelism without oversubscribing the
+// CPU, and lets the native codecs skip per-call thread-pool setup when a single
+// thread per frame is enough. A single-frame image runs inline with the
+// original context so it still uses all cores for that one frame.
+//
+// work must be safe to call concurrently for distinct j and must not touch
+// shared transcoder state (e.g. the DICOMObject); callers apply ordered results
+// after this returns.
+func runFrameJobs(ctx context.Context, frames uint32, work func(ctx context.Context, j uint32) error) error {
+	switch frames {
+	case 0:
+		return nil
+	case 1:
+		return work(ctx, 0)
+	}
+
+	cores := runtime.GOMAXPROCS(0)
+	workers := int(frames)
+	if workers > cores {
+		workers = cores
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	threadsPerFrame := cores / workers
+	if threadsPerFrame < 1 {
+		threadsPerFrame = 1
+	}
+	fctx := codecs.WithCodecThreads(ctx, threadsPerFrame)
+
+	jobs := make(chan uint32)
+	var (
+		mu         sync.Mutex
+		firstErr   error
+		firstFrame uint32
+		wg         sync.WaitGroup
+	)
+	failed := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return firstErr != nil
+	}
+	wg.Add(workers)
+	for w := 0; w < workers; w++ {
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				if failed() {
+					continue // drain remaining jobs cheaply once one has failed
+				}
+				if err := work(fctx, j); err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr, firstFrame = err, j
+					}
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	for j := uint32(0); j < frames; j++ {
+		jobs <- j
+	}
+	close(jobs)
+	wg.Wait()
+
+	if firstErr != nil {
+		return fmt.Errorf("transcoder: frame %d: %w", firstFrame, firstErr)
+	}
+	return nil
+}
+
+// encodeFramesConcurrent encodes every frame in parallel via runFrameJobs and
+// returns the encoded payloads in frame order. encodeOne must return a fresh
+// slice for frame j and must not touch shared transcoder state.
+func encodeFramesConcurrent(ctx context.Context, frames uint32, encodeOne func(ctx context.Context, j uint32) ([]byte, error)) ([][]byte, error) {
+	results := make([][]byte, frames)
+	err := runFrameJobs(ctx, frames, func(fctx context.Context, j uint32) error {
+		data, e := encodeOne(fctx, j)
+		if e != nil {
+			return e
+		}
+		results[j] = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+// appendEncapsulatedFrames writes a complete encapsulated pixel-data element
+// (offset table, one fragment per frame in order, sequence delimiter) and
+// returns the new tag index.
+func appendEncapsulatedFrames(obj media.DICOMObject, index int, frames [][]byte) int {
+	index = beginEncapsulatedPixelData(obj, index)
+	for _, payload := range frames {
+		index = appendEncapsulatedFrame(obj, index, payload)
+	}
+	return endEncapsulatedPixelData(obj, index)
+}
+
+// frameBounds returns the sample count and the [start,end) byte range of frame
+// j within a packed pixel buffer of the given geometry.
+func frameBounds(j uint32, cols uint16, rows uint16, bitsa uint16, RGB bool) (samples uint16, start uint32, end uint32) {
+	frameLen := uint32(cols) * uint32(rows) * uint32(bitsa) / 8
+	samples = 1
+	if RGB {
+		samples = 3
+		frameLen *= 3
+	}
+	start = j * frameLen
+	end = start + frameLen
+	return samples, start, end
+}
+
+// encodeJ2KFrame encodes frame j of img as JPEG 2000 / HTJ2K. ratio is the
+// OpenJPEG compression ratio (0 for lossless).
+func encodeJ2KFrame(ctx context.Context, img []byte, j uint32, cols uint16, rows uint16, bitsa uint16, RGB bool, ratio int) ([]byte, error) {
+	samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
+	var data []byte
+	var n int
+	if err := jpeg2000.J2KencodeContext(ctx, img[start:end], cols, rows, samples, bitsa, &data, &n, ratio); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// encodeJXLFrame encodes frame j of img as JPEG XL.
+func encodeJXLFrame(ctx context.Context, img []byte, j uint32, cols uint16, rows uint16, bitsa uint16, RGB bool, lossless bool) ([]byte, error) {
+	samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
+	var data []byte
+	var n int
+	if err := jpegxl.JXLencodeContext(ctx, img[start:end], cols, rows, samples, bitsa, &data, &n, lossless); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RGB bool, cols uint16, rows uint16, bitss uint16, bitsa uint16, pixelrep uint16, planar uint16, frames uint32, outTS string) error {
 	var offset, size, j uint32
 	var JPEGData []byte
@@ -374,69 +523,40 @@ func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RG
 	case transfersyntax.HTJ2KLossless.UID:
 		fallthrough
 	case transfersyntax.HTJ2KLosslessRPCL.UID:
-		index = beginEncapsulatedPixelData(obj, index)
-		for j = 0; j < frames; j++ {
-			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if RGB {
-				offset = 3 * offset
-				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, 0); err != nil {
-					return err
-				}
-			} else {
-				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, 0); err != nil {
-					return err
-				}
-			}
-			index = appendEncapsulatedFrame(obj, index, JPEGData)
-			JPEGData = nil
+		frameData, err := encodeFramesConcurrent(ctx, frames, func(fctx context.Context, j uint32) ([]byte, error) {
+			return encodeJ2KFrame(fctx, img, j, cols, rows, bitsa, RGB, 0)
+		})
+		if err != nil {
+			return err
 		}
-		index = endEncapsulatedPixelData(obj, index)
+		index = appendEncapsulatedFrames(obj, index, frameData)
 		*i = index
 	case transfersyntax.JPEG2000.UID:
 		fallthrough
 	case transfersyntax.JPEG2000MC.UID:
 		fallthrough
 	case transfersyntax.HTJ2K.UID:
-		index = beginEncapsulatedPixelData(obj, index)
-		for j = 0; j < frames; j++ {
-			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if RGB {
-				offset = 3 * offset
-				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, 10); err != nil {
-					return err
-				}
-			} else {
-				if err := jpeg2000.J2KencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, 10); err != nil {
-					return err
-				}
-			}
-			index = appendEncapsulatedFrame(obj, index, JPEGData)
-			JPEGData = nil
+		frameData, err := encodeFramesConcurrent(ctx, frames, func(fctx context.Context, j uint32) ([]byte, error) {
+			return encodeJ2KFrame(fctx, img, j, cols, rows, bitsa, RGB, 10)
+		})
+		if err != nil {
+			return err
 		}
-		index = endEncapsulatedPixelData(obj, index)
+		index = appendEncapsulatedFrames(obj, index, frameData)
 		*i = index
 	case transfersyntax.JPEGXLLossless.UID:
 		fallthrough
 	case transfersyntax.JPEGXLJPEGRecompression.UID:
 		fallthrough
 	case transfersyntax.JPEGXL.UID:
-		index = beginEncapsulatedPixelData(obj, index)
-		for j = 0; j < frames; j++ {
-			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if RGB {
-				offset = 3 * offset
-				if err := jpegxl.JXLencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGXLLossless.UID); err != nil {
-					return err
-				}
-			} else {
-				if err := jpegxl.JXLencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGXLLossless.UID); err != nil {
-					return err
-				}
-			}
-			index = appendEncapsulatedFrame(obj, index, JPEGData)
-			JPEGData = nil
+		lossless := outTS == transfersyntax.JPEGXLLossless.UID
+		frameData, err := encodeFramesConcurrent(ctx, frames, func(fctx context.Context, j uint32) ([]byte, error) {
+			return encodeJXLFrame(fctx, img, j, cols, rows, bitsa, RGB, lossless)
+		})
+		if err != nil {
+			return err
 		}
-		index = endEncapsulatedPixelData(obj, index)
+		index = appendEncapsulatedFrames(obj, index, frameData)
 		*i = index
 	case transfersyntax.JPIPHTJ2KReferenced.UID:
 		fallthrough
@@ -552,20 +672,27 @@ func uncompress(ctx context.Context, obj media.DICOMObject, i int, img []byte, s
 	single := size / frames
 	tsUID := obj.GetTransferSyntax().UID
 
+	// Collect the compressed payload for every frame first (cheap, and the tag
+	// references stay valid after deletion), then decode them concurrently into
+	// disjoint regions of img. Decoding is the expensive part and each frame is
+	// independent, so this is where the parallelism pays off; the object is only
+	// mutated here on the single goroutine.
 	obj.DelTag(i + 1) // Delete offset table.
+	frameData := make([][]byte, frames)
 	for j := uint32(0); j < frames; j++ {
-		offset := j * single
 		tag := obj.GetTagAt(i + 1)
 		if tag == nil {
 			return fmt.Errorf("transcoder: missing frame %d for transfer syntax %s", j, tsUID)
 		}
-		if err := codecs.DecompressFrame(ctx, tsUID, tag.Data, bitsa, PhotoInt, img[offset:offset+single]); err != nil {
-			return fmt.Errorf("transcoder: frame %d: %w", j, err)
-		}
+		frameData[j] = tag.Data
 		obj.DelTag(i + 1)
 	}
 	obj.DelTag(i + 1) // Delete sequence delimiter.
-	return nil
+
+	return runFrameJobs(ctx, frames, func(fctx context.Context, j uint32) error {
+		offset := j * single
+		return codecs.DecompressFrame(fctx, tsUID, frameData[j], bitsa, PhotoInt, img[offset:offset+single])
+	})
 }
 
 // deplanarizeRGBFrames converts RGB pixel data from planar format (all R
