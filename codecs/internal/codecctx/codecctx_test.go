@@ -9,8 +9,10 @@ func TestThreadsDefaultsToAuto(t *testing.T) {
 	if got := Threads(context.Background()); got != 0 {
 		t.Fatalf("Threads on a bare context = %d, want 0 (auto)", got)
 	}
-	//nolint:staticcheck // intentionally passing a nil context to test the guard
-	if got := Threads(nil); got != 0 {
+	// A nil context must not panic and reports auto. Use a nil-valued variable
+	// rather than the nil literal so staticcheck (SA1012) doesn't flag it.
+	var nilCtx context.Context
+	if got := Threads(nilCtx); got != 0 {
 		t.Fatalf("Threads(nil) = %d, want 0", got)
 	}
 }
