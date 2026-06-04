@@ -72,7 +72,7 @@ func parseJLSFrame(seg []byte, f *jlsFrame) error {
 	if nf < 1 || nf > 255 {
 		return errJLSUnsupported
 	}
-	if f.width*f.height*nf > maxJLSSamples {
+	if int64(f.width)*int64(f.height)*int64(nf) > maxJLSSamples {
 		return errJLSUnsupported
 	}
 	if len(seg) < 6+nf*3 {
@@ -156,8 +156,9 @@ func decodeJLSInto(encoded, output []byte) error {
 	if f.precision > 8 {
 		bps = 2
 	}
-	need := f.width * f.height * nc * bps
-	if need > len(output) {
+	// int64 to avoid overflow on 32-bit builds (nc up to 255).
+	need := int64(f.width) * int64(f.height) * int64(nc) * int64(bps)
+	if need > int64(len(output)) {
 		return errJLSOutputSize
 	}
 

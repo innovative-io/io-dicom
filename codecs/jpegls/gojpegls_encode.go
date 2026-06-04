@@ -336,8 +336,15 @@ func (d *jlsDecoder) encodeRun(w *jlsBitWriter, cur, prev []int, y, ra, x, W int
 // lossless output; NEAR>0 yields near-lossless output with the given error bound.
 func encodeJLS(raw []byte, width, height, samples, precision, near int) ([]byte, error) {
 	// Single-component is written non-interleaved (ILV=0); multi-component is
-	// written line-interleaved (ILV=1), matching the charls backend.
-	if width <= 0 || height <= 0 || samples < 1 || samples > 255 || precision < 2 || precision > 16 {
+	// written line-interleaved (ILV=1), matching the charls backend. width/height
+	// are written into 16-bit SOF fields, so they must fit in 1..0xFFFF.
+	if width <= 0 || width > 0xFFFF || height <= 0 || height > 0xFFFF ||
+		samples < 1 || samples > 255 || precision < 2 || precision > 16 {
+		return nil, errJLSUnsupported
+	}
+	// Cap total samples to the same bound as the decoder to avoid huge
+	// allocations. int64 avoids overflow on 32-bit builds.
+	if int64(width)*int64(height)*int64(samples) > maxJLSSamples {
 		return nil, errJLSUnsupported
 	}
 	// NEAR is written as a single byte in the SOS scan header and must not exceed
@@ -351,7 +358,7 @@ func encodeJLS(raw []byte, width, height, samples, precision, near int) ([]byte,
 	if precision > 8 {
 		bps = 2
 	}
-	if width*height*samples*bps != len(raw) {
+	if int64(width)*int64(height)*int64(samples)*int64(bps) != int64(len(raw)) {
 		return nil, errJLSUnsupported
 	}
 	ilv := 0
