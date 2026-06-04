@@ -169,10 +169,12 @@ var (
 	backendFactories         = map[string]func() Backend{
 		"passthrough": func() Backend { return passthroughBackend{} },
 	}
+	backendPriorities = map[string]int{}
 )
 
 func init() {
 	registerNativeBackends()
+	registerPureGoBackend()
 	selectDefaultBackend()
 }
 
@@ -198,17 +200,18 @@ func selectDefaultBackend() {
 }
 
 func preferredBackendNameLocked() string {
-	nativeNames := make([]string, 0, len(backendFactories))
+	best := "passthrough"
+	bestPriority := 0
 	for name := range backendFactories {
 		if name == "passthrough" {
 			continue
 		}
-		nativeNames = append(nativeNames, name)
+		p := backendPriorities[name]
+		if best == "passthrough" || p > bestPriority || (p == bestPriority && name < best) {
+			best, bestPriority = name, p
+		}
 	}
-	if len(nativeNames) != 1 {
-		return "passthrough"
-	}
-	return nativeNames[0]
+	return best
 }
 
 // SetBackend overrides the active JPEG backend for 12/16-bit paths.
@@ -232,8 +235,17 @@ func BackendName() string {
 	return currentName
 }
 
-// RegisterBackend registers a named backend factory for runtime selection.
+// RegisterBackend registers a named backend factory at the default priority (0).
 func RegisterBackend(name string, factory func() Backend) error {
+	return RegisterBackendWithPriority(name, factory, 0)
+}
+
+// RegisterBackendWithPriority registers a named backend factory with an explicit
+// selection priority. The default backend is the highest-priority registered
+// one (ties broken by name). A cgo backend registers above the pure-Go fallback
+// so it wins when built in, while the pure-Go backend is selected automatically
+// otherwise.
+func RegisterBackendWithPriority(name string, factory func() Backend, priority int) error {
 	if name == "" {
 		return errors.New("backend name is required")
 	}
@@ -247,6 +259,7 @@ func RegisterBackend(name string, factory func() Backend) error {
 		return errors.New("backend already registered")
 	}
 	backendFactories[name] = factory
+	backendPriorities[name] = priority
 	return nil
 }
 

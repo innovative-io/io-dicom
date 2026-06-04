@@ -177,19 +177,25 @@ func TestJ2KdecodeSignedCTIsLittleEndian(t *testing.T) {
 }
 
 func TestJ2KencodeSample(t *testing.T) {
-	if CGOEnabled {
-		SetBackend(nil)
-		t.Cleanup(func() { SetBackend(nil) })
-		if err := UseBackend("openjpeg"); err != nil {
-			t.Fatalf("expected openjpeg backend to be registered: %v", err)
-		}
-	}
 	rawData := loadBytesFromFile("../../testdata/test.raw", t)
 	var jpegData []byte
 	var jpegSize int
 
+	if !CGOEnabled {
+		// No pure-Go JPEG 2000 encoder: encode must fail rather than emit raw
+		// bytes as a fake compressed stream.
+		if err := J2Kencode(rawData, 1576, 1134, 3, 8, &jpegData, &jpegSize, 10); err == nil {
+			t.Fatal("expected J2Kencode to fail without the native backend")
+		}
+		return
+	}
+
+	SetBackend(nil)
+	t.Cleanup(func() { SetBackend(nil) })
+	if err := UseBackend("openjpeg"); err != nil {
+		t.Fatalf("expected openjpeg backend to be registered: %v", err)
+	}
 	if err := J2Kencode(rawData, 1576, 1134, 3, 8, &jpegData, &jpegSize, 10); err != nil {
 		t.Fatalf("J2Kencode() error = %v", err)
 	}
 }
-

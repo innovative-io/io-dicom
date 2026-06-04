@@ -49,15 +49,14 @@ func TestJXLPassthroughDecodeFails(t *testing.T) {
 	raw := []byte{1, 2, 3, 4, 5, 6}
 	var out []byte
 	var outSize int
-	if err := JXLencode(raw, 2, 1, 3, 8, &out, &outSize, true); err != nil {
-		t.Fatalf("unexpected JXLencode error: %v", err)
-	}
-	if outSize != len(raw) {
-		t.Fatalf("unexpected JXL encoded size: got %d, want %d", outSize, len(raw))
+	// There is no pure-Go JPEG XL encoder, so without the native backend encode
+	// must fail rather than emit the raw bytes as a fake stream.
+	if err := JXLencode(raw, 2, 1, 3, 8, &out, &outSize, true); err == nil {
+		t.Fatal("expected JXLencode to fail without native backend")
 	}
 
 	decoded := make([]byte, len(raw))
-	if err := JXLdecode(out, uint32(outSize), decoded); err == nil {
+	if err := JXLdecode([]byte{1, 2, 3, 4, 5, 6}, 6, decoded); err == nil {
 		t.Fatal("expected JXLdecode to fail without native backend")
 	}
 }

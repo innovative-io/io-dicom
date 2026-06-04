@@ -81,10 +81,10 @@ func (passthroughBackend) Decode(_ []byte, _ []byte) error {
 	return errBackendUnavailable
 }
 
-func (passthroughBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uint16, _ bool) ([]byte, error) {
-	encoded := make([]byte, len(raw))
-	copy(encoded, raw)
-	return encoded, nil
+func (passthroughBackend) Encode(_ []byte, _ uint16, _ uint16, _ uint16, _ uint16, _ bool) ([]byte, error) {
+	// No pure-Go JPEG XL encoder exists; erroring is correct rather than
+	// returning the raw bytes as if they were a valid compressed stream.
+	return nil, errBackendUnavailable
 }
 
 var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
@@ -93,7 +93,7 @@ func init() {
 	registerNativeBackends()
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
-		slog.Warn("jpegxl: no native backend available; encode will pass raw bytes unchanged (build with -tags libjxl)")
+		slog.Warn("jpegxl: no native backend available; decode and encode will fail (build with -tags libjxl)")
 	}
 }
 

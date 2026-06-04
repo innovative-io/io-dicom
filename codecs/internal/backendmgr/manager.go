@@ -31,6 +31,7 @@ type Manager[B Namer] struct {
 	passthroughName string
 	passthrough     func() B
 	factories       map[string]func() B
+	priorities      map[string]int
 }
 
 // New creates a Manager pre-seeded with the passthrough backend.
@@ -43,11 +44,23 @@ func New[B Namer](passthroughFactory func() B) *Manager[B] {
 		passthroughName: name,
 		passthrough:     passthroughFactory,
 		factories:       map[string]func() B{name: passthroughFactory},
+		priorities:      map[string]int{},
 	}
 }
 
-// Register adds a named factory. Returns an error if the name is already taken.
+// Register adds a named factory at the default priority (0). Returns an error if
+// the name is already taken.
 func (m *Manager[B]) Register(name string, factory func() B) error {
+	return m.RegisterWithPriority(name, factory, 0)
+}
+
+// RegisterWithPriority adds a named factory with an explicit selection priority.
+// When several non-passthrough backends are registered, SelectDefault picks the
+// highest-priority one (ties broken by name for determinism). This lets a cgo
+// backend (higher priority) win over a pure-Go fallback (lower priority) while
+// both are compiled in, and lets the pure-Go backend take over automatically
+// once the cgo backend is no longer built.
+func (m *Manager[B]) RegisterWithPriority(name string, factory func() B, priority int) error {
 	if name == "" {
 		return errors.New("backend name is required")
 	}
@@ -60,6 +73,7 @@ func (m *Manager[B]) Register(name string, factory func() B) error {
 		return errors.New("backend already registered")
 	}
 	m.factories[name] = factory
+	m.priorities[name] = priority
 	return nil
 }
 
@@ -149,8 +163,8 @@ func (m *Manager[B]) Validate(name string) error {
 	return nil
 }
 
-// SelectDefault picks the single non-passthrough registered backend, if exactly
-// one exists; otherwise leaves the current selection unchanged.
+// SelectDefault picks the highest-priority non-passthrough registered backend;
+// if none is registered it leaves the current selection unchanged.
 func (m *Manager[B]) SelectDefault() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -170,16 +184,20 @@ func (m *Manager[B]) SelectDefault() {
 	m.currentName = preferred
 }
 
+// preferredLocked returns the non-passthrough backend with the highest priority,
+// breaking ties by name so selection is deterministic. Returns the passthrough
+// name when no native backend is registered.
 func (m *Manager[B]) preferredLocked() string {
-	var nativeNames []string
+	best := m.passthroughName
+	bestPriority := 0
 	for name := range m.factories {
 		if name == m.passthroughName {
 			continue
 		}
-		nativeNames = append(nativeNames, name)
+		p := m.priorities[name]
+		if best == m.passthroughName || p > bestPriority || (p == bestPriority && name < best) {
+			best, bestPriority = name, p
+		}
 	}
-	if len(nativeNames) != 1 {
-		return m.passthroughName
-	}
-	return nativeNames[0]
+	return best
 }

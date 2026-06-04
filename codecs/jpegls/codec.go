@@ -57,10 +57,11 @@ func (passthroughBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uin
 var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 
 func init() {
-	registerNativeBackends()
+	registerNativeBackends() // charls (cgo), higher priority, when built with -tags charls
+	registerPureGoBackend()  // pure-Go gojpegls, the default fallback
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
-		slog.Warn("jpegls: no native backend available; encode will pass raw bytes unchanged (build with -tags charls)")
+		slog.Warn("jpegls: no decode backend available")
 	}
 }
 

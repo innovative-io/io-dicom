@@ -97,6 +97,11 @@ func TestGetDecompressedFrame_NonConformantCGET_JPEG(t *testing.T) {
 }
 
 func TestGetDecompressedFrame_NonConformantCGET_JPEG2000(t *testing.T) {
+	if !jpeg2000.CGOEnabled {
+		// Needs the openjpeg backend to both build the JPEG 2000 fragment and
+		// decode it; there is no pure-Go JPEG 2000 codec.
+		t.Skip("requires the openjpeg native backend")
+	}
 	const cols, rows = 8, 8
 	pixels := make([]byte, cols*rows)
 	for i := range pixels {

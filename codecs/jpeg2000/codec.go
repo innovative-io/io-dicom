@@ -53,10 +53,10 @@ func (passthroughBackend) Decode(_ []byte, _ []byte) error {
 	return errBackendUnavailable
 }
 
-func (passthroughBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uint16, _ int) ([]byte, error) {
-	encoded := make([]byte, len(raw))
-	copy(encoded, raw)
-	return encoded, nil
+func (passthroughBackend) Encode(_ []byte, _ uint16, _ uint16, _ uint16, _ uint16, _ int) ([]byte, error) {
+	// No pure-Go JPEG 2000 encoder exists; erroring is correct rather than
+	// returning the raw bytes as if they were a valid compressed stream.
+	return nil, errBackendUnavailable
 }
 
 var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
@@ -65,7 +65,7 @@ func init() {
 	registerNativeBackends()
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
-		slog.Warn("jpeg2000: no native backend available; encode will pass raw bytes unchanged (build with -tags openjpeg)")
+		slog.Warn("jpeg2000: no native backend available; decode and encode will fail (build with -tags openjpeg)")
 	}
 }
 
