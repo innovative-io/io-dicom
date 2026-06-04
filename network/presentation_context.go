@@ -134,10 +134,12 @@ func (pc *presentationContext) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 		return err
 	}
 
-	// Use a signed counter: pc.Length and GetSize are uint16, so the original
-	// "remaining -= size" could underflow below zero and wrap to ~65535, spinning
-	// this loop forever on a malformed/truncated context (a CPU-bound DoS found by
-	// FuzzAssociationRQRead). A signed remaining goes negative and exits cleanly.
+	// Decrement by the bytes actually consumed (a signed position delta) rather
+	// than by uidItem.GetSize(): GetSize computes length+4 in uint16 and wraps for
+	// large lengths, and the original uint16 "remaining" could underflow past zero
+	// to ~65535 — either of which spun this loop forever on a malformed/truncated
+	// context (a CPU-bound DoS found by FuzzAssociationRQRead). A signed remaining
+	// driven by real progress goes to/below zero and exits cleanly.
 	remaining := int(pc.Length) - 4 - int(pc.AbsSyntax.GetSize())
 	for remaining > 0 {
 		startPos := buf.GetPosition()
@@ -145,12 +147,13 @@ func (pc *presentationContext) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 		if err := transferSyntax.Read(buf); err != nil {
 			return err
 		}
+		consumed := buf.GetPosition() - startPos
 		// Defense in depth: if an item consumed no bytes the loop cannot make
 		// progress; bail rather than risk spinning.
-		if buf.GetPosition() <= startPos {
+		if consumed <= 0 {
 			return errors.New("pc::ReadDynamic, transfer syntax item made no progress")
 		}
-		remaining -= int(transferSyntax.GetSize())
+		remaining -= consumed
 		pc.TrnSyntaxs = append(pc.TrnSyntaxs, &transferSyntax)
 	}
 

@@ -235,6 +235,7 @@ func (aarq *associationRequest) Read(buf *media.DICOMBuffer) (err error) {
 
 	Count := int(buf.GetSize() - 4 - 16 - 16 - 32)
 	for Count > 0 {
+		startPos := buf.GetPosition()
 		TempByte, err := buf.GetByte()
 		if err != nil {
 			return err
@@ -246,20 +247,21 @@ func (aarq *associationRequest) Read(buf *media.DICOMBuffer) (err error) {
 			if err := aarq.AppContext.ReadDynamic(buf); err != nil {
 				return err
 			}
-			Count = Count - int(aarq.AppContext.GetSize())
 		case pdutype.PresentationContextItem:
 			PresContext := NewPresentationContext()
 			if err := PresContext.ReadDynamic(buf); err != nil {
 				return err
 			}
-			Count = Count - int(PresContext.Size())
 			aarq.PresContexts = append(aarq.PresContexts, PresContext)
 		case pdutype.UserInformationItem: // User Information
 			return aarq.UserInfo.ReadDynamic(buf)
 		default:
 			loggerOrDefault(aarq.logger).Error("unknown A-ASSOCIATE-RQ item", "item_type", TempByte)
-			Count = -1
+			return errors.New("aarq::ReadDynamic, unknown item type")
 		}
+		// Decrement by bytes actually consumed; the per-item uint16 Size()/GetSize()
+		// could wrap on a malformed large length and corrupt the accounting.
+		Count -= buf.GetPosition() - startPos
 	}
 
 	if Count == 0 {

@@ -189,6 +189,7 @@ func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 	Count := int(aaac.Length - 4 - 16 - 16 - 32)
 
 	for Count > 0 {
+		startPos := buf.GetPosition()
 		TempByte, err := buf.GetByte()
 		if err != nil {
 			return err
@@ -199,23 +200,22 @@ func (aaac *associationAccept) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 			if err := aaac.AppContext.ReadDynamic(buf); err != nil {
 				return err
 			}
-			Count = Count - int(aaac.AppContext.GetSize())
 		case pdutype.PresentationContextAcceptItem:
 			PresContextAccept := NewPresentationContextAccept()
 			if err := PresContextAccept.ReadDynamic(buf); err != nil {
 				return err
 			}
-			Count = Count - int(PresContextAccept.Size())
 			aaac.PresContextAccepts = append(aaac.PresContextAccepts, PresContextAccept)
 		case pdutype.UserInformationItem: // User Information
 			if err := aaac.UserInfo.ReadDynamic(buf); err != nil {
 				return err
 			}
-			Count = Count - int(aaac.UserInfo.Size())
 		default:
-			Count = -1
 			return errors.New("aaac::ReadDynamic, unknown Item " + strconv.Itoa(int(TempByte)))
 		}
+		// Decrement by bytes actually consumed; the per-item uint16 Size()/GetSize()
+		// could wrap on a malformed large length and corrupt the accounting.
+		Count -= buf.GetPosition() - startPos
 	}
 
 	aaLog := loggerOrDefault(aaac.logger)
