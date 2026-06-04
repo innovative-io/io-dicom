@@ -175,7 +175,9 @@ func JXLencodeContext(ctx context.Context, rawData []byte, width uint16, height 
 	if err != nil {
 		return err
 	}
-	*outData = append((*outData)[:0], encoded...)
+	// encoded is already a freshly allocated slice (C.GoBytes or the passthrough
+	// backend's copy), so take ownership directly instead of copying it again.
+	*outData = encoded
 	*outSize = len(encoded)
 	return nil
 }

@@ -430,7 +430,7 @@ func (libjxlBackend) DecodeContext(_ context.Context, encoded []byte, output []b
 	if len(encoded) > maxCodecPayloadBytes || len(output) > maxCodecPayloadBytes {
 		return errInvalidJXLPayload
 	}
-	errBuf := make([]C.char, 256)
+	var errBuf [256]C.char
 	rc := C.io_libjxl_decode(
 		(*C.uint8_t)(unsafe.Pointer(&encoded[0])),
 		C.size_t(len(encoded)),
@@ -479,7 +479,7 @@ func (libjxlBackend) EncodeContext(_ context.Context, raw []byte, width uint16, 
 		return nil, errLibJXLInvalidRawSize
 	}
 
-	errBuf := make([]C.char, 256)
+	var errBuf [256]C.char
 	var outPtr *C.uint8_t
 	var outSize C.size_t
 	rc := C.io_libjxl_encode(

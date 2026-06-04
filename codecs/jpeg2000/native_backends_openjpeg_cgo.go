@@ -392,10 +392,17 @@ static int io_openjpeg_encode(const uint8_t* src, size_t src_size,
 	image->y1 = height;
 
 	size_t pixels = (size_t)width * (size_t)height;
+	// Cache the planar component data pointers so the inner loop avoids the
+	// image->comps[comp].data indirection on every sample (samples is validated
+	// to be 1 or 3 above).
+	OPJ_INT32* comp_data[3];
+	for (uint16_t comp = 0; comp < samples; ++comp) {
+		comp_data[comp] = image->comps[comp].data;
+	}
 	if (bytes_per_sample == 1) {
 		for (size_t i = 0; i < pixels; ++i) {
 			for (uint16_t comp = 0; comp < samples; ++comp) {
-				image->comps[comp].data[i] = src[i * samples + comp];
+				comp_data[comp][i] = src[i * samples + comp];
 			}
 		}
 	} else {
@@ -403,7 +410,7 @@ static int io_openjpeg_encode(const uint8_t* src, size_t src_size,
 			for (uint16_t comp = 0; comp < samples; ++comp) {
 				size_t offset = (i * samples + comp) * 2;
 				// Little-endian input to match the DICOM uncompressed convention.
-				image->comps[comp].data[i] = (OPJ_INT32)src[offset] | ((OPJ_INT32)src[offset + 1] << 8);
+				comp_data[comp][i] = (OPJ_INT32)src[offset] | ((OPJ_INT32)src[offset + 1] << 8);
 			}
 		}
 	}
@@ -500,7 +507,7 @@ func (openjpegBackend) DecodeContext(_ context.Context, encoded []byte, output [
 		return errInvalidJ2KPayload
 	}
 
-	errBuf := make([]C.char, 256)
+	var errBuf [256]C.char
 	rc := C.io_openjpeg_decode(
 		(*C.uint8_t)(unsafe.Pointer(&encoded[0])),
 		C.size_t(len(encoded)),
@@ -546,7 +553,7 @@ func (openjpegBackend) EncodeContext(_ context.Context, raw []byte, width uint16
 		return nil, errOpenJPEGInvalidRawSize
 	}
 
-	errBuf := make([]C.char, 256)
+	var errBuf [256]C.char
 	var outPtr *C.uint8_t
 	var outSize C.size_t
 	rc := C.io_openjpeg_encode(
