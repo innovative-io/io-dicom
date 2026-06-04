@@ -122,6 +122,12 @@ func parseJLSScan(seg []byte, f *jlsFrame) error {
 	if f.ilv != 0 {
 		return errJLSUnsupported // interleaved scans not yet supported
 	}
+	// tail[2] is the point-transform field (Al). The decoder does not apply a
+	// point transform, so a non-zero value would silently yield wrong pixels —
+	// reject it as unsupported.
+	if tail[2] != 0 {
+		return errJLSUnsupported
+	}
 	return nil
 }
 

@@ -308,7 +308,11 @@ func encodeJLS(raw []byte, width, height, samples, precision, near int) ([]byte,
 	if width <= 0 || height <= 0 || samples != 1 || precision < 2 || precision > 16 {
 		return nil, errJLSUnsupported
 	}
-	if near < 0 {
+	// NEAR is written as a single byte in the SOS scan header and must not exceed
+	// MAXVAL (T.87 C.2.4.1.1). Reject out-of-range values rather than truncating
+	// them into a non-conformant stream.
+	maxval := (1 << precision) - 1
+	if near < 0 || near > 255 || near > maxval {
 		return nil, errJLSUnsupported
 	}
 	bps := 1

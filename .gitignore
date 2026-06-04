@@ -15,3 +15,6 @@ datastore
 .local
 testdata/
 bench/transcode/dcmtk_transcode_bench
+
+# Local Claude Code tooling state (settings, scheduled-task locks, etc.)
+.claude/
