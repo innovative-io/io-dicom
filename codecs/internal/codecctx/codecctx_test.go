@@ -34,3 +34,13 @@ func TestWithThreadsRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestWithThreadsNilParent(t *testing.T) {
+	// A nil parent must not panic (context.WithValue would); the hint is still
+	// recorded on a fresh background context.
+	var nilCtx context.Context
+	ctx := WithThreads(nilCtx, 2)
+	if got := Threads(ctx); got != 2 {
+		t.Fatalf("Threads after WithThreads(nil, 2) = %d, want 2", got)
+	}
+}

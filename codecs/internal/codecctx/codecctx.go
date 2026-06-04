@@ -16,6 +16,9 @@ type threadsKey struct{}
 // intra-frame worker threads. n <= 0 means "auto" (use all available cores),
 // which is the default when the hint is absent. n == 1 means single-threaded.
 func WithThreads(ctx context.Context, n int) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if n < 0 {
 		n = 0
 	}
