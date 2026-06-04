@@ -123,3 +123,47 @@ func TestGoJPEGDCT12CloseToLibjpeg(t *testing.T) {
 		})
 	}
 }
+
+// TestGoJPEGEncodeDecodesInLibjpeg confirms the pure-Go lossless encoder emits
+// standard-conformant output by decoding it with libjpeg and requiring an exact
+// round trip.
+func TestGoJPEGEncodeDecodesInLibjpeg(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		w, h, samples, p int
+	}{
+		{"gray12", 64, 40, 1, 12},
+		{"gray16", 51, 33, 1, 16},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := make([]byte, tc.w*tc.h*tc.samples*2)
+			maxv := (1 << tc.p) - 1
+			for i := 0; i < tc.w*tc.h*tc.samples; i++ {
+				v := (i*11 + (i*i)%17) % (maxv + 1)
+				raw[i*2] = byte(v)
+				raw[i*2+1] = byte(v >> 8)
+			}
+			enc, err := encodeLosslessJPEG(raw, tc.w, tc.h, tc.samples, tc.p)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			t.Cleanup(func() { SetBackend(nil) })
+			if err := UseBackend("libjpeg"); err != nil {
+				t.Skipf("libjpeg unavailable: %v", err)
+			}
+			out := make([]byte, len(raw))
+			var derr error
+			if tc.p > 12 {
+				derr = DIJG16decode(enc, uint32(len(enc)), out, uint32(len(out)))
+			} else {
+				derr = DIJG12decode(enc, uint32(len(enc)), out, uint32(len(out)))
+			}
+			if derr != nil {
+				t.Fatalf("libjpeg decode of pure-Go output: %v", derr)
+			}
+			if !bytes.Equal(out, raw) {
+				t.Fatal("libjpeg did not round-trip the pure-Go encoded stream")
+			}
+		})
+	}
+}

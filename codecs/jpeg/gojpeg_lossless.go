@@ -397,7 +397,14 @@ func decodeScan(entropy []byte, frame *losslessFrame, huff *[4]*huffTable) ([]in
 				if s > 16 {
 					return nil, errGoJPEGMalformed
 				}
-				diff := extend(br.receive(int(s)), int(s))
+				// SSSS=16 is the special max category: the difference is -32768
+				// and no additional bits are sent (T.81 lossless).
+				var diff int
+				if s == 16 {
+					diff = -32768
+				} else {
+					diff = extend(br.receive(int(s)), int(s))
+				}
 
 				var px int
 				switch {
@@ -493,16 +500,15 @@ func (gojpegBackend) Decode16(encoded []byte, output []byte) error {
 	return gojpegDecodeInto(encoded, output)
 }
 
-// Encode12/Encode16 are not implemented in pure Go; they preserve the prior
-// no-cgo passthrough behavior (raw bytes copied through) rather than changing
-// encode semantics in this decode-focused change. Build with -tags libjpeg for
-// real 12/16-bit JPEG encoding.
-func (gojpegBackend) Encode12(raw []byte, _ uint16, _ uint16, _ uint16, _ int) ([]byte, error) {
-	return append([]byte(nil), raw...), nil
+// Encode12/Encode16 produce lossless SOF3 JPEG (predictor 1), matching what the
+// libjpeg backend's lossless encode emits. The output round-trips exactly
+// through any conforming decoder.
+func (gojpegBackend) Encode12(raw []byte, width uint16, height uint16, samples uint16, _ int) ([]byte, error) {
+	return encodeLosslessJPEG(raw, int(width), int(height), int(samples), 12)
 }
 
-func (gojpegBackend) Encode16(raw []byte, _ uint16, _ uint16, _ uint16, _ int) ([]byte, error) {
-	return append([]byte(nil), raw...), nil
+func (gojpegBackend) Encode16(raw []byte, width uint16, height uint16, samples uint16, _ int) ([]byte, error) {
+	return encodeLosslessJPEG(raw, int(width), int(height), int(samples), 16)
 }
 
 // gojpegBackendPriority is below the cgo libjpeg backend so libjpeg wins when
