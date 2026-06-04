@@ -4,6 +4,7 @@ package jpeg
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 )
 
@@ -59,6 +60,65 @@ func TestGoJPEGLosslessMatchesLibjpeg(t *testing.T) {
 					}
 				}
 				t.Fatalf("pure-Go decode differs from libjpeg in %d/%d bytes", n, len(want))
+			}
+		})
+	}
+}
+
+// TestGoJPEGDCT12CloseToLibjpeg checks the pure-Go 12-bit DCT decoder against
+// libjpeg on the Extended (SOF1) fixtures. DCT is lossy and the IDCT rounding
+// differs between decoders, so this compares with a small tolerance rather than
+// requiring bit-exact equality.
+func TestGoJPEGDCT12CloseToLibjpeg(t *testing.T) {
+	cases := []string{
+		"../../testdata/cornerstone-CTImage-jpeg-process2-4.dcm",
+		"../../testdata/pydicom-JPGExtended.dcm",
+	}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			dcm := loadBytesFromFile(path, t)
+			frame := extractFirstDICOMEncapsulatedFrame(t, dcm)
+			f, err := decodeDCT(frame)
+			if err != nil {
+				t.Fatalf("decodeDCT: %v", err)
+			}
+			size := f.width * f.height * len(f.comps) * 2
+
+			t.Cleanup(func() { SetBackend(nil) })
+			decode := func(backend string) []byte {
+				if err := UseBackend(backend); err != nil {
+					t.Skipf("backend %s unavailable: %v", backend, err)
+				}
+				out := make([]byte, size)
+				if err := DIJG12decode(frame, uint32(len(frame)), out, uint32(size)); err != nil {
+					t.Fatalf("%s decode: %v", backend, err)
+				}
+				return out
+			}
+			want := decode("libjpeg")
+			got := decode("gojpeg")
+
+			n := size / 2
+			var maxDiff, sumDiff int64
+			for i := 0; i < n; i++ {
+				a := int64(binary.LittleEndian.Uint16(want[i*2:]))
+				b := int64(binary.LittleEndian.Uint16(got[i*2:]))
+				d := a - b
+				if d < 0 {
+					d = -d
+				}
+				if d > maxDiff {
+					maxDiff = d
+				}
+				sumDiff += d
+			}
+			mean := float64(sumDiff) / float64(n)
+			t.Logf("%s: maxDiff=%d meanDiff=%.4f over %d samples", path, maxDiff, mean, n)
+			if maxDiff > 4 {
+				t.Fatalf("max abs diff %d exceeds tolerance (4)", maxDiff)
+			}
+			if mean > 0.5 {
+				t.Fatalf("mean abs diff %.4f exceeds tolerance (0.5)", mean)
 			}
 		})
 	}

@@ -30,6 +30,12 @@ const (
 	mDRI  = 0xDD
 )
 
+// maxGoJPEGSamples bounds the total sample count derived from frame headers so a
+// malformed SOF claiming huge dimensions cannot trigger a giant allocation
+// before the output-buffer size is even checked (~256 Mpixel, generous for
+// medical imaging).
+const maxGoJPEGSamples = 1 << 28
+
 // huffTable is a canonical Huffman decode table built per T.81 Annex C/F.
 type huffTable struct {
 	minCode [17]int // minCode[l] = smallest code of length l
@@ -254,6 +260,9 @@ func parseSOF3(seg []byte, frame *losslessFrame) error {
 	if frame.precision < 2 || frame.precision > 16 || frame.width == 0 || frame.height == 0 {
 		return errGoJPEGUnsupported
 	}
+	if frame.width*frame.height*nf > maxGoJPEGSamples {
+		return errGoJPEGUnsupported
+	}
 	if len(seg) < 6+nf*3 {
 		return errGoJPEGMalformed
 	}
@@ -314,6 +323,9 @@ func parseSOS(seg []byte, frame *losslessFrame) error {
 	for c := 0; c < ns; c++ {
 		cs := seg[1+c*2]
 		td := seg[1+c*2+1] >> 4
+		if td > 3 {
+			return errGoJPEGMalformed // table selector must index the 4-entry table set
+		}
 		// Map the scan component to the frame component order.
 		matched := false
 		for fc := range frame.comps {
@@ -470,15 +482,15 @@ func (gojpegBackend) SupportedTransferSyntaxUIDs() []string {
 }
 
 func (gojpegBackend) Decode8Context(_ context.Context, encoded []byte, output []byte) error {
-	return decodeLosslessInto(encoded, output)
+	return gojpegDecodeInto(encoded, output)
 }
 
 func (gojpegBackend) Decode12(encoded []byte, output []byte) error {
-	return decodeLosslessInto(encoded, output)
+	return gojpegDecodeInto(encoded, output)
 }
 
 func (gojpegBackend) Decode16(encoded []byte, output []byte) error {
-	return decodeLosslessInto(encoded, output)
+	return gojpegDecodeInto(encoded, output)
 }
 
 // Encode12/Encode16 are not implemented in pure Go; they preserve the prior
