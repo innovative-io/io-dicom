@@ -9,9 +9,10 @@ import (
 )
 
 // CGOEnabled reports whether a native (cgo) JPEG 2000 backend is compiled in.
-// There is none anymore — decode and lossless encode are pure Go — so it is
-// always false. Retained for API compatibility with callers/tests.
-var CGOEnabled = nativeBackendEnabled
+// The openjpeg backend was retired in favor of the pure-Go gojpeg2000 codec
+// (decode + lossless encode), so this is always false; it is retained for API
+// compatibility with callers/tests (matching codecs/jpeg and codecs/jpegls).
+const CGOEnabled = false
 
 const maxCodecPayloadBytes = 512 << 20
 
@@ -65,8 +66,7 @@ func (passthroughBackend) Encode(_ []byte, _ uint16, _ uint16, _ uint16, _ uint1
 var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 
 func init() {
-	registerNativeBackends() // no-op (no native backend); kept for symmetry
-	registerPureGoBackend()  // pure-Go gojpeg2000 (decode + lossless 5/3 encode)
+	registerPureGoBackend() // pure-Go gojpeg2000 (decode + lossless 5/3 encode)
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
 		slog.Warn("jpeg2000: no decode backend available")
