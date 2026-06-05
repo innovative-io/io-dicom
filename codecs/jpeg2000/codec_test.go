@@ -44,13 +44,21 @@ func TestJ2KPureGoBackendRejectsBadInput(t *testing.T) {
 	}
 	t.Cleanup(func() { SetBackend(nil) })
 
+	// The pure-Go backend encodes lossless 5/3; a 2×2 8-bit image must round-trip.
 	raw := []byte{1, 2, 3, 4}
 	var out []byte
 	var outSize int
-	// There is no pure-Go JPEG 2000 encoder, so encode must fail rather than emit
-	// the raw bytes as a fake compressed stream.
-	if err := J2Kencode(raw, 2, 2, 1, 8, &out, &outSize, 10); err == nil {
-		t.Fatal("expected pure-Go J2Kencode to fail (no encoder)")
+	if err := J2Kencode(raw, 2, 2, 1, 8, &out, &outSize, 10); err != nil {
+		t.Fatalf("pure-Go J2Kencode: %v", err)
+	}
+	dec := make([]byte, len(raw))
+	if err := J2Kdecode(out, uint32(outSize), dec); err != nil {
+		t.Fatalf("decode of pure-Go encode: %v", err)
+	}
+	for i := range raw {
+		if raw[i] != dec[i] {
+			t.Fatalf("encode/decode round-trip mismatch at %d: got %d want %d", i, dec[i], raw[i])
+		}
 	}
 
 	// Decoding non-codestream input must error, not panic or emit garbage.

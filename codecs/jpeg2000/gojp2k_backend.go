@@ -28,8 +28,14 @@ func (gojpeg2000Backend) Decode(encoded []byte, output []byte) (err error) {
 }
 
 // Encode is not implemented in pure Go; J2K encoding still requires openjpeg.
-func (gojpeg2000Backend) Encode(_ []byte, _ uint16, _ uint16, _ uint16, _ uint16, _ int) ([]byte, error) {
-	return nil, errJ2KUnsupported
+func (gojpeg2000Backend) Encode(raw []byte, width, height, samples, bitsa uint16, _ int) (data []byte, err error) {
+	// Pure-Go encode is lossless 5/3 only; ratio (lossy rate control) is ignored.
+	defer func() {
+		if r := recover(); r != nil {
+			data, err = nil, errJ2KMalformed
+		}
+	}()
+	return goJ2Kencode(raw, int(width), int(height), int(samples), int(bitsa))
 }
 
 func registerPureGoBackend() {
