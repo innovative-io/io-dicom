@@ -82,13 +82,3 @@ func TestEIJG8encodeSample(t *testing.T) {
 		t.Fatalf("EIJG8encode() error = %v", err)
 	}
 }
-
-func TestEIJG16encodeSample(t *testing.T) {
-	rawData := loadBytesFromFile("../../testdata/test.raw", t)
-	var jpegData []byte
-	var jpegSize int
-
-	if err := EIJG16encode(rawData, 1576, 1134, 3, &jpegData, &jpegSize, 4); err != nil {
-		t.Fatalf("EIJG16encode() error = %v", err)
-	}
-}

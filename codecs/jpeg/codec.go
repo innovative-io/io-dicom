@@ -12,11 +12,14 @@ import (
 	"sync"
 )
 
-var CGOEnabled = nativeBackendEnabled
+// CGOEnabled reports whether a native cgo JPEG backend is compiled in. The
+// libjpeg backend was retired in favor of the pure-Go gojpeg codec, so this is
+// always false; it is retained for API compatibility.
+const CGOEnabled = false
 
 const maxCodecPayloadBytes = 512 << 20
 
-var errBackendUnavailable = errors.New("jpeg 12/16-bit decode requires the libjpeg native backend (build with -tags libjpeg)")
+var errBackendUnavailable = errors.New("no JPEG decode backend available for 12/16-bit profiles")
 
 var (
 	errPayloadTooLarge    = errors.New("jpeg: payload exceeds maximum allowed size")
@@ -173,18 +176,22 @@ var (
 )
 
 func init() {
-	registerNativeBackends()
-	registerPureGoBackend()
+	registerPureGoBackend() // pure-Go gojpeg is the only built-in backend
 	selectDefaultBackend()
 }
 
 func selectDefaultBackend() {
 	backendMu.Lock()
 	defer backendMu.Unlock()
+	selectDefaultBackendLocked()
+}
 
+// selectDefaultBackendLocked picks the highest-priority registered backend
+// (pure-Go gojpeg by default). The caller must hold backendMu.
+func selectDefaultBackendLocked() {
 	preferred := preferredBackendNameLocked()
 	if preferred == "passthrough" {
-		slog.Warn("jpeg: no native backend available; 12/16-bit encode will pass raw bytes unchanged (build with -tags libjpeg)")
+		slog.Warn("jpeg: no decode backend available")
 		return
 	}
 	factory := backendFactories[preferred]
@@ -215,13 +222,12 @@ func preferredBackendNameLocked() string {
 }
 
 // SetBackend overrides the active JPEG backend for 12/16-bit paths.
-// Passing nil resets to default passthrough behavior.
+// Passing nil resets to the default (pure-Go gojpeg) backend.
 func SetBackend(backend Backend) {
 	backendMu.Lock()
 	defer backendMu.Unlock()
 	if backend == nil {
-		currentBackend = passthroughBackend{}
-		currentName = "passthrough"
+		selectDefaultBackendLocked()
 		return
 	}
 	currentBackend = backend

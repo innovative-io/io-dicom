@@ -1,6 +1,9 @@
 package jpegls
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 var mockSupportedTransferSyntaxUIDs = []string{"1.2.840.10008.1.2.4.80", "1.2.840.10008.1.2.4.81"}
 
@@ -38,27 +41,29 @@ func (m *mockBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uint16,
 	return out, nil
 }
 
-func TestJLSPassthroughDecodeFails(t *testing.T) {
+func TestJLSDefaultBackendRoundTrips(t *testing.T) {
 	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
 
-	if CGOEnabled != nativeBackendEnabled {
-		t.Fatalf("unexpected CGOEnabled value: got %v want %v", CGOEnabled, nativeBackendEnabled)
+	if CGOEnabled {
+		t.Fatal("CGOEnabled should be false after the charls backend was retired")
+	}
+	if BackendName() != "gojpegls" {
+		t.Fatalf("expected default backend gojpegls, got %s", BackendName())
 	}
 
-	raw := []byte{1, 2, 3, 4}
+	raw := []byte{10, 20, 30, 40}
 	var out []byte
 	var outSize int
 	if err := JLSencode(raw, 2, 2, 1, 8, &out, &outSize, false); err != nil {
 		t.Fatalf("unexpected JLSencode error: %v", err)
 	}
-	if outSize != len(raw) {
-		t.Fatalf("unexpected JLS encoded size: got %d, want %d", outSize, len(raw))
-	}
-
 	decoded := make([]byte, len(raw))
-	if err := JLSdecode(out, uint32(outSize), decoded); err == nil {
-		t.Fatal("expected JLSdecode to fail without native backend")
+	if err := JLSdecode(out, uint32(outSize), decoded); err != nil {
+		t.Fatalf("unexpected JLSdecode error: %v", err)
+	}
+	if !bytes.Equal(decoded, raw) {
+		t.Fatalf("pure-Go JPEG-LS round trip mismatch: got %v want %v", decoded, raw)
 	}
 }
 
@@ -150,19 +155,10 @@ func TestJLSBackendRegistry(t *testing.T) {
 	}
 }
 
-func TestJLSNativeBackendRegistrationMatchesFlag(t *testing.T) {
-	foundCharLS := false
+func TestJLSNoCharLSBackend(t *testing.T) {
 	for _, name := range AvailableBackends() {
 		if name == "charls" {
-			foundCharLS = true
-			break
+			t.Fatal("charls backend should not be registered after retirement")
 		}
-	}
-
-	if CGOEnabled && !foundCharLS {
-		t.Fatal("expected charls backend when CGOEnabled is true")
-	}
-	if !CGOEnabled && foundCharLS {
-		t.Fatal("did not expect charls backend when CGOEnabled is false")
 	}
 }

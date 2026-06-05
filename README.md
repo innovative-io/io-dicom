@@ -159,7 +159,8 @@ Latest architecture cleanup includes package path renames.
   - JPIP HTJ2K passthrough encode helpers (`codecs/jpip`)
   - MPEG-2 / MPEG-4 AVC / HEVC passthrough encode helpers (`codecs/mpeg`)
 
-- Decode behavior without the matching native backend now fails explicitly instead of returning compressed payload bytes as if they were decoded pixels. Build with the matching tag (`libjpeg`, `openjpeg`, `charls`, `libjxl`, `openjph`, `ffmpeg`, `st2110`) for production decode/transcode paths.
+- The JPEG family (baseline/extended/lossless) and JPEG-LS (lossless and near-lossless, single- and multi-component) decode and encode entirely in pure Go — no build tag or cgo required. The former `libjpeg` (JPEG) and `charls` (JPEG-LS) cgo backends have been retired; their correctness is preserved by frozen golden vectors under `codecs/jpeg/golden` and `codecs/jpegls/golden`.
+- For the remaining cgo-only codecs, decode without the matching native backend fails explicitly instead of returning compressed payload bytes as if they were decoded pixels. Build with the matching tag (`openjpeg`, `libjxl`, `openjph`, `ffmpeg`, `st2110`) for those production decode/transcode paths.
 
 ## Codec-Backed Transfer Syntaxes
 
@@ -244,26 +245,15 @@ the supported syntax families.
 - `codecs/smpte2110` now supports pluggable backends via `SetBackend`.
 - Default behavior remains pure-Go passthrough for no-cgo environments.
 - Builds that register exactly one native backend for a codec family now select it automatically during package initialization.
-- `codecs/jpeg` also supports named backend registration and selection for
-  12/16-bit paths via `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
-- `codecs/jpeg` now includes a build-tagged `libjpeg` backend registration path
-  for 12/16-bit profiles:
-  - default builds keep pure-Go passthrough (`CGOEnabled == false`),
-  - `-tags libjpeg` with cgo enables `CGOEnabled == true` and registers backend name `libjpeg`.
-  - the `libjpeg` backend now links directly against libjpeg-turbo for in-memory
-    12/16-bit lossless encode/decode behavior with passthrough-compatible fallback semantics.
-  - prerequisites for tagged builds:
-    - `pkg-config` must resolve a libjpeg development package such as libjpeg-turbo.
-- `codecs/jpegls` also supports named backend registration and selection via
-  `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
-- `codecs/jpegls` now includes a build-tagged `charls` backend registration path:
-  - default builds keep pure-Go passthrough (`CGOEnabled == false`),
-  - `-tags charls` with cgo enables `CGOEnabled == true` and registers backend name `charls`.
-  - the `charls` backend now bridges to the CharLS C API for encode/decode when
-    CharLS is available in the build environment.
-  - prerequisites for tagged builds:
-    - `pkg-config` must be available,
-    - CharLS development package must be installed and discoverable via `PKG_CONFIG_PATH` (providing `charls.pc`).
+- `codecs/jpeg` implements baseline (`.50`), extended 12-bit (`.51`), and lossless
+  (`.57`/`.70`) decode and encode entirely in pure Go (`CGOEnabled == false`). The
+  former `-tags libjpeg` cgo backend has been retired; `RegisterBackend`/`UseBackend`
+  remain for custom backends.
+- `codecs/jpegls` implements lossless (`.80`) and near-lossless (`.81`) decode and
+  encode entirely in pure Go (`CGOEnabled == false`), covering single- and
+  multi-component scans (non-interleaved, line-interleaved, and sample-interleaved
+  decode). The former `-tags charls` cgo backend has been retired; correctness is
+  preserved by frozen golden vectors validated against CharLS at the retirement commit.
 - `codecs/jpeg2000` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
 - `codecs/jpeg2000` now includes a build-tagged `openjpeg` backend registration path:

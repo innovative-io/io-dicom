@@ -8,12 +8,15 @@ import (
 	"github.com/innovative-io/io-dicom/codecs/internal/backendmgr"
 )
 
-var CGOEnabled = nativeBackendEnabled
+// CGOEnabled reports whether a native cgo JPEG-LS backend is compiled in. The
+// charls backend was retired in favor of the pure-Go gojpegls codec, so this is
+// always false; it is retained for API compatibility.
+const CGOEnabled = false
 
 const maxCodecPayloadBytes = 512 << 20
 
 var errInvalidJLSPayload = errors.New("invalid JPEG-LS payload size")
-var errBackendUnavailable = errors.New("jpeg-ls decode requires the charls native backend (build with -tags charls)")
+var errBackendUnavailable = errors.New("no JPEG-LS decode backend available")
 
 var supportedTransferSyntaxUIDs = []string{
 	"1.2.840.10008.1.2.4.80",
@@ -57,18 +60,21 @@ func (passthroughBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uin
 var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 
 func init() {
-	registerNativeBackends() // charls (cgo), higher priority, when built with -tags charls
-	registerPureGoBackend()  // pure-Go gojpegls, the default fallback
+	registerPureGoBackend() // pure-Go gojpegls is the only built-in backend
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
 		slog.Warn("jpegls: no decode backend available")
 	}
 }
 
-// SetBackend overrides the active JPEG-LS backend. Passing nil resets to passthrough.
+// SetBackend overrides the active JPEG-LS backend. Passing nil resets to the
+// default (pure-Go gojpegls) backend.
 func SetBackend(backend Backend) {
 	if backend == nil {
+		// Reset to the default (pure-Go gojpegls) rather than the passthrough
+		// fallback, since gojpegls is the only real backend after charls retired.
 		mgr.Reset()
+		mgr.SelectDefault()
 		return
 	}
 	mgr.Set(backend)

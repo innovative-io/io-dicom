@@ -95,38 +95,6 @@ func TestBaseline8RoundTripGray(t *testing.T) {
 	}
 }
 
-func TestJPEG12PassthroughDecodeFails(t *testing.T) {
-	SetBackend(nil)
-	t.Cleanup(func() { SetBackend(nil) })
-
-	raw := []byte{1, 2, 3, 4, 5, 6}
-	var encoded []byte
-	var encodedSize int
-	if err := EIJG12encode(raw, 2, 1, 3, &encoded, &encodedSize, 0); err != nil {
-		t.Fatalf("EIJG12encode failed: %v", err)
-	}
-	decoded := make([]byte, len(raw))
-	if err := DIJG12decode(encoded, uint32(encodedSize), decoded, uint32(len(decoded))); err == nil {
-		t.Fatal("expected DIJG12decode to fail without native backend")
-	}
-}
-
-func TestJPEG16PassthroughDecodeFails(t *testing.T) {
-	SetBackend(nil)
-	t.Cleanup(func() { SetBackend(nil) })
-
-	raw := []byte{10, 20, 30, 40}
-	var encoded []byte
-	var encodedSize int
-	if err := EIJG16encode(raw, 1, 2, 1, &encoded, &encodedSize, 0); err != nil {
-		t.Fatalf("EIJG16encode failed: %v", err)
-	}
-	decoded := make([]byte, len(raw))
-	if err := DIJG16decode(encoded, uint32(encodedSize), decoded, uint32(len(decoded))); err == nil {
-		t.Fatal("expected DIJG16decode to fail without native backend")
-	}
-}
-
 func TestJPEG12And16Validation(t *testing.T) {
 	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
@@ -238,19 +206,13 @@ func TestJPEGBackendRegistry(t *testing.T) {
 	}
 }
 
-func TestJPEGNativeBackendRegistrationMatchesFlag(t *testing.T) {
-	foundLibJPEG := false
+func TestJPEGNoLibJPEGBackend(t *testing.T) {
+	if CGOEnabled {
+		t.Fatal("CGOEnabled should be false after the libjpeg backend was retired")
+	}
 	for _, name := range AvailableBackends() {
 		if name == "libjpeg" {
-			foundLibJPEG = true
-			break
+			t.Fatal("libjpeg backend should not be registered after retirement")
 		}
-	}
-
-	if CGOEnabled && !foundLibJPEG {
-		t.Fatal("expected libjpeg backend when CGOEnabled is true")
-	}
-	if !CGOEnabled && foundLibJPEG {
-		t.Fatal("did not expect libjpeg backend when CGOEnabled is false")
 	}
 }

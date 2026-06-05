@@ -11,8 +11,6 @@ run() {
   go test -tags "$tag" "$pkg"
 }
 
-run charls ./codecs/jpegls
-run charls ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
 run openjpeg ./codecs/jpeg2000
 run openjpeg ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
 run libjxl ./codecs/jpegxl
@@ -23,7 +21,5 @@ run openjph ./codecs/jpip
 run openjph ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
 run st2110 ./codecs/smpte2110
 run st2110 ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
-run libjpeg ./codecs/jpeg
-run libjpeg ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
 
 echo "All tagged codec backend tests passed."
