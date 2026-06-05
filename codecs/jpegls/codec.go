@@ -67,7 +67,8 @@ func init() {
 	}
 }
 
-// SetBackend overrides the active JPEG-LS backend. Passing nil resets to passthrough.
+// SetBackend overrides the active JPEG-LS backend. Passing nil resets to the
+// default (pure-Go gojpegls) backend.
 func SetBackend(backend Backend) {
 	if backend == nil {
 		// Reset to the default (pure-Go gojpegls) rather than the passthrough

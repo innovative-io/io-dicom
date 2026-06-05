@@ -19,7 +19,7 @@ const CGOEnabled = false
 
 const maxCodecPayloadBytes = 512 << 20
 
-var errBackendUnavailable = errors.New("jpeg 12/16-bit decode requires the libjpeg native backend (build with -tags libjpeg)")
+var errBackendUnavailable = errors.New("no JPEG decode backend available for 12/16-bit profiles")
 
 var (
 	errPayloadTooLarge    = errors.New("jpeg: payload exceeds maximum allowed size")

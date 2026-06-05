@@ -6,7 +6,9 @@ package jpeg
 // the pure-Go decoded output captured when the cgo golden tests last passed.
 // Pure-Go decode is deterministic; lossless decode is bit-exact with libjpeg and
 // the 12-bit DCT decode was within tolerance of libjpeg at the snapshot commit,
-// so any mismatch here is a real regression. Regenerate with golden_gen_test.go.
+// so any mismatch here is a real regression. These vectors were generated against
+// the libjpeg reference at the retirement commit (see git history of codecs/jpeg
+// for the libjpeg-tagged generator); regenerating requires restoring that backend.
 import (
 	"crypto/sha256"
 	"encoding/hex"

@@ -5,7 +5,9 @@ package jpegls
 // an independent JPEG-LS stream (a real DICOM fixture or a charls-encoded
 // synthetic stream) with the SHA-256 of the pure-Go decoded output captured when
 // the cgo golden tests last passed. Pure-Go decode is deterministic, so any
-// mismatch is a real regression. Regenerate with golden_gen_test.go.
+// mismatch is a real regression. These vectors were generated against the CharLS
+// reference at the retirement commit (see git history of codecs/jpegls for the
+// charls-tagged generator); regenerating requires restoring that backend.
 import (
 	"crypto/sha256"
 	"encoding/hex"
