@@ -26,6 +26,11 @@ func decodeTileComponent(cs *j2kCodestream, frame []byte, tc *tileComp) ([]int32
 	if transform == 0 && quant.style == 0 {
 		return nil, errJ2KUnsupported
 	}
+	// HT (High-Throughput, ISO 15444-15) code-blocks: only the reversible (5/3)
+	// Cleanup path is implemented. Defer lossy HT to the native backend.
+	if tc.style.htCodeblocks && transform != 1 {
+		return nil, errJ2KUnsupported
+	}
 	prec := cs.comps[tc.comp].precision
 
 	// bandQuant returns the (exponent, mantissa) for a subband. For expounded
@@ -93,6 +98,36 @@ func decodeTileComponent(cs *j2kCodestream, frame []byte, tc *tileComp) ([]int32
 			}
 			for bi := range sb.blocks {
 				cb := &sb.blocks[bi]
+				if tc.style.htCodeblocks {
+					// HT Cleanup pass (reversible). Single-pass blocks only for now;
+					// refuse multi-pass (SigProp/MagRef) so the caller can fall back.
+					if cb.npasses == 0 || len(cb.segs) == 0 {
+						continue // empty/insignificant block stays zero
+					}
+					if cb.npasses != 1 {
+						return nil, errJ2KUnsupported
+					}
+					seg := cb.segs[0]
+					decoded, ok := decodeHTCleanup(seg, len(seg), cb.nzeroBP, cb.w(), cb.h())
+					if !ok {
+						return nil, errJ2KMalformed
+					}
+					shift := uint(31 - mb)
+					cw := cb.w()
+					for yy := 0; yy < cb.h(); yy++ {
+						for xx := 0; xx < cw; xx++ {
+							gx := cb.x0 - sb.x0 + xx
+							gy := cb.y0 - sb.y0 + yy
+							v := decoded[yy*cw+xx]
+							m := int32((v & 0x7FFFFFFF) >> shift)
+							if v&0x80000000 != 0 {
+								m = -m
+							}
+							ibuf[gy*sw+gx] = m
+						}
+					}
+					continue
+				}
 				coeffs, lowestBP := decodeCodeBlock(cb, sb.orient, mb)
 				// Mid-point of the dequantization interval (T.800 E.1.1). The
 				// reversible path keeps integer coefficients, so the mid-point only
