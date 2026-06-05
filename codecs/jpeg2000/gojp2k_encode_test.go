@@ -64,6 +64,8 @@ func TestEncodeInputValidation(t *testing.T) {
 		{"zero-prec", good, 4, 4, 1, 0},
 		{"prec-too-large", good, 4, 4, 1, 17},
 		{"too-many-components", good, 4, 4, maxJ2KComponents + 1, 8},
+		{"huge-height-overflow", good, 4, 1 << 40, 1, 8},
+		{"huge-width-overflow", good, 1 << 40, 4, 1, 8},
 	}
 	for _, c := range cases {
 		_, err := goJ2Kencode(c.raw, c.w, c.h, c.nc, c.prec)

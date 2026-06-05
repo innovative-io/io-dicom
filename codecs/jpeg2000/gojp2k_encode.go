@@ -171,18 +171,18 @@ func goJ2Kencode(raw []byte, w, h, nc, prec int) ([]byte, error) {
 		bps = 2
 	}
 	// Require the raw payload to be exactly w·h·nc·bps bytes (no missing or extra
-	// bytes), computed overflow-safe: accumulate in int64 and reject as soon as the
-	// running product exceeds the codec's payload cap, so a hostile w/h/nc cannot
-	// overflow int. Each factor multiplies a value already capped, so no
-	// intermediate can overflow int64.
+	// bytes). Compute the size overflow-safe: before each multiply, a
+	// division-based guard ensures the running product never exceeds the codec's
+	// payload cap, so a hostile w/h/nc (any factor) can never overflow int64.
 	need := int64(w)
 	for _, f := range []int{h, nc, bps} {
-		if need > maxCodecPayloadBytes {
+		ff := int64(f)
+		if ff <= 0 || need > maxCodecPayloadBytes/ff {
 			return nil, errInvalidJ2KPayload
 		}
-		need *= int64(f)
+		need *= ff
 	}
-	if need > maxCodecPayloadBytes || int64(len(raw)) != need {
+	if int64(len(raw)) != need {
 		return nil, errInvalidJ2KPayload
 	}
 
