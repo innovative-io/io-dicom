@@ -97,7 +97,7 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 			want:                    []byte{7, 17, 27, 37},
 			passthroughMode:         roundTripAssertionExact,
 			nativeFamily:            "jpeg2000",
-			nativeBackend:           "openjpeg",
+			nativeBackend:           "gojpeg2000",
 			nativeMode:              roundTripAssertionExact,
 			nativeToolingHint:       "tooling is unavailable",
 			passthroughCannotEncode: true,

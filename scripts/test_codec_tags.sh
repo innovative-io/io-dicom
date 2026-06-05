@@ -11,8 +11,6 @@ run() {
   go test -tags "$tag" "$pkg"
 }
 
-run openjpeg ./codecs/jpeg2000
-run openjpeg ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
 run libjxl ./codecs/jpegxl
 run libjxl ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
 run ffmpeg ./codecs/mpeg

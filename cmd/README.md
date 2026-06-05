@@ -214,7 +214,7 @@ The built binaries run natively on Linux inside WSL. To produce a native Windows
 ```bash
 # Inside WSL — cross-compile for Windows amd64
 GOOS=windows GOARCH=amd64 \
-  go build -tags 'libjpeg charls openjpeg libjxl openjph ffmpeg st2110' \
+  go build -tags 'libjxl openjph ffmpeg st2110' \
   -o io-dicom.exe ./cmd/io-dicom
 ```
 
@@ -256,7 +256,6 @@ MSYS2 UCRT64 shell exactly as documented in the Linux steps above.
 |-----|-------|----------------|
 | `libjpeg` | JPEG 12/16-bit via libjpeg-turbo | `pkg-config`, libjpeg dev package |
 | `charls` | JPEG-LS via CharLS | `pkg-config`, CharLS dev package |
-| `openjpeg` | JPEG 2000 / HTJ2K via OpenJPEG | `pkg-config`, OpenJPEG dev package (`libopenjp2.pc`) |
 | `libjxl` | JPEG XL via libjxl | `pkg-config`, libjxl dev package (`libjxl.pc`) |
 | `openjph` | JPIP / HTJ2K via OpenJPH | `pkg-config`, OpenJPH dev package (`openjph.pc`) |
 | `ffmpeg` | MPEG-2/4/HEVC via FFmpeg | `pkg-config`, FFmpeg dev packages (`libavcodec.pc`, `libavformat.pc`, `libavutil.pc`, `libswscale.pc`) |
@@ -298,20 +297,20 @@ source "$PWD/.local/codec-deps/env.sh"
 Build with all native codec tags (matches `make build-native`):
 
 ```bash
-go build -tags 'libjpeg charls openjpeg libjxl openjph ffmpeg st2110' \
+go build -tags 'libjxl openjph ffmpeg st2110' \
   -o io-dicom ./cmd/io-dicom
 ```
 
-Build with a subset of tags (e.g. JPEG 2000 and JPEG-LS only):
+Build with a subset of tags (e.g. JPEG XL only):
 
 ```bash
-go build -tags 'openjpeg charls' -o io-dicom ./cmd/io-dicom
+go build -tags 'libjxl' -o io-dicom ./cmd/io-dicom
 ```
 
 ### Install with native codec tags
 
 ```bash
-go install -tags 'libjpeg charls openjpeg libjxl openjph ffmpeg st2110' \
+go install -tags 'libjxl openjph ffmpeg st2110' \
   ./cmd/io-dicom
 ```
 

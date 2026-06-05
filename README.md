@@ -160,7 +160,8 @@ Latest architecture cleanup includes package path renames.
   - MPEG-2 / MPEG-4 AVC / HEVC passthrough encode helpers (`codecs/mpeg`)
 
 - The JPEG family (baseline/extended/lossless) and JPEG-LS (lossless and near-lossless, single- and multi-component) decode and encode entirely in pure Go — no build tag or cgo required. The former `libjpeg` (JPEG) and `charls` (JPEG-LS) cgo backends have been retired; their correctness is preserved by frozen golden vectors under `codecs/jpeg/golden` and `codecs/jpegls/golden`.
-- For the remaining cgo-only codecs, decode without the matching native backend fails explicitly instead of returning compressed payload bytes as if they were decoded pixels. Build with the matching tag (`openjpeg`, `libjxl`, `openjph`, `ffmpeg`, `st2110`) for those production decode/transcode paths.
+- JPEG 2000 — both classic (EBCOT) and High-Throughput (HTJ2K) — decodes (lossless and lossy) in pure Go, and encodes lossless (5/3) in pure Go. The former `openjpeg` cgo backend has been retired; out-of-scope codestreams (multi-tile, custom precincts, MCT, non-LRCP) and lossy encode are not yet covered.
+- For the remaining cgo-only codecs, decode without the matching native backend fails explicitly instead of returning compressed payload bytes as if they were decoded pixels. Build with the matching tag (`libjxl`, `openjph`, `ffmpeg`, `st2110`) for those production decode/transcode paths.
 
 ## Codec-Backed Transfer Syntaxes
 
@@ -256,16 +257,12 @@ the supported syntax families.
   preserved by frozen golden vectors validated against CharLS at the retirement commit.
 - `codecs/jpeg2000` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
-- `codecs/jpeg2000` now includes a build-tagged `openjpeg` backend registration path:
-  - default builds keep pure-Go passthrough (`CGOEnabled == false`),
-  - `-tags openjpeg` with cgo enables `CGOEnabled == true` and registers backend name `openjpeg`.
-  - the `openjpeg` backend now bridges directly to the OpenJPEG C API for
-    encode/decode, so it no longer depends on `opj_compress` or `opj_decompress`
-    at runtime.
-  - prerequisites for tagged builds:
-    - `pkg-config` must be available,
-    - the OpenJPEG development package must be discoverable via `PKG_CONFIG_PATH`
-      (providing `libopenjp2.pc`).
+- `codecs/jpeg2000` is pure Go (no cgo, no build tag). It decodes classic and
+  High-Throughput JPEG 2000 (lossless and lossy) and encodes lossless 5/3. The
+  former `openjpeg` cgo backend has been retired; `CGOEnabled` is always `false`.
+  The pure-Go decoder was validated byte-exact against OpenJPEG/OpenJPH before
+  retirement (see git history), and is now guarded by self round-trip and frozen
+  golden vectors.
 - `codecs/jpegxl` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
 - `codecs/jpegxl` now includes a build-tagged `libjxl` backend registration path:
@@ -335,7 +332,7 @@ Applications that need request-scoped cancellation for transcode operations can 
 - Run only the media native-backend representative roundtrip check for a specific tag:
 
 ```bash
-go test -tags openjpeg ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
+go test -tags libjxl ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
 ```
 
 - Equivalent Make targets:
