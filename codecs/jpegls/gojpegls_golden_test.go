@@ -55,6 +55,194 @@ func TestGoJLSLosslessMatchesCharls(t *testing.T) {
 	}
 }
 
+// TestGoJLSMultiComponentEncodeDecodesInCharls confirms the pure-Go multi-
+// component (line-interleaved) encoder emits standard-conformant output: charls
+// must decode the stream to exactly the same pixels the pure-Go decoder produces,
+// and every pixel must be within NEAR of the original.
+func TestGoJLSMultiComponentEncodeDecodesInCharls(t *testing.T) {
+	t.Cleanup(func() { SetBackend(nil) })
+	for _, tc := range []struct {
+		w, h, comps, p, near int
+	}{
+		{16, 16, 3, 8, 0}, {20, 12, 3, 8, 1}, {17, 9, 3, 12, 0},
+		{32, 8, 3, 16, 2}, {10, 10, 4, 8, 0}, {13, 11, 4, 12, 1},
+	} {
+		bps := 1
+		if tc.p > 8 {
+			bps = 2
+		}
+		maxv := (1 << tc.p) - 1
+		n := tc.w * tc.h * tc.comps
+		raw := make([]byte, n*bps)
+		for i := 0; i < n; i++ {
+			v := (i*7 + (i*i)%29 + (i%tc.comps)*11) % (maxv + 1)
+			if bps == 1 {
+				raw[i] = byte(v)
+			} else {
+				raw[i*2] = byte(v)
+				raw[i*2+1] = byte(v >> 8)
+			}
+		}
+		enc, err := encodeJLS(raw, tc.w, tc.h, tc.comps, tc.p, tc.near)
+		if err != nil {
+			t.Fatalf("%dc p%d near%d pure-Go encode: %v", tc.comps, tc.p, tc.near, err)
+		}
+
+		SetBackend(nil)
+		mine := make([]byte, len(raw))
+		if err := decodeJLSInto(enc, mine); err != nil {
+			t.Fatalf("%dc pure-Go decode of own output: %v", tc.comps, err)
+		}
+
+		if err := UseBackend("charls"); err != nil {
+			t.Skipf("charls unavailable: %v", err)
+		}
+		theirs := make([]byte, len(raw))
+		if err := JLSdecode(enc, uint32(len(enc)), theirs); err != nil {
+			t.Fatalf("%dc charls decode of pure-Go output: %v", tc.comps, err)
+		}
+		if !bytes.Equal(mine, theirs) {
+			t.Fatalf("%dc p%d near%d charls decode differs from pure-Go decode", tc.comps, tc.p, tc.near)
+		}
+		for i := 0; i < n; i++ {
+			var o, g int
+			if bps == 1 {
+				o, g = int(raw[i]), int(theirs[i])
+			} else {
+				o = int(raw[i*2]) | int(raw[i*2+1])<<8
+				g = int(theirs[i*2]) | int(theirs[i*2+1])<<8
+			}
+			if d := o - g; d < -tc.near || d > tc.near {
+				t.Fatalf("%dc p%d near%d sample %d: got %d want within %d of %d", tc.comps, tc.p, tc.near, i, g, tc.near, o)
+			}
+		}
+	}
+}
+
+// TestGoJLSLineInterleavedMatchesCharls proves the pure-Go ILV=1 (line-
+// interleaved) multi-component decoder is byte-for-byte identical to charls. The
+// charls encoder uses INTERLEAVE_MODE_LINE for multi-component input, so this
+// produces line-interleaved streams across bit depths and NEAR values.
+func TestGoJLSLineInterleavedMatchesCharls(t *testing.T) {
+	t.Cleanup(func() { SetBackend(nil) })
+	for _, tc := range []struct {
+		w, h, comps, p, near int
+	}{
+		{16, 16, 3, 8, 0}, {20, 12, 3, 8, 1}, {17, 9, 3, 12, 0},
+		{32, 8, 3, 16, 2}, {10, 10, 4, 8, 0}, {13, 11, 4, 8, 1},
+	} {
+		bps := 1
+		if tc.p > 8 {
+			bps = 2
+		}
+		maxv := (1 << tc.p) - 1
+		n := tc.w * tc.h * tc.comps
+		raw := make([]byte, n*bps)
+		for i := 0; i < n; i++ {
+			v := (i*7 + (i*i)%29 + (i%tc.comps)*11) % (maxv + 1)
+			if bps == 1 {
+				raw[i] = byte(v)
+			} else {
+				raw[i*2] = byte(v)
+				raw[i*2+1] = byte(v >> 8)
+			}
+		}
+
+		if err := UseBackend("charls"); err != nil {
+			t.Skipf("charls unavailable: %v", err)
+		}
+		var enc []byte
+		var encSize int
+		if err := JLSencode(raw, uint16(tc.w), uint16(tc.h), uint16(tc.comps), uint16(tc.p), &enc, &encSize, tc.near != 0); err != nil {
+			t.Fatalf("%dc p%d near%d charls encode: %v", tc.comps, tc.p, tc.near, err)
+		}
+		enc = enc[:encSize]
+
+		f, _, err := parseJLS(enc)
+		if err != nil {
+			t.Fatalf("%dc parse charls stream: %v", tc.comps, err)
+		}
+		if f.ilv != 1 || len(f.comps) != tc.comps {
+			t.Fatalf("%dc expected ILV=1 with %d comps, got ilv=%d comps=%d", tc.comps, tc.comps, f.ilv, len(f.comps))
+		}
+
+		decode := func(backend string) []byte {
+			if err := UseBackend(backend); err != nil {
+				t.Skipf("backend %s unavailable: %v", backend, err)
+			}
+			out := make([]byte, len(raw))
+			if err := JLSdecode(enc, uint32(len(enc)), out); err != nil {
+				t.Fatalf("%dc %s decode: %v", tc.comps, backend, err)
+			}
+			return out
+		}
+		want := decode("charls")
+		got := decode("gojpegls")
+		if !bytes.Equal(want, got) {
+			n, first := 0, -1
+			for i := range want {
+				if want[i] != got[i] {
+					if first < 0 {
+						first = i
+					}
+					n++
+				}
+			}
+			t.Fatalf("%dc p%d near%d line-interleaved decode differs in %d/%d bytes (first at %d: got %d want %d)",
+				tc.comps, tc.p, tc.near, n, len(want), first, got[first], want[first])
+		}
+	}
+}
+
+// TestGoJLSSampleInterleavedMatchesCharls proves the pure-Go ILV=2 (sample-
+// interleaved) multi-component decoder is byte-for-byte identical to charls,
+// using the real highdicom RGB fixtures (3-component, sample-interleaved).
+func TestGoJLSSampleInterleavedMatchesCharls(t *testing.T) {
+	t.Cleanup(func() { SetBackend(nil) })
+	for _, path := range []string{
+		"../../testdata/highdicom-sm_image_jpegls.dcm",
+		"../../testdata/highdicom-sm_image_jpegls_nobot.dcm",
+	} {
+		t.Run(path, func(t *testing.T) {
+			dcm := loadDCM(t, path)
+			frame := extractFirstFrame(t, dcm)
+			f, _, err := parseJLS(frame)
+			if err != nil {
+				t.Fatalf("parseJLS: %v", err)
+			}
+			if f.ilv != 2 || len(f.comps) < 2 {
+				t.Skipf("not a sample-interleaved multi-component stream (ilv=%d comps=%d)", f.ilv, len(f.comps))
+			}
+			bps := 1
+			if f.precision > 8 {
+				bps = 2
+			}
+			size := f.width * f.height * len(f.comps) * bps
+			decode := func(backend string) []byte {
+				if err := UseBackend(backend); err != nil {
+					t.Skipf("backend %s unavailable: %v", backend, err)
+				}
+				out := make([]byte, size)
+				if err := JLSdecode(frame, uint32(len(frame)), out); err != nil {
+					t.Fatalf("%s decode: %v", backend, err)
+				}
+				return out
+			}
+			want := decode("charls")
+			got := decode("gojpegls")
+			if !bytes.Equal(want, got) {
+				n := 0
+				for i := range want {
+					if want[i] != got[i] {
+						n++
+					}
+				}
+				t.Fatalf("sample-interleaved decode differs from charls in %d/%d bytes", n, len(want))
+			}
+		})
+	}
+}
+
 // TestGoJLSNearLosslessMatchesCharls proves the pure-Go near-lossless (.81)
 // decoder is byte-for-byte identical to charls. The stream is produced by the
 // charls encoder (NEAR=1); decoding is deterministic given the stream, so the
