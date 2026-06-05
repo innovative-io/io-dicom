@@ -9,6 +9,8 @@ package jpeg2000
 // precincts (one precinct per resolution), no SOP/EPH dependence, no per-pass
 // termination (one segment per code-block). These cover the DICOM J2K fixtures.
 
+import "math/bits"
+
 // bioReader reads bits MSB-first from a packet header with JPEG 2000 bit
 // un-stuffing, mirroring the reference (openjpeg opj_bio): a 16-bit window holds
 // the previous and current bytes; when the previous byte was 0xFF the current
@@ -236,13 +238,43 @@ func decodeOnePacket(cs *j2kCodestream, tc *tileComp, pt *precinctTrees, r, laye
 					blk.included = true
 				}
 				passes := readNumPasses(bio)
-				// Lblock increment (comma code).
-				for bio.readBit() == 1 {
-					blk.lblock++
+				var length int
+				// Use the component's effective coding style (COC override or COD
+				// default), so a stream that mixes HT and non-HT components parses
+				// each component's packet lengths correctly.
+				if tc.style.htCodeblocks {
+					// HT length signaling (ISO 15444-15): placeholder passes fold
+					// into missing-MSBs, then one cleanup length and (for >1 pass) a
+					// refinement length, with HT-specific bit widths.
+					numPhld := (passes - 1) / 3
+					blk.nzeroBP += numPhld
+					eff := passes - numPhld*3
+					for bio.readBit() == 1 {
+						blk.lblock++
+					}
+					bits0 := blk.lblock + 31 - bits.LeadingZeros32(uint32(numPhld+1))
+					len0 := bio.read(bits0)
+					len1 := 0
+					if eff > 1 {
+						bits1 := blk.lblock
+						if eff > 2 {
+							bits1++
+						}
+						len1 = bio.read(bits1)
+					}
+					blk.npasses += eff
+					blk.htLen1 = len0
+					blk.htLen2 = len1
+					length = len0 + len1
+				} else {
+					// Lblock increment (comma code).
+					for bio.readBit() == 1 {
+						blk.lblock++
+					}
+					lenBits := blk.lblock + floorLog2(passes)
+					length = bio.read(lenBits)
+					blk.npasses += passes
 				}
-				lenBits := blk.lblock + floorLog2(passes)
-				length := bio.read(lenBits)
-				blk.npasses += passes
 				contribs = append(contribs, cbContrib{sb: sb, blk: blk, length: length})
 			}
 		}

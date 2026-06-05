@@ -28,6 +28,7 @@ var (
 const (
 	mSOC = 0xFF4F // start of codestream
 	mSIZ = 0xFF51 // image and tile size
+	mCAP = 0xFF50 // extended capabilities (HTJ2K / ISO 15444-15)
 	mCOD = 0xFF52 // coding style default
 	mCOC = 0xFF53 // coding style component
 	mTLM = 0xFF55 // tile-part lengths
@@ -69,6 +70,7 @@ type codingStyle struct {
 	decompLevels int   // number of wavelet decomposition levels (NL)
 	cbW, cbH     int   // code-block dimensions (2^(exp+2))
 	cbStyle      int   // code-block style flags
+	htCodeblocks bool  // HT (High-Throughput, ISO 15444-15) code-blocks (cbStyle bit 6)
 	transform    int   // 0=9/7 irreversible, 1=5/3 reversible
 	precinctW    []int // per-resolution precinct width  (2^exp), low-to-high
 	precinctH    []int // per-resolution precinct height (2^exp), low-to-high
@@ -91,6 +93,10 @@ type j2kCodestream struct {
 	xtsiz, ytsiz   int // nominal tile size
 	xtOsiz, ytOsiz int
 	comps          []componentInfo
+
+	// CAP (ISO 15444-15): HT capability. htCcap is the Ccap^15 value when present.
+	htCap  bool
+	htCcap int
 
 	// Coding/quant: index 0 is the default (COD/QCD); per-component overrides
 	// (COC/QCC) replace the corresponding entry.
@@ -160,6 +166,10 @@ func parseCodestream(data []byte) (*j2kCodestream, error) {
 				return nil, err
 			}
 			sizSeen = true
+		case mCAP:
+			if err := cs.parseCAP(body); err != nil {
+				return nil, err
+			}
 		case mCOD:
 			if err := cs.parseCOD(body); err != nil {
 				return nil, err
@@ -198,6 +208,34 @@ func parseCodestream(data []byte) (*j2kCodestream, error) {
 		return nil, err
 	}
 	return cs, nil
+}
+
+// parseCAP parses the CAP (extended capabilities) marker. Pcap is a 32-bit
+// bitmap; each set bit i (1=MSB) adds a 16-bit Ccap entry. Bit 15 (mask 1<<17)
+// signals HTJ2K (ISO 15444-15); its Ccap describes the HT set parameters. We
+// accept any well-formed CAP and record the HT capability for downstream use.
+func (cs *j2kCodestream) parseCAP(b []byte) error {
+	if len(b) < 4 {
+		return errJ2KMalformed
+	}
+	pcap := be32(b, 0)
+	idx := 4
+	for bit := 0; bit < 32; bit++ {
+		mask := uint32(1) << uint(31-bit) // bit 1 = MSB
+		if pcap&mask == 0 {
+			continue
+		}
+		if idx+2 > len(b) {
+			return errJ2KMalformed
+		}
+		ccap := int(be16(b, idx))
+		idx += 2
+		if bit == 14 { // Pcap bit 15 (1-indexed) → Part 15 (HTJ2K)
+			cs.htCap = true
+			cs.htCcap = ccap
+		}
+	}
+	return nil
 }
 
 func (cs *j2kCodestream) parseSIZ(b []byte) error {
@@ -247,6 +285,7 @@ func parseSPcod(cs *codingStyle, b []byte, usePrecincts bool) error {
 	cs.cbW = 1 << (int(b[1]&0x0F) + 2)
 	cs.cbH = 1 << (int(b[2]&0x0F) + 2)
 	cs.cbStyle = int(b[3])
+	cs.htCodeblocks = b[3]&0x40 != 0 // HT code-blocks (ISO 15444-15)
 	cs.transform = int(b[4])
 	if cs.decompLevels > 32 || cs.cbW > 1024 || cs.cbH > 1024 || cs.cbW*cs.cbH > 4096 {
 		return errJ2KMalformed
