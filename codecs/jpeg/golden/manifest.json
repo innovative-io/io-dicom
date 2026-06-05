@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "name": "fixture-lossless-process14",
+      "fixture": "../../testdata/cornerstone-CTImage-jpeg-process14.dcm",
+      "bits": 16,
+      "size": 524288,
+      "sha256": "1bee432808f49770bbc30d904e3e744082b0ba41704d4943e7de5bcb3e3d72f9"
+    },
+    {
+      "name": "fixture-lossless-process14sv1",
+      "fixture": "../../testdata/cornerstone-CTImage-jpeg-process14sv1.dcm",
+      "bits": 16,
+      "size": 524288,
+      "sha256": "1bee432808f49770bbc30d904e3e744082b0ba41704d4943e7de5bcb3e3d72f9"
+    },
+    {
+      "name": "fixture-dct12-process2-4",
+      "fixture": "../../testdata/cornerstone-CTImage-jpeg-process2-4.dcm",
+      "bits": 12,
+      "size": 524288,
+      "sha256": "e5d5a328921e8d006334c4834a06b6a74100134192f761e534d9b2b62f98d3a4"
+    },
+    {
+      "name": "fixture-dct12-jpgextended",
+      "fixture": "../../testdata/pydicom-JPGExtended.dcm",
+      "bits": 12,
+      "size": 524288,
+      "sha256": "3e571988ed84a9d29e90c0fcf1e77636d27b374b69aa20f6bd317d88518710b3"
+    }
+  ]
+}

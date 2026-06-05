@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "name": "fixture-ct-lossless",
+      "fixture": "../../testdata/cornerstone-CTImage-jpegls-lossless.dcm",
+      "size": 524288,
+      "sha256": "1bee432808f49770bbc30d904e3e744082b0ba41704d4943e7de5bcb3e3d72f9"
+    },
+    {
+      "name": "fixture-ct-near",
+      "fixture": "../../testdata/cornerstone-CTImage-jpegls-lossy.dcm",
+      "size": 524288,
+      "sha256": "9595c2a8a59647d6b8e4445486984c615b2ac99085eca0d18988bec429ebd6b8"
+    },
+    {
+      "name": "fixture-sm-rgb-ilv2",
+      "fixture": "../../testdata/highdicom-sm_image_jpegls.dcm",
+      "size": 300,
+      "sha256": "fca966161a41548b22e75feeff281c3afc97fcc3138ca20e5df9b846375cc617"
+    },
+    {
+      "name": "fixture-sm-rgb-ilv2-nobot",
+      "fixture": "../../testdata/highdicom-sm_image_jpegls_nobot.dcm",
+      "size": 300,
+      "sha256": "fca966161a41548b22e75feeff281c3afc97fcc3138ca20e5df9b846375cc617"
+    },
+    {
+      "name": "fixture-near8",
+      "fixture": "../../testdata/pydicom-JPEGLSNearLossless_08.dcm",
+      "size": 450,
+      "sha256": "9eb46aa86c342094f826affc35703f71b425ba4ef229fe1711adcf1bb3ca458f"
+    },
+    {
+      "name": "fixture-near16",
+      "fixture": "../../testdata/pydicom-JPEGLSNearLossless_16.dcm",
+      "size": 1000,
+      "sha256": "f929318278115ce952d85c011f752634e266720680e807bd03bf97ded3f0d3e4"
+    },
+    {
+      "name": "syn-gray12-lossless",
+      "stream": "streams/syn-gray12-lossless.jls",
+      "size": 2400,
+      "sha256": "cd881ef1983dc1ab32df94ce826b6b702db1aea32c899bf8a93004efc47638cb"
+    },
+    {
+      "name": "syn-ilv1-3c-8-near0",
+      "stream": "streams/syn-ilv1-3c-8-near0.jls",
+      "size": 768,
+      "sha256": "f05eaee0caa7cc5cca06e1357c0e3aa3d909dfac61d17f3c1685066273255477"
+    },
+    {
+      "name": "syn-ilv1-3c-8-near1",
+      "stream": "streams/syn-ilv1-3c-8-near1.jls",
+      "size": 720,
+      "sha256": "0e8d2b15d1ecae5fa7c190170e9b5fa3a5d7941bfa63ae5797bceac9dbb079e4"
+    },
+    {
+      "name": "syn-ilv1-3c-12-near0",
+      "stream": "streams/syn-ilv1-3c-12-near0.jls",
+      "size": 918,
+      "sha256": "9bb490ed9ac1486252f83fd78162b73744791c1c855dfb519ad9f4dd77e31fa2"
+    },
+    {
+      "name": "syn-ilv1-3c-16-near2",
+      "stream": "streams/syn-ilv1-3c-16-near2.jls",
+      "size": 1536,
+      "sha256": "0bfa0031c01cdef717f1afcb3b4c6163ddd95b19023ea725760fad9344c720ba"
+    },
+    {
+      "name": "syn-ilv1-4c-8-near0",
+      "stream": "streams/syn-ilv1-4c-8-near0.jls",
+      "size": 400,
+      "sha256": "8e396055451cc43c6127ca5d1e6cda64946913a1d91f7101abd70be5fa78b852"
+    },
+    {
+      "name": "syn-ilv1-4c-12-near1",
+      "stream": "streams/syn-ilv1-4c-12-near1.jls",
+      "size": 1144,
+      "sha256": "beaef8035e460e90df3fb7ca4c1c1f3e4428daea6c6f7d20429db07ee5d6c065"
+    }
+  ]
+}
