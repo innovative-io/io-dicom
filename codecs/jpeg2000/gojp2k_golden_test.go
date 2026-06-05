@@ -59,8 +59,8 @@ func TestGoJ2KMatchesOpenJPEG(t *testing.T) {
 func TestGoJ2KLossy97(t *testing.T) {
 	for _, tc := range []struct {
 		path      string
-		maxAbs    int   // max allowed per-sample absolute difference
-		maxOutlie int   // allowed count of samples exceeding maxAbs (rounding edges)
+		maxAbs    int // max allowed per-sample absolute difference
+		maxOutlie int // allowed count of samples exceeding maxAbs (rounding edges)
 	}{
 		{"../../testdata/pydicom-JPEG2000.dcm", 1, 0},
 	} {

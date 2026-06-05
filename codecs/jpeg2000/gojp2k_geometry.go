@@ -22,9 +22,6 @@ type codeBlock struct {
 	lblock   int      // length-indicator state (starts at 3)
 	npasses  int      // total coding passes decoded so far
 	segs     [][]byte // coded data segments (concatenated per tier-1 needs)
-
-	// tier-1 output
-	coeffs []int32 // signed magnitudes, row-major over (x1-x0)*(y1-y0)
 }
 
 func (cb *codeBlock) w() int { return cb.x1 - cb.x0 }

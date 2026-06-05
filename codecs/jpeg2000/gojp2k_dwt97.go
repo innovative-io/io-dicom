@@ -11,7 +11,7 @@ const (
 	dwtBeta  = float32(-0.052980118)
 	dwtGamma = float32(0.882911075)
 	dwtDelta = float32(0.443506852)
-	dwtK = float32(1.230174105)
+	dwtK     = float32(1.230174105)
 	// openjpeg scales the high-pass on inverse by 2/K (two_invK), not 1/K, and
 	// compensates by forcing the sub-band gain to 0 in the dequant step (see
 	// BUG_WEIRD_TWO_INVK in openjpeg dwt.c/tcd.c). We mirror that exact scheme so
