@@ -14,22 +14,27 @@ import (
 // fixture-backed tests.
 func TestGoJ2KGoldenDecode(t *testing.T) {
 	cases := []struct {
-		name           string
-		dcm            string // DICOM-encapsulated fixture (J2K frame extracted)
-		j2k            string // raw codestream fixture (used when dcm is empty)
-		golden         string
-		w, h, nc, bps  int
-		maxAbs, maxOut int // tolerance (0/0 ⇒ byte-exact)
+		name          string
+		dcm           string // DICOM-encapsulated fixture (J2K frame extracted)
+		j2k           string // raw codestream fixture (used when dcm is empty)
+		golden        string
+		w, h, nc, bps int
 	}{
-		{"ct-5x3-lossless", "cornerstone-CTImage-jpeg2000-lossless.dcm", "", "golden-ct-5x3-lossless.raw", 512, 512, 1, 2, 0, 0},
-		{"pydicom-9x7", "pydicom-JPEG2000.dcm", "", "golden-pydicom-9x7.raw", 256, 1024, 1, 2, 0, 0},
-		{"rgb-5x3-lossless", "", "test.j2k", "golden-rgb-5x3-lossless.raw", 1576, 1134, 3, 1, 0, 0},
+		{"ct-5x3-lossless", "cornerstone-CTImage-jpeg2000-lossless.dcm", "", "golden-ct-5x3-lossless.raw", 512, 512, 1, 2},
+		{"pydicom-9x7", "pydicom-JPEG2000.dcm", "", "golden-pydicom-9x7.raw", 256, 1024, 1, 2},
+		{"rgb-5x3-lossless", "", "test.j2k", "golden-rgb-5x3-lossless.raw", 1576, 1134, 3, 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			want, err := os.ReadFile("../../testdata/" + c.golden)
 			if err != nil {
 				t.Skipf("golden unavailable: %v", err)
+			}
+			// Guard against a mis-sized golden: goJ2Kdecode only checks the output
+			// buffer is large enough, so an oversized golden could mask a regression.
+			if exp := c.w * c.h * c.nc * c.bps; len(want) != exp {
+				t.Fatalf("golden %s size %d != expected %d (%dx%d nc=%d bps=%d)",
+					c.golden, len(want), exp, c.w, c.h, c.nc, c.bps)
 			}
 			var frame []byte
 			if c.j2k != "" {

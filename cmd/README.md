@@ -254,8 +254,6 @@ MSYS2 UCRT64 shell exactly as documented in the Linux steps above.
 
 | Tag | Codec | Required tools |
 |-----|-------|----------------|
-| `libjpeg` | JPEG 12/16-bit via libjpeg-turbo | `pkg-config`, libjpeg dev package |
-| `charls` | JPEG-LS via CharLS | `pkg-config`, CharLS dev package |
 | `libjxl` | JPEG XL via libjxl | `pkg-config`, libjxl dev package (`libjxl.pc`) |
 | `openjph` | JPIP / HTJ2K via OpenJPH | `pkg-config`, OpenJPH dev package (`openjph.pc`) |
 | `ffmpeg` | MPEG-2/4/HEVC via FFmpeg | `pkg-config`, FFmpeg dev packages (`libavcodec.pc`, `libavformat.pc`, `libavutil.pc`, `libswscale.pc`) |

@@ -70,10 +70,10 @@ func extractFirstDICOMEncapsulatedFrame(t *testing.T, dcmData []byte) []byte {
 }
 
 func TestJ2KdecodeSample(t *testing.T) {
+	t.Cleanup(func() { SetBackend(nil) })
 	if err := UseBackend("gojpeg2000"); err != nil {
 		t.Fatalf("UseBackend(gojpeg2000): %v", err)
 	}
-	t.Cleanup(func() { SetBackend(nil) })
 	jpegData := loadBytesFromFile("../../testdata/test.j2k", t)
 	outSize := 1576 * 1134 * 3
 	outData := make([]byte, outSize)
@@ -87,10 +87,10 @@ func TestJ2KdecodeSample(t *testing.T) {
 // that contains signed 16-bit pixel data (CT Hounsfield values). This was
 // previously rejected with "unsupported decoded image layout".
 func TestJ2KdecodeSampleSignedCT(t *testing.T) {
+	t.Cleanup(func() { SetBackend(nil) })
 	if err := UseBackend("gojpeg2000"); err != nil {
 		t.Fatalf("UseBackend(gojpeg2000): %v", err)
 	}
-	t.Cleanup(func() { SetBackend(nil) })
 
 	dcmData := loadBytesFromFile("../../testdata/cornerstone-CTImage-jpeg2000-lossless.dcm", t)
 	j2kFrame := extractFirstDICOMEncapsulatedFrame(t, dcmData)
@@ -125,10 +125,10 @@ func TestJ2KdecodeSampleSignedCT(t *testing.T) {
 // CT stored-value range, whereas a big-endian (byte-swapped) reading scatters
 // values across the full int16 range and falls outside it far more often.
 func TestJ2KdecodeSignedCTIsLittleEndian(t *testing.T) {
+	t.Cleanup(func() { SetBackend(nil) })
 	if err := UseBackend("gojpeg2000"); err != nil {
 		t.Fatalf("UseBackend(gojpeg2000): %v", err)
 	}
-	t.Cleanup(func() { SetBackend(nil) })
 
 	dcmData := loadBytesFromFile("../../testdata/cornerstone-CTImage-jpeg2000-lossless.dcm", t)
 	j2kFrame := extractFirstDICOMEncapsulatedFrame(t, dcmData)
@@ -171,10 +171,10 @@ func TestJ2KencodeSample(t *testing.T) {
 
 	// Pure-Go lossless 5/3 encode: a real RGB image must encode and round-trip
 	// back to the original through the pure-Go decoder.
+	t.Cleanup(func() { SetBackend(nil) })
 	if err := UseBackend("gojpeg2000"); err != nil {
 		t.Fatalf("UseBackend(gojpeg2000): %v", err)
 	}
-	t.Cleanup(func() { SetBackend(nil) })
 	if err := J2Kencode(rawData, 1576, 1134, 3, 8, &jpegData, &jpegSize, 10); err != nil {
 		t.Fatalf("pure-Go J2Kencode: %v", err)
 	}
