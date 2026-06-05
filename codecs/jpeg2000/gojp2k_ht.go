@@ -1,10 +1,9 @@
 package jpeg2000
 
-// Pure-Go HTJ2K (ISO/IEC 15444-15) HT Cleanup-pass block decoder, ported from
-// openjph's scalar reference (ojph_block_decoder32.cpp + ojph_block_common.cpp).
-// It decodes a single HT Cleanup pass (the mandatory first pass of every HT
-// code-block) into sign-magnitude "decoded_data" words; the SigProp and MagRef
-// refinement passes (for multi-pass blocks) are not yet implemented.
+// Pure-Go HTJ2K (ISO/IEC 15444-15) HT block decoder, ported from openjph's
+// scalar reference (ojph_block_decoder32.cpp + ojph_block_common.cpp). It decodes
+// the mandatory HT Cleanup pass and, for multi-pass code-blocks, the SigProp and
+// MagRef refinement passes, into sign-magnitude "decoded_data" words.
 //
 // The three sub-bitstreams of the cleanup pass are read by three machines:
 //   - MEL   : forward adaptive run-length for quad significance.

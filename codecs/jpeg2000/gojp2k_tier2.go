@@ -239,7 +239,10 @@ func decodeOnePacket(cs *j2kCodestream, tc *tileComp, pt *precinctTrees, r, laye
 				}
 				passes := readNumPasses(bio)
 				var length int
-				if cs.cod.htCodeblocks {
+				// Use the component's effective coding style (COC override or COD
+				// default), so a stream that mixes HT and non-HT components parses
+				// each component's packet lengths correctly.
+				if tc.style.htCodeblocks {
 					// HT length signaling (ISO 15444-15): placeholder passes fold
 					// into missing-MSBs, then one cleanup length and (for >1 pass) a
 					// refinement length, with HT-specific bit widths.

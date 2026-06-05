@@ -69,13 +69,33 @@ func TestGoHTMultiPassConformance(t *testing.T) {
 	if err != nil {
 		t.Skipf("golden unavailable: %v", err)
 	}
+	cs, err := parseCodestream(frame)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	comp := cs.comps[0]
+	bps := 1
+	if comp.precision > 8 {
+		bps = 2
+	}
 	out := make([]byte, len(want))
 	if err := goJ2Kdecode(frame, out); err != nil {
 		t.Fatalf("pure-Go HT multi-pass decode: %v", err)
 	}
+	readSample := func(b []byte, i int) int {
+		if bps == 1 {
+			return int(b[i])
+		}
+		v := int(b[i*2]) | int(b[i*2+1])<<8
+		if comp.signed {
+			v = int(int16(uint16(v)))
+		}
+		return v
+	}
+	n := len(want) / bps
 	maxd, outl := 0, 0
-	for i := range want {
-		d := int(want[i]) - int(out[i])
+	for i := 0; i < n; i++ {
+		d := readSample(want, i) - readSample(out, i)
 		if d < 0 {
 			d = -d
 		}
@@ -86,7 +106,7 @@ func TestGoHTMultiPassConformance(t *testing.T) {
 			outl++
 		}
 	}
-	t.Logf("ds0_ht_09 (CUP+SPP+MRP): maxDiff=%d outliers(>1)=%d/%d", maxd, outl, len(want))
+	t.Logf("ds0_ht_09 (CUP+SPP+MRP): maxDiff=%d outliers(>1)=%d/%d", maxd, outl, n)
 	if outl > 0 {
 		t.Fatalf("multi-pass conformance: %d samples exceed ±1 (maxDiff=%d)", outl, maxd)
 	}

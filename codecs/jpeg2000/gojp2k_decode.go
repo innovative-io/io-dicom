@@ -99,6 +99,14 @@ func decodeTileComponent(cs *j2kCodestream, frame []byte, tc *tileComp) ([]int32
 					if cb.npasses == 0 || len(cb.segs) == 0 {
 						continue // empty/insignificant block stays zero
 					}
+					// One contribution carries the whole HT block (cleanup +
+					// refinement). Multiple segments mean a multi-layer/fragmented
+					// block, which this baseline path does not reassemble — defer to
+					// the native backend. mb (K_max) outside [0,31] needs openjph's
+					// 64-bit decoder, which we have not ported.
+					if len(cb.segs) != 1 || mb < 0 || mb > 31 {
+						return nil, errJ2KUnsupported
+					}
 					seg := cb.segs[0]
 					stripeCausal := tc.style.cbStyle&0x08 != 0
 					decoded, ok := decodeHTBlock(seg, cb.htLen1, cb.htLen2, cb.npasses,
