@@ -300,32 +300,49 @@ func decodeCodeBlock(cb *codeBlock, orient, mb int) []int32 {
 	}
 	bp := bpStart
 	passNo := 0
+	lowestBP := bpStart
 	// First bit-plane: cleanup only.
 	t.cleanupPass(bp)
 	passNo++
+	lowestBP = bp
 	bp--
 	for passNo < cb.npasses && bp >= 0 {
 		if passNo < cb.npasses {
 			t.sigPropPass(bp)
 			passNo++
+			lowestBP = bp
 		}
 		if passNo < cb.npasses {
 			t.magRefPass(bp)
 			passNo++
+			lowestBP = bp
 		}
 		if passNo < cb.npasses {
 			t.cleanupPass(bp)
 			passNo++
+			lowestBP = bp
 		}
 		bp--
 	}
 
+	// Mid-point reconstruction: when the code-block was not decoded to bit-plane 0
+	// (rate truncation), each significant coefficient's true value lies in
+	// [mag, mag+2^lowestBP); reconstruct at the mid-point by setting the bit just
+	// below the lowest decoded bit-plane (T.800 / openjpeg "halfb").
+	half := int32(0)
+	if lowestBP > 0 {
+		half = 1 << uint(lowestBP-1)
+	}
 	out := make([]int32, w*h)
 	for i := range out {
+		m := t.mag[i]
+		if m != 0 {
+			m += half
+		}
 		if t.sign[i] {
-			out[i] = -t.mag[i]
+			out[i] = -m
 		} else {
-			out[i] = t.mag[i]
+			out[i] = m
 		}
 	}
 	return out
