@@ -269,10 +269,14 @@ func (t *t1) cleanupPass(bp int) {
 
 // decodeCodeBlock decodes one code-block's coefficients. mb is the number of
 // magnitude bit-planes for the subband (Mb). Returns signed coefficients.
-func decodeCodeBlock(cb *codeBlock, orient, mb int) []int32 {
+// The returned coefficients are raw signed magnitudes (no mid-point applied);
+// the second return value is the lowest decoded bit-plane, which the caller uses
+// to add the reconstruction mid-point (T.800 E.1.1) appropriately for the
+// reversible (integer) or irreversible (float) path.
+func decodeCodeBlock(cb *codeBlock, orient, mb int) ([]int32, int) {
 	w, h := cb.w(), cb.h()
 	if w <= 0 || h <= 0 || cb.npasses == 0 || len(cb.segs) == 0 {
-		return make([]int32, w*h)
+		return make([]int32, w*h), 0
 	}
 	// Concatenate segments (baseline: no per-pass termination → typically one).
 	var data []byte
@@ -296,7 +300,7 @@ func decodeCodeBlock(cb *codeBlock, orient, mb int) []int32 {
 
 	bpStart := mb - 1 - cb.nzeroBP
 	if bpStart < 0 {
-		return t.mag
+		return t.mag, 0
 	}
 	bp := bpStart
 	passNo := 0
@@ -325,27 +329,19 @@ func decodeCodeBlock(cb *codeBlock, orient, mb int) []int32 {
 		bp--
 	}
 
-	// Mid-point reconstruction: when the code-block was not decoded to bit-plane 0
-	// (rate truncation), each significant coefficient's true value lies in
-	// [mag, mag+2^lowestBP); reconstruct at the mid-point by setting the bit just
-	// below the lowest decoded bit-plane (T.800 / openjpeg "halfb").
-	half := int32(0)
-	if lowestBP > 0 {
-		half = 1 << uint(lowestBP-1)
-	}
+	// Return raw signed magnitudes; the caller applies the mid-point using
+	// lowestBP. (Reversible adds an integer 2^(lowestBP-1) only when lowestBP>0;
+	// irreversible always adds the float 2^(lowestBP-1), which is 0.5 at bp 0.)
 	out := make([]int32, w*h)
 	for i := range out {
 		m := t.mag[i]
-		if m != 0 {
-			m += half
-		}
 		if t.sign[i] {
 			out[i] = -m
 		} else {
 			out[i] = m
 		}
 	}
-	return out
+	return out, lowestBP
 }
 
 func b2i(b bool) int {
