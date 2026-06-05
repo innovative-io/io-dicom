@@ -236,12 +236,12 @@ func TestPS35_GetStringStripsTrailingPadding(t *testing.T) {
 // Write() has an even byte length, satisfying the PS3.5 §7.1.3 even-length rule.
 func TestPS35_AllTagValuesAreEvenLength(t *testing.T) {
 	obj := media.NewEmptyDCMObj()
-	obj.Write(tags.PatientName, "DOE^A")            // 5 bytes → padded to 6
-	obj.Write(tags.PatientID, "1")                  // 1 byte → padded to 2
-	obj.Write(tags.StudyDate, "20240101")            // 8 bytes, already even
-	obj.Write(tags.Modality, "XRF")                 // 3 bytes → padded to 4
+	obj.Write(tags.PatientName, "DOE^A")                     // 5 bytes → padded to 6
+	obj.Write(tags.PatientID, "1")                           // 1 byte → padded to 2
+	obj.Write(tags.StudyDate, "20240101")                    // 8 bytes, already even
+	obj.Write(tags.Modality, "XRF")                          // 3 bytes → padded to 4
 	obj.Write(tags.SOPClassUID, "1.2.840.10008.5.1.4.1.1.7") // 26 bytes, even
-	obj.Write(tags.BitsAllocated, uint16(16))        // 2 bytes, always even
+	obj.Write(tags.BitsAllocated, uint16(16))                // 2 bytes, always even
 	obj.Write(tags.BitsStored, uint16(16))
 	obj.Write(tags.PixelRepresentation, uint16(0))
 

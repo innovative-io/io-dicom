@@ -1,4 +1,4 @@
-//go:build openjpeg && libjxl && cgo
+//go:build libjxl && cgo
 
 package transcoder_test
 

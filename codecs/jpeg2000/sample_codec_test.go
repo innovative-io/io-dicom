@@ -70,13 +70,9 @@ func extractFirstDICOMEncapsulatedFrame(t *testing.T, dcmData []byte) []byte {
 }
 
 func TestJ2KdecodeSample(t *testing.T) {
-	if !CGOEnabled {
-		t.Skip("J2Kdecode sample requires the openjpeg native backend")
-	}
-	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
-	if err := UseBackend("openjpeg"); err != nil {
-		t.Fatalf("expected openjpeg backend to be registered: %v", err)
+	if err := UseBackend("gojpeg2000"); err != nil {
+		t.Fatalf("UseBackend(gojpeg2000): %v", err)
 	}
 	jpegData := loadBytesFromFile("../../testdata/test.j2k", t)
 	outSize := 1576 * 1134 * 3
@@ -91,13 +87,9 @@ func TestJ2KdecodeSample(t *testing.T) {
 // that contains signed 16-bit pixel data (CT Hounsfield values). This was
 // previously rejected with "unsupported decoded image layout".
 func TestJ2KdecodeSampleSignedCT(t *testing.T) {
-	if !CGOEnabled {
-		t.Skip("J2Kdecode signed CT sample requires the openjpeg native backend")
-	}
-	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
-	if err := UseBackend("openjpeg"); err != nil {
-		t.Fatalf("expected openjpeg backend to be registered: %v", err)
+	if err := UseBackend("gojpeg2000"); err != nil {
+		t.Fatalf("UseBackend(gojpeg2000): %v", err)
 	}
 
 	dcmData := loadBytesFromFile("../../testdata/cornerstone-CTImage-jpeg2000-lossless.dcm", t)
@@ -133,13 +125,9 @@ func TestJ2KdecodeSampleSignedCT(t *testing.T) {
 // CT stored-value range, whereas a big-endian (byte-swapped) reading scatters
 // values across the full int16 range and falls outside it far more often.
 func TestJ2KdecodeSignedCTIsLittleEndian(t *testing.T) {
-	if !CGOEnabled {
-		t.Skip("requires the openjpeg native backend")
-	}
-	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
-	if err := UseBackend("openjpeg"); err != nil {
-		t.Fatalf("expected openjpeg backend to be registered: %v", err)
+	if err := UseBackend("gojpeg2000"); err != nil {
+		t.Fatalf("UseBackend(gojpeg2000): %v", err)
 	}
 
 	dcmData := loadBytesFromFile("../../testdata/cornerstone-CTImage-jpeg2000-lossless.dcm", t)
@@ -181,34 +169,22 @@ func TestJ2KencodeSample(t *testing.T) {
 	var jpegData []byte
 	var jpegSize int
 
-	if !CGOEnabled {
-		// Pure-Go lossless 5/3 encode: a real RGB image must encode and round-trip
-		// back to the original through the pure-Go decoder.
-		if err := UseBackend("gojpeg2000"); err != nil {
-			t.Fatalf("UseBackend(gojpeg2000): %v", err)
-		}
-		t.Cleanup(func() { SetBackend(nil) })
-		if err := J2Kencode(rawData, 1576, 1134, 3, 8, &jpegData, &jpegSize, 10); err != nil {
-			t.Fatalf("pure-Go J2Kencode: %v", err)
-		}
-		dec := make([]byte, len(rawData))
-		if err := J2Kdecode(jpegData, uint32(jpegSize), dec); err != nil {
-			t.Fatalf("decode of pure-Go encode: %v", err)
-		}
-		for i := range rawData {
-			if rawData[i] != dec[i] {
-				t.Fatalf("RGB lossless round-trip mismatch at %d: got %d want %d", i, dec[i], rawData[i])
-			}
-		}
-		return
-	}
-
-	SetBackend(nil)
+	// Pure-Go lossless 5/3 encode: a real RGB image must encode and round-trip
+	// back to the original through the pure-Go decoder.
 	t.Cleanup(func() { SetBackend(nil) })
-	if err := UseBackend("openjpeg"); err != nil {
-		t.Fatalf("expected openjpeg backend to be registered: %v", err)
+	if err := UseBackend("gojpeg2000"); err != nil {
+		t.Fatalf("UseBackend(gojpeg2000): %v", err)
 	}
 	if err := J2Kencode(rawData, 1576, 1134, 3, 8, &jpegData, &jpegSize, 10); err != nil {
-		t.Fatalf("J2Kencode() error = %v", err)
+		t.Fatalf("pure-Go J2Kencode: %v", err)
+	}
+	dec := make([]byte, len(rawData))
+	if err := J2Kdecode(jpegData, uint32(jpegSize), dec); err != nil {
+		t.Fatalf("decode of pure-Go encode: %v", err)
+	}
+	for i := range rawData {
+		if rawData[i] != dec[i] {
+			t.Fatalf("RGB lossless round-trip mismatch at %d: got %d want %d", i, dec[i], rawData[i])
+		}
 	}
 }

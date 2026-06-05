@@ -10,7 +10,6 @@ PREFIX="${PREFIX:-$HOME/.local/codec-deps}"
 LIB_DIR="$PREFIX/lib"
 JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 
-OPENJPEG_VERSION="${OPENJPEG_VERSION:-2.5.3}"
 JPEGXL_VERSION="${JPEGXL_VERSION:-0.10.3}"
 OPENJPH_VERSION="${OPENJPH_VERSION:-0.26.3}"
 FFMPEG_VERSION="${FFMPEG_VERSION:-7.1}"
@@ -43,27 +42,6 @@ extract_tarball() {
   rm -rf "$dir"
   mkdir -p "$dir"
   tar -xf "$archive" -C "$dir" --strip-components=1
-}
-
-build_openjpeg() {
-  local src="$WORK_DIR/openjpeg-src"
-  local build="$WORK_DIR/openjpeg-build"
-  local tarball="$WORK_DIR/openjpeg-${OPENJPEG_VERSION}.tar.gz"
-
-  echo "[codec-deps] building OpenJPEG ${OPENJPEG_VERSION}"
-  fetch_tarball "https://github.com/uclouvain/openjpeg/archive/refs/tags/v${OPENJPEG_VERSION}.tar.gz" "$tarball"
-  extract_tarball "$tarball" "$src"
-
-  cmake -S "$src" -B "$build" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-    -DCMAKE_INSTALL_LIBDIR=lib \
-    -DBUILD_SHARED_LIBS=ON \
-    -DBUILD_TESTING=OFF \
-    -DBUILD_CODEC=ON
-  cmake --build "$build" --parallel "$JOBS"
-  cmake --install "$build"
 }
 
 build_jpegxl() {
@@ -233,7 +211,6 @@ main() {
   need_cmd gcc
   need_cmd g++
 
-  build_openjpeg
   build_jpegxl
   build_openjph
   build_ffmpeg

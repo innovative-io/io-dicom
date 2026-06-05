@@ -8,12 +8,15 @@ import (
 	"github.com/innovative-io/io-dicom/codecs/internal/backendmgr"
 )
 
+// CGOEnabled reports whether a native (cgo) JPEG 2000 backend is compiled in.
+// There is none anymore — decode and lossless encode are pure Go — so it is
+// always false. Retained for API compatibility with callers/tests.
 var CGOEnabled = nativeBackendEnabled
 
 const maxCodecPayloadBytes = 512 << 20
 
 var errInvalidJ2KPayload = errors.New("invalid JPEG 2000 payload size")
-var errBackendUnavailable = errors.New("jpeg 2000 decode requires the openjpeg native backend (build with -tags openjpeg)")
+var errBackendUnavailable = errors.New("jpeg 2000: no decode backend available")
 
 var supportedTransferSyntaxUIDs = []string{
 	"1.2.840.10008.1.2.4.90",
@@ -62,8 +65,8 @@ func (passthroughBackend) Encode(_ []byte, _ uint16, _ uint16, _ uint16, _ uint1
 var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 
 func init() {
-	registerNativeBackends() // openjpeg (cgo), higher priority, when built with -tags openjpeg
-	registerPureGoBackend()  // pure-Go gojpeg2000 (lossless 5/3), the default fallback
+	registerNativeBackends() // no-op (no native backend); kept for symmetry
+	registerPureGoBackend()  // pure-Go gojpeg2000 (decode + lossless 5/3 encode)
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
 		slog.Warn("jpeg2000: no decode backend available")
@@ -71,8 +74,7 @@ func init() {
 }
 
 // SetBackend overrides the active JPEG 2000 backend. Passing nil resets to the
-// default (the highest-priority registered backend: openjpeg when built with
-// -tags openjpeg, otherwise the pure-Go gojpeg2000 decoder).
+// default (the pure-Go gojpeg2000 backend).
 func SetBackend(backend Backend) {
 	if backend == nil {
 		mgr.Reset()

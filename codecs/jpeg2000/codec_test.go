@@ -156,19 +156,23 @@ func TestJ2KBackendRegistry(t *testing.T) {
 	}
 }
 
-func TestJ2KNativeBackendRegistrationMatchesFlag(t *testing.T) {
-	foundOpenJPEG := false
+// TestJ2KNoNativeBackend confirms the JPEG 2000 codec is pure-Go: no native
+// backend is compiled in (CGOEnabled false), the pure-Go backend is registered,
+// and no "openjpeg" backend exists.
+func TestJ2KNoNativeBackend(t *testing.T) {
+	if CGOEnabled {
+		t.Fatal("CGOEnabled should be false: no native JPEG 2000 backend exists")
+	}
+	foundPureGo := false
 	for _, name := range AvailableBackends() {
 		if name == "openjpeg" {
-			foundOpenJPEG = true
-			break
+			t.Fatal("did not expect an openjpeg backend")
+		}
+		if name == "gojpeg2000" {
+			foundPureGo = true
 		}
 	}
-
-	if CGOEnabled && !foundOpenJPEG {
-		t.Fatal("expected openjpeg backend when CGOEnabled is true")
-	}
-	if !CGOEnabled && foundOpenJPEG {
-		t.Fatal("did not expect openjpeg backend when CGOEnabled is false")
+	if !foundPureGo {
+		t.Fatal("expected the pure-Go gojpeg2000 backend to be registered")
 	}
 }

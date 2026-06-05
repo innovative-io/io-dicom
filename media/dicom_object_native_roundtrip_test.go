@@ -1,4 +1,4 @@
-//go:build openjpeg || libjxl || openjph || ffmpeg || st2110
+//go:build libjxl || openjph || ffmpeg || st2110
 
 package media_test
 
