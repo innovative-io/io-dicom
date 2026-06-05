@@ -180,8 +180,22 @@ func goJ2Kdecode(frame, out []byte) error {
 	}
 	w := cs.xsiz - cs.xOsiz
 	h := cs.ysiz - cs.yOsiz
-	need := w * h * nc * bps
-	if need > len(out) {
+	if w <= 0 || h <= 0 || nc <= 0 {
+		return errJ2KMalformed
+	}
+	// Validate the required output size without overflowing int on hostile SIZ
+	// values: accumulate in int64 and reject as soon as the running product
+	// exceeds the (already bounded) output buffer. Each factor multiplies a value
+	// already capped at len(out), so no intermediate can overflow int64.
+	outLen := int64(len(out))
+	need := int64(w)
+	for _, f := range []int{h, nc, bps} {
+		if need > outLen {
+			return errJ2KMalformed
+		}
+		need *= int64(f)
+	}
+	if need > outLen {
 		return errJ2KMalformed
 	}
 

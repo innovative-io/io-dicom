@@ -344,6 +344,9 @@ func parseQuant(q *quantStyle, b []byte) error {
 			q.exponents[i] = int(v >> 3)
 		}
 	case 1, 2: // scalar derived / expounded: two bytes per subband
+		if len(rest)%2 != 0 {
+			return errJ2KMalformed // odd body length cannot be whole 16-bit step sizes
+		}
 		n := len(rest) / 2
 		q.exponents = make([]int, n)
 		q.mantissas = make([]int, n)

@@ -185,10 +185,15 @@ func decodeTileTier2(cs *j2kCodestream, comps []*tileComp, data []byte, start, e
 func decodeOnePacket(cs *j2kCodestream, tc *tileComp, pt *precinctTrees, r, layer int, data []byte, pos *int, end int) (int, error) {
 	res := &tc.resolutions[r]
 
-	// Optional SOP marker (0xFF91) — skip if present.
+	// Optional SOP marker (0xFF91) — skip if present. SOP is a fixed 6-byte
+	// segment; require the whole thing to be in range before advancing so a
+	// truncated tail cannot push the read position past end.
 	p := *pos
 	if cs.cod.useSOP && p+1 < end && data[p] == 0xFF && data[p+1] == 0x91 {
-		p += 6 // SOP is 6 bytes
+		if p+6 > end {
+			return 0, errJ2KMalformed
+		}
+		p += 6
 	}
 
 	bio := newBIO(data, p, end)

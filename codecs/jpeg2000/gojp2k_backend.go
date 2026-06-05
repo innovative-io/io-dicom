@@ -1,7 +1,8 @@
 package jpeg2000
 
 // Pure-Go JPEG 2000 backend. It decodes the codestreams it supports (single
-// tile, single layer, LRCP, default precincts, 5/3 reversible) entirely in Go,
+// tile, single layer, LRCP, default precincts, 5/3 reversible and 9/7
+// irreversible) entirely in Go,
 // and returns errJ2KUnsupported for anything else so the native openjpeg backend
 // (when built with -tags openjpeg, registered at a higher priority) handles the
 // rest. It is registered at priority -1 so openjpeg always wins when present.
