@@ -266,9 +266,14 @@ type htFrwd struct {
 	tmp     uint64
 	bits    int
 	unstuff bool
+	fillFF  bool // feed 0xFF when exhausted (MagSgn); else feed 0 (SigProp)
 }
 
 func (f *htFrwd) read() {
+	var fillWord uint32
+	if f.fillFF {
+		fillWord = 0xFFFFFFFF
+	}
 	var val uint32
 	if f.size > 3 {
 		val = uint32(f.data[f.pos]) | uint32(f.data[f.pos+1])<<8 |
@@ -277,7 +282,7 @@ func (f *htFrwd) read() {
 		f.size -= 4
 	} else if f.size > 0 {
 		i := 0
-		val = 0xFFFFFFFF
+		val = fillWord
 		for f.size > 0 {
 			v := uint32(f.data[f.pos])
 			f.pos++
@@ -287,7 +292,7 @@ func (f *htFrwd) read() {
 			i += 8
 		}
 	} else {
-		val = 0xFFFFFFFF
+		val = fillWord
 	}
 
 	nbits := 8 - b2i(f.unstuff)
@@ -325,11 +330,15 @@ func (f *htFrwd) advance(n uint32) {
 	f.bits -= int(n)
 }
 
-func newHTFrwd(data []byte, start, size int) *htFrwd {
-	f := &htFrwd{data: data, pos: start, size: size}
+func newHTFrwd(data []byte, start, size int, fillFF bool) *htFrwd {
+	f := &htFrwd{data: data, pos: start, size: size, fillFF: fillFF}
+	var fillByte uint64
+	if fillFF {
+		fillByte = 0xFF
+	}
 	num := 4 - (f.pos & 0x3)
 	for i := 0; i < num; i++ {
-		var d uint64 = 0xFF
+		d := fillByte
 		if f.size > 0 {
 			d = uint64(f.data[f.pos])
 			f.pos++
@@ -343,20 +352,51 @@ func newHTFrwd(data []byte, start, size int) *htFrwd {
 	return f
 }
 
-// decodeHTCleanup decodes one HT Cleanup pass. coded is the cleanup segment
-// (length lcup). missingMSBs is the number of all-zero MSB bit-planes. Returns
-// width*height packed sign-magnitude words (sign in bit 31), or ok=false on a
-// malformed block.
-func decodeHTCleanup(coded []byte, lcup, missingMSBs, width, height int) ([]uint32, bool) {
-	if missingMSBs > 30 || lcup < 2 {
+// htRev (backward reader) is reused for MagRef (MRP). newHTRevMRP initialises it
+// over the refinement segment [lcup, lcup+len2), growing backward, with the
+// MRP-specific start (no 12-bit length prefix, initial unstuff=true, fill 0).
+func newHTRevMRP(data []byte, lcup, len2 int) *htRev {
+	r := &htRev{data: data, pos: lcup + len2 - 1, size: len2, unstuff: true}
+	num := 1 + (r.pos & 0x3)
+	for i := 0; i < num; i++ {
+		var d uint64
+		if r.size > 0 {
+			d = uint64(r.data[r.pos])
+		}
+		if r.size > 0 {
+			r.pos--
+		}
+		r.size--
+		dBits := 8 - b2i(r.unstuff && (d&0x7F) == 0x7F)
+		r.tmp |= d << uint(r.bits)
+		r.bits += dBits
+		r.unstuff = d > 0x8F
+	}
+	r.read()
+	return r
+}
+
+// decodeHTBlock decodes an HT code-block: the mandatory Cleanup pass plus, when
+// numPasses>1, the SigProp refinement pass, and when numPasses>2, the MagRef
+// refinement pass. coded holds the cleanup segment (lengths1) followed by the
+// refinement segment (lengths2). missingMSBs is the number of all-zero MSB
+// bit-planes. Returns width*height packed sign-magnitude words (sign in bit 31),
+// or ok=false on a malformed block.
+func decodeHTBlock(coded []byte, lengths1, lengths2, numPasses, missingMSBs, width, height int, stripeCausal bool) ([]uint32, bool) {
+	if missingMSBs > 30 || lengths1 < 2 {
 		return nil, false
 	}
+	lcup := lengths1
 	p := 30 - missingMSBs
 	mmsbp2 := missingMSBs + 2
 
 	// Pad so the byte-oriented readers can over-read up to a few bytes.
-	buf := make([]byte, lcup+16)
-	copy(buf, coded[:lcup])
+	total := lengths1 + lengths2
+	if total > len(coded) {
+		return nil, false
+	}
+	buf := make([]byte, total+16)
+	copy(buf, coded[:total])
 
 	scup := (int(buf[lcup-1]) << 4) + (int(buf[lcup-2]) & 0xF)
 	if scup < 2 || scup > lcup || scup > 4079 {
@@ -504,12 +544,13 @@ func decodeHTCleanup(coded []byte, lcup, missingMSBs, width, height int) ([]uint
 	}
 
 	// ----- step 2: decode MagSgn into decoded_data -----
-	// Quads write two rows at a time (dp and dp+stride), so an odd-height block
-	// writes one row past the last real row; round the buffer up to even rows.
+	// Quads write two rows at a time, and the SigProp pass writes 4-row stripes,
+	// so round the row count up to a multiple of 4 to absorb writes past the last
+	// real row of an odd-sized block.
 	stride := width
-	dh := (height + 1) &^ 1
+	dh := (height + 3) &^ 3
 	decoded := make([]uint32, stride*dh)
-	magsgn := newHTFrwd(buf, 0, lcup-scup)
+	magsgn := newHTFrwd(buf, 0, lcup-scup, true)
 	vnScratch := make([]uint32, width+8)
 
 	decodeQuadSample := func(inf, uQ uint32, bit int, ms *htFrwd) (uint32, uint32) {
@@ -613,5 +654,220 @@ func decodeHTCleanup(coded []byte, lcup, missingMSBs, width, height int) ([]uint
 		vnScratch[vp] = prevVn
 	}
 
+	if numPasses <= 1 {
+		return decoded, true
+	}
+
+	// ----- refinement passes (SigProp, then MagRef) -----
+	// Re-arrange quad significance (rho, bits 4..7 of each inf word) into column
+	// significance: each nibble holds one column of 4 rows, 8 columns per word.
+	mstr := (width + 3) >> 2
+	mstr = ((mstr + 2) + 7) &^ 7
+	sigmaRows := (height+3)/4 + 2
+	sigma := make([]uint16, mstr*sigmaRows+2)
+	for y := 0; y < height; y += 4 {
+		spBase := (y >> 1) * sstr
+		dpBase := (y >> 2) * mstr
+		di := 0
+		for x := 0; x < width; x += 4 {
+			sp := spBase + x
+			s0 := uint32(scratch[sp])
+			s2 := uint32(scratch[sp+2])
+			s0b := uint32(scratch[sp+sstr])
+			s2b := uint32(scratch[sp+2+sstr])
+			t0 := ((s0 & 0x30) >> 4) | ((s0 & 0xC0) >> 2)
+			t0 |= ((s2 & 0x30) << 4) | ((s2 & 0xC0) << 6)
+			t1 := ((s0b & 0x30) >> 2) | (s0b & 0xC0)
+			t1 |= ((s2b & 0x30) << 6) | ((s2b & 0xC0) << 8)
+			sigma[dpBase+di] = uint16(t0 | t1)
+			di++
+		}
+		sigma[dpBase+di] = 0
+	}
+
+	// SigProp pass.
+	{
+		prevRowSig := make([]uint16, (width+15)/4+8)
+		sigprop := newHTFrwd(buf, lcup, lengths2, false)
+		for y := 0; y < height; y += 4 {
+			pattern := uint32(0xFFFF)
+			if height-y < 4 {
+				pattern = 0x7777
+				if height-y < 3 {
+					pattern = 0x3333
+					if height-y < 2 {
+						pattern = 0x1111
+					}
+				}
+			}
+			prev := uint32(0)
+			curSigBase := (y >> 2) * mstr
+			for x := 0; x < width; x += 4 {
+				k := x >> 2
+				curSig := curSigBase + k
+				s := x + 4 - width
+				if s < 0 {
+					s = 0
+				}
+				pattern >>= uint(s * 4)
+
+				ps := ld32(prevRowSig, k)
+				ns := ld32(sigma, curSig+mstr)
+				u := (ps & 0x88888888) >> 3
+				if !stripeCausal {
+					u |= (ns & 0x11111111) << 3
+				}
+				csig := ld32(sigma, curSig)
+				mbr := csig
+				mbr |= (csig & 0x77777777) << 1
+				mbr |= (csig & 0xEEEEEEEE) >> 1
+				mbr |= u
+				t := mbr
+				mbr |= t << 4
+				mbr |= t >> 4
+				mbr |= prev >> 12
+				mbr &= pattern
+				mbr &^= csig
+
+				newSig := mbr
+				if newSig != 0 {
+					cwd := sigprop.fetch()
+					cnt := uint32(0)
+					colMask := uint32(0xF)
+					invSig := ^csig & pattern
+					for i := 0; i < 16; i += 4 {
+						if colMask&newSig != 0 {
+							sampleMask := uint32(0x1111) & colMask
+							if newSig&sampleMask != 0 {
+								newSig &^= sampleMask
+								if cwd&1 != 0 {
+									newSig |= (uint32(0x33) << uint(i)) & invSig
+								}
+								cwd >>= 1
+								cnt++
+							}
+							sampleMask <<= 1
+							if newSig&sampleMask != 0 {
+								newSig &^= sampleMask
+								if cwd&1 != 0 {
+									newSig |= (uint32(0x76) << uint(i)) & invSig
+								}
+								cwd >>= 1
+								cnt++
+							}
+							sampleMask <<= 1
+							if newSig&sampleMask != 0 {
+								newSig &^= sampleMask
+								if cwd&1 != 0 {
+									newSig |= (uint32(0xEC) << uint(i)) & invSig
+								}
+								cwd >>= 1
+								cnt++
+							}
+							sampleMask <<= 1
+							if newSig&sampleMask != 0 {
+								newSig &^= sampleMask
+								if cwd&1 != 0 {
+									newSig |= (uint32(0xC8) << uint(i)) & invSig
+								}
+								cwd >>= 1
+								cnt++
+							}
+						}
+						colMask <<= 4
+					}
+					if newSig != 0 {
+						dpx := y*stride + x
+						val := uint32(3) << uint(p-2)
+						colMask = 0xF
+						for i := 0; i < 4; i++ {
+							if colMask&newSig != 0 {
+								sampleMask := uint32(0x1111) & colMask
+								if newSig&sampleMask != 0 {
+									decoded[dpx] = (cwd << 31) | val
+									cwd >>= 1
+									cnt++
+								}
+								sampleMask += sampleMask
+								if newSig&sampleMask != 0 {
+									decoded[dpx+stride] = (cwd << 31) | val
+									cwd >>= 1
+									cnt++
+								}
+								sampleMask += sampleMask
+								if newSig&sampleMask != 0 {
+									decoded[dpx+2*stride] = (cwd << 31) | val
+									cwd >>= 1
+									cnt++
+								}
+								sampleMask += sampleMask
+								if newSig&sampleMask != 0 {
+									decoded[dpx+3*stride] = (cwd << 31) | val
+									cwd >>= 1
+									cnt++
+								}
+							}
+							dpx++
+							colMask <<= 4
+						}
+					}
+					sigprop.advance(cnt)
+				}
+
+				newSig |= csig
+				prevRowSig[k] = uint16(newSig)
+				t = newSig
+				newSig |= (t & 0x7777) << 1
+				newSig |= (t & 0xEEEE) >> 1
+				prev = newSig | u
+				prev &= 0xF000
+			}
+		}
+	}
+
+	// MagRef pass.
+	if numPasses > 2 {
+		magref := newHTRevMRP(buf, lcup, lengths2)
+		half := uint32(1) << uint(p-2)
+		for y := 0; y < height; y += 4 {
+			curSigBase := (y >> 2) * mstr
+			dppBase := y * stride
+			csi := 0
+			for i := 0; i < width; i += 8 {
+				cwd := magref.fetch()
+				sig := ld32(sigma, curSigBase+csi)
+				csi += 2
+				if sig != 0 {
+					colMask := uint32(0xF)
+					for j := 0; j < 8; j++ {
+						if sig&colMask != 0 {
+							dp := dppBase + i + j
+							sampleMask := uint32(0x11111111) & colMask
+							for k := 0; k < 4; k++ {
+								if sig&sampleMask != 0 {
+									sym := cwd & 1
+									sym = (1 - sym) << uint(p-1)
+									sym |= half
+									decoded[dp] ^= sym
+									cwd >>= 1
+								}
+								sampleMask += sampleMask
+								dp += stride
+							}
+						}
+						colMask <<= 4
+					}
+				}
+				magref.advance(uint32(bits.OnesCount32(sig)))
+			}
+		}
+	}
+
 	return decoded, true
+}
+
+// ld32 reads two consecutive little-endian uint16 entries as one uint32, matching
+// openjph's *(ui32*) reads over the 16-bit significance scratch arrays.
+func ld32(s []uint16, i int) uint32 {
+	return uint32(s[i]) | uint32(s[i+1])<<16
 }

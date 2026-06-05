@@ -15,7 +15,7 @@ func FuzzGoJ2K(f *testing.F) {
 	}
 	// Seed HTJ2K (ISO 15444-15) codestreams so the fuzzer exercises the HT
 	// Cleanup decoder (MEL/VLC/MagSgn) on mutated inputs.
-	for _, p := range []string{"htj2k-reversible-gray", "htj2k-lossy-gray"} {
+	for _, p := range []string{"htj2k-reversible-gray", "htj2k-lossy-gray", "htj2k-conf-ds0_ht_09"} {
 		if j2c, err := os.ReadFile("../../testdata/" + p + ".j2c"); err == nil {
 			f.Add(j2c)
 		}

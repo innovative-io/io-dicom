@@ -94,16 +94,15 @@ func decodeTileComponent(cs *j2kCodestream, frame []byte, tc *tileComp) ([]int32
 			for bi := range sb.blocks {
 				cb := &sb.blocks[bi]
 				if tc.style.htCodeblocks {
-					// HT Cleanup pass. Single-pass blocks only for now; refuse
-					// multi-pass (SigProp/MagRef) so the caller can fall back.
+					// HT block: Cleanup pass plus SigProp/MagRef refinement passes
+					// when present (npasses 2/3).
 					if cb.npasses == 0 || len(cb.segs) == 0 {
 						continue // empty/insignificant block stays zero
 					}
-					if cb.npasses != 1 {
-						return nil, errJ2KUnsupported
-					}
 					seg := cb.segs[0]
-					decoded, ok := decodeHTCleanup(seg, len(seg), cb.nzeroBP, cb.w(), cb.h())
+					stripeCausal := tc.style.cbStyle&0x08 != 0
+					decoded, ok := decodeHTBlock(seg, cb.htLen1, cb.htLen2, cb.npasses,
+						cb.nzeroBP, cb.w(), cb.h(), stripeCausal)
 					if !ok {
 						return nil, errJ2KMalformed
 					}

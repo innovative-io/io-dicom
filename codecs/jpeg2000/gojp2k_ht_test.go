@@ -54,6 +54,44 @@ func TestGoHTReversibleGolden(t *testing.T) {
 	}
 }
 
+// TestGoHTMultiPassConformance decodes an ISO/IEC 15444-15 conformance codestream
+// (ds0_ht_09) that contains a 3-pass HT code-block — Cleanup + SigProp + MagRef —
+// and checks it against openjph's decode. This stream is not openjph-encoded (its
+// encoder only emits single-pass blocks), so it independently validates the
+// refinement passes. The fixture is an ISO HTJ2K conformance file (from the
+// OpenHTJ2K project's conformance_data); the golden is ojph_expand's output.
+func TestGoHTMultiPassConformance(t *testing.T) {
+	frame, err := os.ReadFile("../../testdata/htj2k-conf-ds0_ht_09.j2c")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	want, err := os.ReadFile("../../testdata/htj2k-conf-ds0_ht_09.raw")
+	if err != nil {
+		t.Skipf("golden unavailable: %v", err)
+	}
+	out := make([]byte, len(want))
+	if err := goJ2Kdecode(frame, out); err != nil {
+		t.Fatalf("pure-Go HT multi-pass decode: %v", err)
+	}
+	maxd, outl := 0, 0
+	for i := range want {
+		d := int(want[i]) - int(out[i])
+		if d < 0 {
+			d = -d
+		}
+		if d > maxd {
+			maxd = d
+		}
+		if d > 1 {
+			outl++
+		}
+	}
+	t.Logf("ds0_ht_09 (CUP+SPP+MRP): maxDiff=%d outliers(>1)=%d/%d", maxd, outl, len(want))
+	if outl > 0 {
+		t.Fatalf("multi-pass conformance: %d samples exceed ±1 (maxDiff=%d)", outl, maxd)
+	}
+}
+
 // TestGoHTLossyGolden decodes pure-Go HTJ2K lossy (irreversible 9/7) codestreams
 // and compares against openjph's ojph_expand output within a small tolerance
 // (the 9/7 inverse transform is floating-point, so it matches to ±1 rather than

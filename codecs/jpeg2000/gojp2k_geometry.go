@@ -22,6 +22,11 @@ type codeBlock struct {
 	lblock   int      // length-indicator state (starts at 3)
 	npasses  int      // total coding passes decoded so far
 	segs     [][]byte // coded data segments (concatenated per tier-1 needs)
+
+	// HT (ISO 15444-15) split lengths: cleanup (htLen1) and refinement
+	// SigProp+MagRef (htLen2) within the single stored segment.
+	htLen1 int
+	htLen2 int
 }
 
 func (cb *codeBlock) w() int { return cb.x1 - cb.x0 }
