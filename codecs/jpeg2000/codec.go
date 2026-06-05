@@ -62,17 +62,21 @@ func (passthroughBackend) Encode(_ []byte, _ uint16, _ uint16, _ uint16, _ uint1
 var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 
 func init() {
-	registerNativeBackends()
+	registerNativeBackends() // openjpeg (cgo), higher priority, when built with -tags openjpeg
+	registerPureGoBackend()  // pure-Go gojpeg2000 (lossless 5/3), the default fallback
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
-		slog.Warn("jpeg2000: no native backend available; decode and encode will fail (build with -tags openjpeg)")
+		slog.Warn("jpeg2000: no decode backend available")
 	}
 }
 
-// SetBackend overrides the active JPEG 2000 backend. Passing nil resets to passthrough.
+// SetBackend overrides the active JPEG 2000 backend. Passing nil resets to the
+// default (the highest-priority registered backend: openjpeg when built with
+// -tags openjpeg, otherwise the pure-Go gojpeg2000 decoder).
 func SetBackend(backend Backend) {
 	if backend == nil {
 		mgr.Reset()
+		mgr.SelectDefault()
 		return
 	}
 	mgr.Set(backend)

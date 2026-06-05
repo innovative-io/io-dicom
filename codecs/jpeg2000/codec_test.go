@@ -38,26 +38,25 @@ func (m *mockBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uint16,
 	return out, nil
 }
 
-func TestJ2KPassthroughDecodeFails(t *testing.T) {
-	SetBackend(nil)
-	t.Cleanup(func() { SetBackend(nil) })
-
-	if CGOEnabled != nativeBackendEnabled {
-		t.Fatalf("unexpected CGOEnabled value: got %v want %v", CGOEnabled, nativeBackendEnabled)
+func TestJ2KPureGoBackendRejectsBadInput(t *testing.T) {
+	if err := UseBackend("gojpeg2000"); err != nil {
+		t.Fatalf("UseBackend(gojpeg2000): %v", err)
 	}
+	t.Cleanup(func() { SetBackend(nil) })
 
 	raw := []byte{1, 2, 3, 4}
 	var out []byte
 	var outSize int
-	// There is no pure-Go JPEG 2000 encoder, so without the native backend
-	// encode must fail rather than emit the raw bytes as a fake stream.
+	// There is no pure-Go JPEG 2000 encoder, so encode must fail rather than emit
+	// the raw bytes as a fake compressed stream.
 	if err := J2Kencode(raw, 2, 2, 1, 8, &out, &outSize, 10); err == nil {
-		t.Fatal("expected J2Kencode to fail without native backend")
+		t.Fatal("expected pure-Go J2Kencode to fail (no encoder)")
 	}
 
+	// Decoding non-codestream input must error, not panic or emit garbage.
 	decoded := make([]byte, len(raw))
 	if err := J2Kdecode([]byte{1, 2, 3, 4}, 4, decoded); err == nil {
-		t.Fatal("expected J2Kdecode to fail without native backend")
+		t.Fatal("expected J2Kdecode to reject non-codestream input")
 	}
 }
 
