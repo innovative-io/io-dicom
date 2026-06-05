@@ -184,6 +184,10 @@ func TestJ2KencodeSample(t *testing.T) {
 	if !CGOEnabled {
 		// No pure-Go JPEG 2000 encoder: encode must fail rather than emit raw
 		// bytes as a fake compressed stream.
+		if err := UseBackend("gojpeg2000"); err != nil {
+			t.Fatalf("UseBackend(gojpeg2000): %v", err)
+		}
+		t.Cleanup(func() { SetBackend(nil) })
 		if err := J2Kencode(rawData, 1576, 1134, 3, 8, &jpegData, &jpegSize, 10); err == nil {
 			t.Fatal("expected J2Kencode to fail without the native backend")
 		}
