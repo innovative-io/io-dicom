@@ -54,16 +54,60 @@ func TestGoHTReversibleGolden(t *testing.T) {
 	}
 }
 
-// TestGoHTLossyDeferred confirms that lossy (irreversible 9/7) HT code-blocks are
-// not yet handled by the pure-Go path and are reported as unsupported so the
-// caller can fall back to the native backend, rather than mis-decoding.
-func TestGoHTLossyDeferred(t *testing.T) {
-	frame, err := os.ReadFile("../../testdata/htj2k-lossy-gray.j2c")
-	if err != nil {
-		t.Skipf("fixture unavailable: %v", err)
+// TestGoHTLossyGolden decodes pure-Go HTJ2K lossy (irreversible 9/7) codestreams
+// and compares against openjph's ojph_expand output within a small tolerance
+// (the 9/7 inverse transform is floating-point, so it matches to ±1 rather than
+// bit-exactly).
+func TestGoHTLossyGolden(t *testing.T) {
+	cases := []struct {
+		name           string
+		bps            int
+		maxAbs, maxOut int
+	}{
+		{"lossy-gray", 1, 1, 0},   // 8-bit
+		{"lossy-gray16", 2, 1, 0}, // 16-bit
+		{"lossy-odd", 1, 1, 0},    // 8-bit, odd dimensions
 	}
-	out := make([]byte, 256*256)
-	if err := goJ2Kdecode(frame, out); err == nil {
-		t.Fatal("expected unsupported error for lossy HT in pure-Go path")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			frame, err := os.ReadFile("../../testdata/htj2k-" + c.name + ".j2c")
+			if err != nil {
+				t.Skipf("fixture unavailable: %v", err)
+			}
+			want, err := os.ReadFile("../../testdata/htj2k-" + c.name + ".raw")
+			if err != nil {
+				t.Skipf("golden unavailable: %v", err)
+			}
+			out := make([]byte, len(want))
+			if err := goJ2Kdecode(frame, out); err != nil {
+				t.Fatalf("pure-Go HT lossy decode: %v", err)
+			}
+			readSample := func(b []byte, i int) int {
+				if c.bps == 1 {
+					return int(b[i])
+				}
+				return int(uint16(b[i*2]) | uint16(b[i*2+1])<<8)
+			}
+			n := len(want) / c.bps
+			maxd, sumd, outl := 0, 0, 0
+			for i := 0; i < n; i++ {
+				d := readSample(want, i) - readSample(out, i)
+				if d < 0 {
+					d = -d
+				}
+				sumd += d
+				if d > maxd {
+					maxd = d
+				}
+				if d > c.maxAbs {
+					outl++
+				}
+			}
+			t.Logf("%s: maxDiff=%d meanDiff=%.4f outliers(>%d)=%d/%d",
+				c.name, maxd, float64(sumd)/float64(n), c.maxAbs, outl, n)
+			if outl > c.maxOut {
+				t.Fatalf("%s: %d samples exceed |Δ|=%d (maxDiff=%d)", c.name, outl, c.maxAbs, maxd)
+			}
+		})
 	}
 }

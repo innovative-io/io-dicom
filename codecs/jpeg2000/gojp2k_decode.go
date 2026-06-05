@@ -26,11 +26,6 @@ func decodeTileComponent(cs *j2kCodestream, frame []byte, tc *tileComp) ([]int32
 	if transform == 0 && quant.style == 0 {
 		return nil, errJ2KUnsupported
 	}
-	// HT (High-Throughput, ISO 15444-15) code-blocks: only the reversible (5/3)
-	// Cleanup path is implemented. Defer lossy HT to the native backend.
-	if tc.style.htCodeblocks && transform != 1 {
-		return nil, errJ2KUnsupported
-	}
 	prec := cs.comps[tc.comp].precision
 
 	// bandQuant returns the (exponent, mantissa) for a subband. For expounded
@@ -99,8 +94,8 @@ func decodeTileComponent(cs *j2kCodestream, frame []byte, tc *tileComp) ([]int32
 			for bi := range sb.blocks {
 				cb := &sb.blocks[bi]
 				if tc.style.htCodeblocks {
-					// HT Cleanup pass (reversible). Single-pass blocks only for now;
-					// refuse multi-pass (SigProp/MagRef) so the caller can fall back.
+					// HT Cleanup pass. Single-pass blocks only for now; refuse
+					// multi-pass (SigProp/MagRef) so the caller can fall back.
 					if cb.npasses == 0 || len(cb.segs) == 0 {
 						continue // empty/insignificant block stays zero
 					}
@@ -112,18 +107,36 @@ func decodeTileComponent(cs *j2kCodestream, frame []byte, tc *tileComp) ([]int32
 					if !ok {
 						return nil, errJ2KMalformed
 					}
+					// HT decode yields packed sign-magnitude words. Reversible: the
+					// integer coefficient is the magnitude shifted down by 31−K_max
+					// (K_max = Mb). Irreversible: multiply by a float δ; with our
+					// gain-0/two_invK convention δ = (1+μ/2^11)·2^(prec+G−32) (the
+					// per-subband exponent cancels), so packed·δ = M·stepsize_gain0 —
+					// the same value the EBCOT 9/7 path feeds idwt97.
 					shift := uint(31 - mb)
+					delta := float32((1.0 + float64(mant)/2048.0) *
+						math.Exp2(float64(prec+quant.guardBits-32)))
 					cw := cb.w()
 					for yy := 0; yy < cb.h(); yy++ {
 						for xx := 0; xx < cw; xx++ {
 							gx := cb.x0 - sb.x0 + xx
 							gy := cb.y0 - sb.y0 + yy
 							v := decoded[yy*cw+xx]
-							m := int32((v & 0x7FFFFFFF) >> shift)
-							if v&0x80000000 != 0 {
-								m = -m
+							neg := v&0x80000000 != 0
+							mag := v & 0x7FFFFFFF
+							if transform == 0 {
+								fv := float32(mag) * delta
+								if neg {
+									fv = -fv
+								}
+								fbuf[gy*sw+gx] = fv
+							} else {
+								m := int32(mag >> shift)
+								if neg {
+									m = -m
+								}
+								ibuf[gy*sw+gx] = m
 							}
-							ibuf[gy*sw+gx] = m
 						}
 					}
 					continue
@@ -192,6 +205,24 @@ func decodeTileComponent(cs *j2kCodestream, frame []byte, tc *tileComp) ([]int32
 		shift := int32(1) << uint(ci.precision-1)
 		for i := range samples {
 			samples[i] += shift
+		}
+	}
+
+	// Clamp to the component's representable range. Lossy reconstruction can
+	// overshoot the valid range; openjpeg and openjph both clamp, and lossless
+	// output is already in range, so this is a no-op there.
+	var lo, hi int32
+	if ci.signed {
+		hi = (int32(1) << uint(ci.precision-1)) - 1
+		lo = -(int32(1) << uint(ci.precision-1))
+	} else {
+		hi = (int32(1) << uint(ci.precision)) - 1
+	}
+	for i := range samples {
+		if samples[i] < lo {
+			samples[i] = lo
+		} else if samples[i] > hi {
+			samples[i] = hi
 		}
 	}
 	return samples, nil
