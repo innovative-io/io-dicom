@@ -47,3 +47,32 @@ func TestEncodeRoundTripSelf(t *testing.T) {
 		t.Logf("%+v: round-trip OK (%d raw → %d coded)", c, len(raw), len(stream))
 	}
 }
+
+// TestEncodeInputValidation checks that goJ2Kencode rejects malformed parameters
+// and non-exact payload sizes instead of silently accepting them.
+func TestEncodeInputValidation(t *testing.T) {
+	good := make([]byte, 4*4*1*1) // 4×4, 1 comp, 8-bit
+	cases := []struct {
+		name           string
+		raw            []byte
+		w, h, nc, prec int
+	}{
+		{"ok-exact", good, 4, 4, 1, 8},
+		{"too-few-bytes", good[:len(good)-1], 4, 4, 1, 8},
+		{"too-many-bytes", append(append([]byte{}, good...), 0), 4, 4, 1, 8},
+		{"zero-width", good, 0, 4, 1, 8},
+		{"zero-prec", good, 4, 4, 1, 0},
+		{"prec-too-large", good, 4, 4, 1, 17},
+		{"too-many-components", good, 4, 4, maxJ2KComponents + 1, 8},
+	}
+	for _, c := range cases {
+		_, err := goJ2Kencode(c.raw, c.w, c.h, c.nc, c.prec)
+		if c.name == "ok-exact" {
+			if err != nil {
+				t.Errorf("%s: unexpected error: %v", c.name, err)
+			}
+		} else if err == nil {
+			t.Errorf("%s: expected error, got nil", c.name)
+		}
+	}
+}
