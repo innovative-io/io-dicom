@@ -182,14 +182,23 @@ func TestJ2KencodeSample(t *testing.T) {
 	var jpegSize int
 
 	if !CGOEnabled {
-		// No pure-Go JPEG 2000 encoder: encode must fail rather than emit raw
-		// bytes as a fake compressed stream.
+		// Pure-Go lossless 5/3 encode: a real RGB image must encode and round-trip
+		// back to the original through the pure-Go decoder.
 		if err := UseBackend("gojpeg2000"); err != nil {
 			t.Fatalf("UseBackend(gojpeg2000): %v", err)
 		}
 		t.Cleanup(func() { SetBackend(nil) })
-		if err := J2Kencode(rawData, 1576, 1134, 3, 8, &jpegData, &jpegSize, 10); err == nil {
-			t.Fatal("expected J2Kencode to fail without the native backend")
+		if err := J2Kencode(rawData, 1576, 1134, 3, 8, &jpegData, &jpegSize, 10); err != nil {
+			t.Fatalf("pure-Go J2Kencode: %v", err)
+		}
+		dec := make([]byte, len(rawData))
+		if err := J2Kdecode(jpegData, uint32(jpegSize), dec); err != nil {
+			t.Fatalf("decode of pure-Go encode: %v", err)
+		}
+		for i := range rawData {
+			if rawData[i] != dec[i] {
+				t.Fatalf("RGB lossless round-trip mismatch at %d: got %d want %d", i, dec[i], rawData[i])
+			}
 		}
 		return
 	}
