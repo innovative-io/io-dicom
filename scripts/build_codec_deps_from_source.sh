@@ -10,12 +10,10 @@ PREFIX="${PREFIX:-$HOME/.local/codec-deps}"
 LIB_DIR="$PREFIX/lib"
 JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 
-CHARLS_VERSION="${CHARLS_VERSION:-2.4.3}"
 OPENJPEG_VERSION="${OPENJPEG_VERSION:-2.5.3}"
 JPEGXL_VERSION="${JPEGXL_VERSION:-0.10.3}"
 OPENJPH_VERSION="${OPENJPH_VERSION:-0.26.3}"
 FFMPEG_VERSION="${FFMPEG_VERSION:-7.1}"
-LIBJPEG_TURBO_VERSION="${LIBJPEG_TURBO_VERSION:-3.0.3}"
 
 echo "[codec-deps] target: $(uname -s)/$(uname -m)"
 echo "[codec-deps] prefix: ${PREFIX}"
@@ -45,25 +43,6 @@ extract_tarball() {
   rm -rf "$dir"
   mkdir -p "$dir"
   tar -xf "$archive" -C "$dir" --strip-components=1
-}
-
-build_charls() {
-  local src="$WORK_DIR/charls-src"
-  local build="$WORK_DIR/charls-build"
-  local tarball="$WORK_DIR/charls-${CHARLS_VERSION}.tar.gz"
-
-  echo "[codec-deps] building CharLS ${CHARLS_VERSION}"
-  fetch_tarball "https://github.com/team-charls/charls/archive/refs/tags/${CHARLS_VERSION}.tar.gz" "$tarball"
-  extract_tarball "$tarball" "$src"
-
-  cmake -S "$src" -B "$build" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-    -DCMAKE_INSTALL_LIBDIR=lib \
-    -DBUILD_SHARED_LIBS=ON \
-    -DBUILD_TESTING=OFF
-  cmake --build "$build" --parallel "$JOBS"
-  cmake --install "$build"
 }
 
 build_openjpeg() {
@@ -191,26 +170,6 @@ Cflags: -I\${includedir}
 EOF
 }
 
-build_libjpeg_turbo() {
-  local src="$WORK_DIR/libjpeg-turbo-src"
-  local build="$WORK_DIR/libjpeg-turbo-build"
-  local tarball="$WORK_DIR/libjpeg-turbo-${LIBJPEG_TURBO_VERSION}.tar.gz"
-
-  echo "[codec-deps] building libjpeg-turbo ${LIBJPEG_TURBO_VERSION}"
-  fetch_tarball "https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/${LIBJPEG_TURBO_VERSION}.tar.gz" "$tarball"
-  extract_tarball "$tarball" "$src"
-
-  cmake -S "$src" -B "$build" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-    -DCMAKE_INSTALL_LIBDIR=lib \
-    -DENABLE_SHARED=ON \
-    -DENABLE_STATIC=OFF \
-    -DBUILD_TESTING=OFF
-  cmake --build "$build" --parallel "$JOBS"
-  cmake --install "$build"
-}
-
 build_ffmpeg() {
   local src="$WORK_DIR/ffmpeg-src"
   local tarball="$WORK_DIR/ffmpeg-${FFMPEG_VERSION}.tar.xz"
@@ -274,11 +233,9 @@ main() {
   need_cmd gcc
   need_cmd g++
 
-  build_charls
   build_openjpeg
   build_jpegxl
   build_openjph
-  build_libjpeg_turbo
   build_ffmpeg
   normalize_lib_layout
   write_env_file

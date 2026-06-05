@@ -69,26 +69,26 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 			passthroughMode: roundTripAssertionDelta3,
 		},
 		{
-			name:              "JPEGExtended12Bit",
-			ts:                transfersyntax.JPEGExtended12Bit,
-			newObj:            newMono12BitRoundTripObject,
-			want:              []byte{0x34, 0x02, 0xAB, 0x03},
-			passthroughMode:   roundTripAssertionExact,
-			nativeFamily:      "jpeg",
-			nativeBackend:     "libjpeg",
-			nativeMode:        roundTripAssertionExact,
-			nativeToolingHint: "tooling is unavailable",
+			// JPEG family decode is pure-Go now (gojpeg); there is no native
+			// backend, so nativeBackend is empty and the native test skips this
+			// case. nativeFamily marks that forced-passthrough decode must fail
+			// cleanly rather than emit garbage.
+			name:            "JPEGExtended12Bit",
+			ts:              transfersyntax.JPEGExtended12Bit,
+			newObj:          newMono12BitRoundTripObject,
+			want:            []byte{0x34, 0x02, 0xAB, 0x03},
+			passthroughMode: roundTripAssertionExact,
+			nativeFamily:    "jpeg",
 		},
 		{
-			name:              "JPEGLSLossless",
-			ts:                transfersyntax.JPEGLSLossless,
-			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
-			want:              []byte{7, 17, 27, 37},
-			passthroughMode:   roundTripAssertionExact,
-			nativeFamily:      "jpegls",
-			nativeBackend:     "charls",
-			nativeMode:        roundTripAssertionExact,
-			nativeToolingHint: "tooling is unavailable",
+			// JPEG-LS decode is pure-Go now (gojpegls); no native backend, so
+			// nativeBackend is empty and the native test skips this case.
+			name:            "JPEGLSLossless",
+			ts:              transfersyntax.JPEGLSLossless,
+			newObj:          func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			want:            []byte{7, 17, 27, 37},
+			passthroughMode: roundTripAssertionExact,
+			nativeFamily:    "jpegls",
 		},
 		{
 			name:                    "JPEG2000Lossless",
