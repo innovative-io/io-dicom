@@ -155,17 +155,34 @@ func bitLen(v int) int {
 
 const encGuardBits = 2
 
+// maxJ2KComponents caps the component count the pure-Go encoder accepts. DICOM
+// pixel data uses 1 (monochrome) or 3 (colour); this is a generous upper bound
+// that rejects absurd values while never constraining real images.
+const maxJ2KComponents = 256
+
 // goJ2Kencode encodes raw little-endian samples (1 byte/sample for prec≤8, else
 // 2) into a lossless 5/3 JPEG 2000 codestream.
 func goJ2Kencode(raw []byte, w, h, nc, prec int) ([]byte, error) {
-	if w <= 0 || h <= 0 || nc <= 0 || prec <= 0 || prec > 16 {
+	if w <= 0 || h <= 0 || nc <= 0 || prec <= 0 || prec > 16 || nc > maxJ2KComponents {
 		return nil, errJ2KUnsupported
 	}
 	bps := 1
 	if prec > 8 {
 		bps = 2
 	}
-	if len(raw) < w*h*nc*bps {
+	// Require the raw payload to be exactly w·h·nc·bps bytes (no missing or extra
+	// bytes). Compute the size overflow-safe: before each multiply, a
+	// division-based guard ensures the running product never exceeds the codec's
+	// payload cap, so a hostile w/h/nc (any factor) can never overflow int64.
+	need := int64(w)
+	for _, f := range []int{h, nc, bps} {
+		ff := int64(f)
+		if ff <= 0 || need > maxCodecPayloadBytes/ff {
+			return nil, errInvalidJ2KPayload
+		}
+		need *= ff
+	}
+	if int64(len(raw)) != need {
 		return nil, errInvalidJ2KPayload
 	}
 
