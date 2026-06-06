@@ -64,66 +64,119 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		return nil, errors.New("gojxl: not a VarDCT frame")
 	}
 	st.fd = computeFrameDimensions(st.sh.Xsize, st.sh.Ysize, st.fh.GroupSizeShift, st.fh.Upsampling)
-	if _, err = readTOC(b, numTocEntries(st.fd.numGroups, st.fd.numDCGroups, st.fh.NumPasses)); err != nil {
+	tocEntries := numTocEntries(st.fd.numGroups, st.fd.numDCGroups, st.fh.NumPasses)
+	sizes, err := readTOC(b, tocEntries)
+	if err != nil {
 		return nil, err
 	}
 	if st.fh.Flags != 0 {
 		return nil, errors.New("gojxl: frame flags (patches/splines/noise/DC) not yet supported")
 	}
-
-	// ----- LfGlobal: DequantMatrices DC, then VarDCT global DC info -----
-	readDequantMatricesDC(b)
-	st.quant = decodeQuantizer(b)
-	if st.blockCtx, err = decodeBlockCtxMap(b); err != nil {
-		return nil, err
-	}
-	if st.cmap, err = decodeCfLDC(b); err != nil {
-		return nil, err
-	}
-
-	// ----- LfGlobal: modular global info (tree + histograms) -----
-	hasTree := b.ReadBits(1) == 1
-	if !hasTree {
-		return nil, errors.New("gojxl: VarDCT frame without a global tree not yet supported")
-	}
-	if st.tree, err = decodeTree(b, 1<<20); err != nil {
-		return nil, err
-	}
-	if st.code, st.ctxMap, err = decodeHistograms(b, (len(st.tree)+1)/2, false); err != nil {
-		return nil, err
-	}
-
-	// ----- DC group: VarDCT DC (LF) image -----
-	// Single DC group only (16-bit-friendly small images) for now.
-	if st.fd.numDCGroups != 1 {
-		return st, errors.New("gojxl: multi-DC-group VarDCT not yet supported")
-	}
-	if err := decodeVarDCTDCImage(b, st, 0); err != nil {
-		return st, err
-	}
-	// DecodeGroup(ModularDC) for extra channels is a no-op with no extra
-	// channels (this subset). AC metadata follows.
 	if len(st.meta.ExtraChannels) != 0 {
 		return st, errors.New("gojxl: VarDCT with extra channels not yet supported")
 	}
-	if err := decodeAcMetadata(b, st, 0); err != nil {
+	// Single DC group only (images <= 2048px); multi-AC-group is supported.
+	if st.fd.numDCGroups != 1 {
+		return st, errors.New("gojxl: multi-DC-group VarDCT not yet supported")
+	}
+
+	// Sections are byte-aligned and laid out contiguously after the TOC in
+	// section-index order. Build a per-section bit reader over each byte range.
+	// For the single-section case (numGroups==1 && numPasses==1) the whole frame
+	// is one section read sequentially.
+	sectionData := cs[2:][b.bitsConsumed()/8:]
+	offs := make([]int, len(sizes)+1)
+	for i, s := range sizes {
+		offs[i+1] = offs[i] + int(s)
+	}
+	sectionReader := func(i uint32) (*bitReader, error) {
+		if int(i) >= len(sizes) || offs[i+1] > len(sectionData) {
+			return nil, errTruncated
+		}
+		return newBitReader(sectionData[offs[i]:offs[i+1]]), nil
+	}
+	single := tocEntries == 1
+	reader := func(i uint32) (*bitReader, error) {
+		if single {
+			return newBitReader(sectionData), nil // one continuous section
+		}
+		return sectionReader(i)
+	}
+
+	// ----- LfGlobal (section 0): global DC info + modular tree/histograms -----
+	lfr, err := reader(0)
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeLfGlobal(lfr, st); err != nil {
 		return st, err
 	}
 
-	// ----- ACGlobal / HfGlobal -----
-	if err := decodeHfGlobal(b, st); err != nil {
+	// ----- DC group (section 1): VarDCT DC (LF) image + AC metadata -----
+	dcr := lfr
+	if !single {
+		if dcr, err = sectionReader(1); err != nil {
+			return st, err
+		}
+	}
+	if err := decodeVarDCTDCImage(dcr, st, 0); err != nil {
+		return st, err
+	}
+	if err := decodeAcMetadata(dcr, st, 0); err != nil {
 		return st, err
 	}
 
-	// ----- AC group: quantized coefficient decode -----
-	if st.fd.numGroups != 1 {
-		return st, errors.New("gojxl: multi-AC-group VarDCT not yet supported")
+	// ----- ACGlobal / HfGlobal (section 1+numDCGroups) -----
+	hfr := lfr
+	if !single {
+		if hfr, err = sectionReader(1 + st.fd.numDCGroups); err != nil {
+			return st, err
+		}
 	}
-	if err := decodeACGroup(b, st); err != nil {
+	if err := decodeHfGlobal(hfr, st); err != nil {
 		return st, err
+	}
+
+	// ----- AC groups: one section per (pass, group). Single pass only. -----
+	st.acCoeffs = [3]map[int][]int32{{}, {}, {}}
+	for g := uint32(0); g < st.fd.numGroups; g++ {
+		gr := lfr
+		if !single {
+			if gr, err = sectionReader(acGroupIndex(0, g, st.fd.numGroups, st.fd.numDCGroups)); err != nil {
+				return st, err
+			}
+		}
+		if err := decodeACGroup(gr, st, int(g)); err != nil {
+			return st, err
+		}
 	}
 
 	return st, nil
+}
+
+// decodeLfGlobal parses the LfGlobal section: the DC dequant matrices, the
+// VarDCT global DC info (quantizer, block context map, CfL), and the modular
+// global tree and histograms.
+func decodeLfGlobal(b *bitReader, st *vardctState) error {
+	readDequantMatricesDC(b)
+	st.quant = decodeQuantizer(b)
+	var err error
+	if st.blockCtx, err = decodeBlockCtxMap(b); err != nil {
+		return err
+	}
+	if st.cmap, err = decodeCfLDC(b); err != nil {
+		return err
+	}
+	if b.ReadBits(1) != 1 {
+		return errors.New("gojxl: VarDCT frame without a global tree not yet supported")
+	}
+	if st.tree, err = decodeTree(b, 1<<20); err != nil {
+		return err
+	}
+	if st.code, st.ctxMap, err = decodeHistograms(b, (len(st.tree)+1)/2, false); err != nil {
+		return err
+	}
+	return nil
 }
 
 // DecodeVarDCT decodes a lossy VarDCT JPEG XL frame to an 8-bit sRGB image.
@@ -139,29 +192,43 @@ func DecodeVarDCT(data []byte) (*Image, error) {
 }
 
 // decodeACGroup decodes the quantized AC coefficients of one AC group
-// (dec_group.cc DecodeGroupImpl / DecodeACVarBlock). Restricted to the single
-// group / single pass / no-chroma-subsampling subset. Coefficients are stored
-// per channel as bw*bh blocks of 64 (DCT8x8 etc.; the LLF/DC slot stays 0 here
-// and is filled from the DC image during reconstruction).
-func decodeACGroup(b *bitReader, st *vardctState) error {
-	bw, bh := st.acm.bw, st.acm.bh
-	// AC coefficients per channel (0=X,1=Y,2=B), keyed by the varblock's top-left
-	// block index -> a coefficient block of strategy.numCoeffs() entries. A map
-	// (rather than a flat grid) avoids multiblock varblocks overlapping in
-	// storage. The LLF/DC slots stay 0 here and are filled from the DC image.
-	coeffs := [3]map[int][]int32{{}, {}, {}}
-	// Per-channel non-zero count grids for prediction.
+// (dec_group.cc DecodeGroupImpl / DecodeACVarBlock). Each group covers a
+// groupDim×groupDim pixel region (32×32 blocks at groupDim 256); the AC stream
+// is an independent ANS section. Coefficients are accumulated into the
+// frame-wide st.acCoeffs, keyed per channel by the varblock's top-left block
+// index. The LLF/DC slots stay 0 here and are filled from the DC image during
+// reconstruction. The non-zero count prediction grid is group-local — it does
+// not cross group boundaries, matching libjxl's per-group num_nzeroes cache.
+func decodeACGroup(b *bitReader, st *vardctState, groupIdx int) error {
+	bw := st.acm.bw
+	if st.numHistograms != 1 {
+		return errors.New("gojxl: multiple AC histogram sets not yet supported")
+	}
+
+	// Group block bounds within the frame block grid.
+	gdb := int(st.fd.groupDim) / 8 // group dimension in 8×8 blocks
+	gx := groupIdx % int(st.fd.xsizeGroups)
+	gy := groupIdx / int(st.fd.xsizeGroups)
+	bx0, by0 := gx*gdb, gy*gdb
+	bx1 := min(bx0+gdb, bw)
+	by1 := min(by0+gdb, st.acm.bh)
+	gw := bx1 - bx0
+	gh := by1 - by0
+
+	// Group-local non-zero count grids for prediction.
 	nzeros := [3][]int32{
-		make([]int32, bw*bh),
-		make([]int32, bw*bh),
-		make([]int32, bw*bh),
+		make([]int32, gw*gh),
+		make([]int32, gw*gh),
+		make([]int32, gw*gh),
 	}
 
 	// Single histogram set -> no histogram selector bits, ctx_offset 0.
 	reader := newANSSymbolReader(st.acCode, b, 0)
 
-	for by := 0; by < bh; by++ {
-		for bx := 0; bx < bw; bx++ {
+	for by := by0; by < by1; by++ {
+		ly := by - by0
+		for bx := bx0; bx < bx1; bx++ {
+			lx := bx - bx0
 			idx := by*bw + bx
 			if !st.acm.valid[idx] {
 				continue
@@ -176,11 +243,11 @@ func decodeACGroup(b *bitReader, st *vardctState) error {
 			// Channel decode order is Y, X, B = {1, 0, 2}.
 			for _, c := range [3]int{1, 0, 2} {
 				var rowTop []int32
-				if by > 0 {
-					rowTop = nzeros[c][(by-1)*bw : by*bw]
+				if ly > 0 {
+					rowTop = nzeros[c][(ly-1)*gw : ly*gw]
 				}
-				row := nzeros[c][by*bw : (by+1)*bw]
-				predicted := int(predictFromTopAndLeft(rowTop, row, bx, 32))
+				row := nzeros[c][ly*gw : (ly+1)*gw]
+				predicted := int(predictFromTopAndLeft(rowTop, row, lx, 32))
 
 				blockCtx := st.blockCtx.blockContext(0, uint32(qf), ord, c)
 				nzeroCtx := st.blockCtx.nonZeroContext(predicted, blockCtx)
@@ -192,7 +259,7 @@ func decodeACGroup(b *bitReader, st *vardctState) error {
 				val := int32((nz + coveredBlocks - 1) >> uint(log2cov))
 				for yy := 0; yy < acs.coveredBlocksY(); yy++ {
 					for xx := 0; xx < acs.coveredBlocksX(); xx++ {
-						nzeros[c][(by+yy)*bw+(bx+xx)] = val
+						nzeros[c][(ly+yy)*gw+(lx+xx)] = val
 					}
 				}
 
@@ -203,7 +270,7 @@ func decodeACGroup(b *bitReader, st *vardctState) error {
 				}
 				order := st.coeffOrders[ord][c]
 				block := make([]int32, size)
-				coeffs[c][idx] = block
+				st.acCoeffs[c][idx] = block
 				for k := coveredBlocks; k < size && nz != 0; k++ {
 					ctx := histoOffset + zeroDensityContext(nz, k, coveredBlocks, log2cov, prev)
 					u := reader.readHybridUint(ctx, b, st.acCtxMap)
@@ -224,7 +291,6 @@ func decodeACGroup(b *bitReader, st *vardctState) error {
 	if !reader.checkFinalState() {
 		return errors.New("gojxl: AC group ANS final state failed")
 	}
-	st.acCoeffs = coeffs
 	return nil
 }
 

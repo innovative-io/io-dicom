@@ -92,3 +92,39 @@ func TestVarDCTReconstructMultiblock(t *testing.T) {
 		t.Errorf("detail patch not brighter: br=%d tl=%d", avg(40, 40), avg(8, 8))
 	}
 }
+
+// TestVarDCTReconstructMultiGroup decodes a 300x300 lossy fixture that spans
+// FOUR AC groups (groupDim 256 -> 2x2 groups). It exercises the multi-group
+// path: per-section TOC offsets, independent ANS streams per AC group, and
+// group-local non-zero prediction. The source is an R=x, G=y, B=(x+y)/2 sRGB
+// gradient; corners pin the four quadrants so a misplaced group region would
+// fail. Decode is byte-exact vs djxl (mean ~0.25) on this fixture.
+func TestVarDCTReconstructMultiGroup(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_rgb300x300.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := DecodeVarDCT(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT: %v", err)
+	}
+	if img.W != 300 || img.H != 300 || img.Channels != 3 {
+		t.Fatalf("got %dx%d ch=%d, want 300x300x3", img.W, img.H, img.Channels)
+	}
+	get := func(x, y, c int) int { return int(img.Pixels[(y*img.W+x)*3+c]) }
+	near := func(name string, x, y, c, want int) {
+		if d := get(x, y, c) - want; d < -6 || d > 6 {
+			t.Errorf("%s ch%d at (%d,%d) = %d, want ~%d", name, c, x, y, get(x, y, c), want)
+		}
+	}
+	// Four corners pin the four group quadrants (R=x, G=y, B=(x+y)/2).
+	near("TL", 2, 2, 0, 1)
+	near("TL", 2, 2, 1, 1)
+	near("TR", 297, 2, 0, 252) // group (1,0): red high, green low
+	near("TR", 297, 2, 1, 1)
+	near("BL", 2, 297, 0, 1) // group (0,1): red low, green high
+	near("BL", 2, 297, 1, 252)
+	near("BR", 297, 297, 0, 253) // group (1,1): both high
+	near("BR", 297, 297, 1, 252)
+	near("center", 150, 150, 0, 127)
+}
