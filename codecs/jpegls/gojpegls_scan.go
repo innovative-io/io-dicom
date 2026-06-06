@@ -170,13 +170,12 @@ func decodeJLSInto(encoded, output []byte) error {
 		d.decodeSampleInterleaved(output, nc, bps)
 	default:
 		// Non-interleaved (ILV=0): each component is a full plane, decoded in
-		// turn, then packed pixel-interleaved (component-minor), little-endian.
+		// turn and written directly into the pixel-interleaved (component-minor),
+		// little-endian output one line at a time. Streaming per line avoids a
+		// W*H intermediate int plane (8 bytes/sample), which on large images was
+		// the dominant allocation and could OOM the process.
 		for c := 0; c < nc; c++ {
-			plane := make([]int, f.width*f.height)
-			d.decodePlane(plane)
-			for i, v := range plane {
-				putSample(output, i*nc+c, v, bps)
-			}
+			d.decodePlaneInto(output, c, nc, bps)
 		}
 	}
 	return nil
@@ -189,32 +188,27 @@ func decodeJLSInto(encoded, output []byte) error {
 // scans save/restore d.runIndex per component around this call.
 func (d *jlsDecoder) decodeScalarLine(cur, prev []int, y, rcLeft int) int {
 	W := d.f.width
-	lineRb0 := 0
-	if y > 0 {
-		lineRb0 = prev[0]
-	}
+	// The callers zero-initialize prev for row 0, so reading prev[x] yields the
+	// correct all-zero neighbors there; the per-pixel y==0 special-cases are thus
+	// redundant and omitted, keeping the hot inner loop branch-free on row index.
+	lineRb0 := prev[0]
 	x := 0
 	for x < W {
 		// neighbors
-		var a, b, c, dd int
-		if y == 0 {
-			b, c, dd = 0, 0, 0
+		b := prev[x]
+		var dd int
+		if x+1 < W {
+			dd = prev[x+1]
 		} else {
-			b = prev[x]
-			if x+1 < W {
-				dd = prev[x+1]
-			} else {
-				dd = b
-			}
+			dd = b
 		}
+		var a, c int
 		if x == 0 {
 			a = lineRb0 // Ra at line start = sample above (b)
 			c = rcLeft
 		} else {
 			a = cur[x-1]
-			if y > 0 {
-				c = prev[x-1]
-			}
+			c = prev[x-1]
 		}
 
 		q1 := d.quantize(dd - b)
@@ -234,9 +228,9 @@ func (d *jlsDecoder) decodeScalarLine(cur, prev []int, y, rcLeft int) int {
 		}
 		px := predict(a, b, c)
 		if sign > 0 {
-			px += d.c[q]
+			px += d.ctx[q].c
 		} else {
-			px -= d.c[q]
+			px -= d.ctx[q].c
 		}
 		if px < 0 {
 			px = 0
@@ -365,9 +359,9 @@ func (d *jlsDecoder) decodeSampleInterleaved(out []byte, nc, bps int) {
 			for c := 0; c < nc; c++ {
 				px := predict(ra[c], rb[c], rc[c])
 				if sgn[c] > 0 {
-					px += d.c[qs[c]]
+					px += d.ctx[qs[c]].c
 				} else {
-					px -= d.c[qs[c]]
+					px -= d.ctx[qs[c]].c
 				}
 				if px < 0 {
 					px = 0
@@ -447,8 +441,11 @@ func (d *jlsDecoder) decodeSampleRun(cur, prev [][]int, ra []int, y, x, nc int) 
 	return x
 }
 
-// decodePlane decodes one component plane (ILV=0) into plane (row-major).
-func (d *jlsDecoder) decodePlane(plane []int) {
+// decodePlaneInto decodes one component plane (ILV=0) directly into the
+// pixel-interleaved output as component c of nc, one reconstructed line at a
+// time. Only the two O(W) line buffers are held, so peak memory is independent
+// of image height (no W*H int plane).
+func (d *jlsDecoder) decodePlaneInto(output []byte, c, nc, bps int) {
 	W, H := d.f.width, d.f.height
 	d.runIndex = 0
 	prev := make([]int, W) // reconstructed line above (zero for first line)
@@ -457,7 +454,10 @@ func (d *jlsDecoder) decodePlane(plane []int) {
 
 	for y := 0; y < H; y++ {
 		rcLeft = d.decodeScalarLine(cur, prev, y, rcLeft)
-		copy(plane[y*W:y*W+W], cur)
+		row := y * W
+		for x := 0; x < W; x++ {
+			putSample(output, (row+x)*nc+c, cur[x], bps)
+		}
 		prev, cur = cur, prev
 	}
 }
@@ -524,10 +524,11 @@ func (d *jlsDecoder) decodeRunInterruption(ra, rb int) int {
 
 // decodeRIError decodes a run-interruption error for context q with nRItype.
 func (d *jlsDecoder) decodeRIError(q, nRItype int) int {
+	cs := &d.ctx[q]
 	// k: TEMP = A + (N>>1)*nRItype; smallest k with (N<<k) >= TEMP.
-	temp := d.a[q] + (d.n[q]>>1)*nRItype
+	temp := cs.a + (cs.n>>1)*nRItype
 	k := 0
-	for (d.n[q] << k) < temp {
+	for (cs.n << k) < temp {
 		k++
 	}
 	limit := d.limit - jlsRunJ[d.runIndex] - 1
@@ -538,7 +539,7 @@ func (d *jlsDecoder) decodeRIError(q, nRItype int) int {
 	mapFlag := t & 1
 	errAbs := (t + mapFlag) / 2
 	condition := 0
-	if k != 0 || 2*d.nn[q] >= d.n[q] {
+	if k != 0 || 2*cs.nn >= cs.n {
 		condition = 1
 	}
 	var errval int
@@ -550,15 +551,15 @@ func (d *jlsDecoder) decodeRIError(q, nRItype int) int {
 
 	// UpdateVariables(errval, EMErrval).
 	if errval < 0 {
-		d.nn[q]++
+		cs.nn++
 	}
-	d.a[q] += (emerr + 1 - nRItype) >> 1
-	if d.n[q] == d.f.reset {
-		d.a[q] >>= 1
-		d.n[q] >>= 1
-		d.nn[q] >>= 1
+	cs.a += (emerr + 1 - nRItype) >> 1
+	if cs.n == d.f.reset {
+		cs.a >>= 1
+		cs.n >>= 1
+		cs.nn >>= 1
 	}
-	d.n[q]++
+	cs.n++
 	return errval
 }
 

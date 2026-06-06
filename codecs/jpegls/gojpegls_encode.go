@@ -67,8 +67,9 @@ func (d *jlsDecoder) encodeValue(w *jlsBitWriter, merr, k, limit int) {
 
 // encodeRegular encodes one regular-mode sample (inverse of decodeRegular).
 func (d *jlsDecoder) encodeRegular(w *jlsBitWriter, q, sign, px, sample int) int {
+	cs := &d.ctx[q]
 	k := 0
-	for (d.n[q] << k) < d.a[q] {
+	for (cs.n << k) < cs.a {
 		k++
 	}
 	// errval such that the decoder reconstructs an in-tolerance sample from px.
@@ -84,7 +85,7 @@ func (d *jlsDecoder) encodeRegular(w *jlsBitWriter, q, sign, px, sample int) int
 	// inverse of the k==0 bias flip; applies in pure-lossless mode only (NEAR==0),
 	// matching the decoder / CharLS get_error_correction(near_lossless).
 	mapped := errval
-	if k == 0 && d.f.near == 0 && 2*d.b[q]+d.n[q]-1 < 0 {
+	if k == 0 && d.f.near == 0 && 2*cs.b+cs.n-1 < 0 {
 		mapped = -errval - 1
 	}
 	var merr int
@@ -94,7 +95,7 @@ func (d *jlsDecoder) encodeRegular(w *jlsBitWriter, q, sign, px, sample int) int
 		merr = -2*mapped - 1
 	}
 	d.encodeValue(w, merr, k, d.limit)
-	d.updateRegular(q, errval)
+	updateRegular(cs, errval, d.f.near, d.f.reset)
 	// Return the value the decoder will reconstruct, so the encoder feeds
 	// reconstructed (not original) neighbors — required for near-lossless.
 	return d.computeRecon(px, sign*errval)
@@ -135,14 +136,15 @@ func (d *jlsDecoder) encodeRunInterruption(w *jlsBitWriter, ra, rb, sample int) 
 		errval -= d.range_
 	}
 
-	temp := d.a[q] + (d.n[q]>>1)*nRItype
+	cs := &d.ctx[q]
+	temp := cs.a + (cs.n>>1)*nRItype
 	k := 0
-	for (d.n[q] << k) < temp {
+	for (cs.n << k) < temp {
 		k++
 	}
 	// inverse of ComputeErrVal: find EMErrval whose decode yields errval.
 	mapFlagBase := 0
-	if k != 0 || 2*d.nn[q] >= d.n[q] {
+	if k != 0 || 2*cs.nn >= cs.n {
 		mapFlagBase = 1
 	}
 	// errval = (condition==map) ? -errAbs : errAbs, with map=(EMErrval+nRItype)&1.
@@ -167,16 +169,16 @@ func (d *jlsDecoder) encodeRunInterruption(w *jlsBitWriter, ra, rb, sample int) 
 
 	// context update (identical to decode)
 	if errval < 0 {
-		d.nn[q]++
+		cs.nn++
 	}
 	emerr := t
-	d.a[q] += (emerr + 1 - nRItype) >> 1
-	if d.n[q] == d.f.reset {
-		d.a[q] >>= 1
-		d.n[q] >>= 1
-		d.nn[q] >>= 1
+	cs.a += (emerr + 1 - nRItype) >> 1
+	if cs.n == d.f.reset {
+		cs.a >>= 1
+		cs.n >>= 1
+		cs.nn >>= 1
 	}
-	d.n[q]++
+	cs.n++
 	// The decoder reconstructs the interrupting sample from px and the signed
 	// error; return it so the encoder feeds reconstructed neighbors.
 	return d.computeRecon(px, sign*errval)
@@ -233,9 +235,9 @@ func (d *jlsDecoder) encodeScalarLine(w *jlsBitWriter, cur, prev []int, y, rcLef
 		}
 		px := predict(a, b, c)
 		if sign > 0 {
-			px += d.c[q]
+			px += d.ctx[q].c
 		} else {
-			px -= d.c[q]
+			px -= d.ctx[q].c
 		}
 		if px < 0 {
 			px = 0
