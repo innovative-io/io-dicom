@@ -8,19 +8,44 @@ import (
 // kInvDCQuant / kDCQuant: per-channel DC quantization weights (quant_weights.h).
 var kDCQuant = [3]float32{1.0 / 4096.0, 1.0 / 512.0, 1.0 / 256.0}
 
-// resampleScale1D returns the DC->LLF resample scales (DCTResampleScales) for a
-// square DCT covering cb 8x8 blocks per axis. Index 0..cb-1.
+// resampleScale1D returns the DC->LLF resample scales for the inverse transform:
+// DCTResampleScales<FROM=cb, TO=8*cb> (dct_scales.h), the up-sampling ("inverse
+// of the above") scales used by LowestFrequenciesFromDC — NOT the down-sampling
+// <8*cb, cb> scales. cb is the covered 8x8 blocks on the axis; index 0..cb-1.
 func resampleScale1D(cb int) []float32 {
 	switch cb {
 	case 1:
 		return []float32{1.0}
 	case 2:
-		return []float32{1.0, 0.901764195028874394}
+		return []float32{1.0, 1.108937353592731823}
 	case 4:
-		return []float32{1.0, 0.974886821136879522, 0.901764195028874394, 0.787054918159101335}
+		return []float32{1.0, 1.025760096781116015, 1.108937353592731823, 1.270559368765487251}
+	case 8:
+		return []float32{
+			1.0000000000000000, 1.0063534990068217, 1.0257600967811158,
+			1.0593017296817173, 1.1089373535927318, 1.1777765381970435,
+			1.2705593687654873, 1.3944898413647777,
+		}
 	default:
 		return nil
 	}
+}
+
+// transposeRect reinterprets a coefficient block from libjxl's storage layout
+// into the row-major [ROWS][COLS] layout that idct2d expects. libjxl stores
+// coefficients row-major (idx = r*COLS+c) when ROWS<COLS, but transposed
+// (idx = c*ROWS+r) when ROWS>=COLS. transpose must be true in the latter case.
+func transposeRect(blk []float32, pw, ph int, transpose bool) []float32 {
+	if !transpose {
+		return blk // already row-major [ROWS][COLS]
+	}
+	out := make([]float32, pw*ph)
+	for r := 0; r < ph; r++ {
+		for c := 0; c < pw; c++ {
+			out[r*pw+c] = blk[c*ph+r]
+		}
+	}
+	return out
 }
 
 // adaptiveDCSmoothing smooths the dequantized DC image (compressed_dc.cc
@@ -68,15 +93,6 @@ func adaptiveDCSmoothing(planes [3][]float32, w, h int, dcFactor [3]float32) {
 	}
 }
 
-// transposeSquare transposes an n x n block in place.
-func transposeSquare(b []float32, n int) {
-	for y := 0; y < n; y++ {
-		for x := y + 1; x < n; x++ {
-			b[y*n+x], b[x*n+y] = b[x*n+y], b[y*n+x]
-		}
-	}
-}
-
 // reconstructVarDCT turns the decoded VarDCT state into an 8-bit sRGB image.
 // Supports the square DCT strategies (DCT8x8/16x16/32x32), XYB, single group.
 // Pipeline per varblock: dequant AC -> chroma-from-luma -> LLF from the DC image
@@ -91,8 +107,11 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			continue
 		}
 		t := st.acm.strategy[i]
-		if t != acDCT && t != acDCT16X16 && t != acDCT32X32 {
-			return nil, errors.New("gojxl: VarDCT reconstruction supports only square DCT (8/16/32) blocks")
+		if !t.usesPlainDCT() {
+			return nil, errors.New("gojxl: VarDCT reconstruction: special transforms (IDENTITY/DCT2x2/DCT4x4/DCT4x8/DCT8x4/AFV) not yet supported")
+		}
+		if resampleScale1D(t.coveredBlocksX()) == nil || resampleScale1D(t.coveredBlocksY()) == nil {
+			return nil, errors.New("gojxl: VarDCT reconstruction: DCT128/256 not yet supported")
 		}
 	}
 	W, H := int(st.sh.Xsize), int(st.sh.Ysize)
@@ -186,7 +205,12 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 
 			// LLF: forward-DCT the dequantized DC of the covered cby x cbx blocks
 			// (with DC chroma-from-luma) and place at the top-left LLF positions.
-			scale := resampleScale1D(cbx)
+			// Resample scales are per-axis (vertical=cby rows, horizontal=cbx
+			// cols), and the placement uses libjxl's storage layout (transposed
+			// when ROWS>=COLS, i.e. cby>=cbx).
+			scaleRow := resampleScale1D(cby) // vertical axis
+			scaleCol := resampleScale1D(cbx) // horizontal axis
+			transpose := cby >= cbx
 			dcY := make([]float32, cbx*cby)
 			dcX := make([]float32, cbx*cby)
 			dcB := make([]float32, cbx*cby)
@@ -201,14 +225,18 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			}
 			llfNorm := float32(1.0 / math.Sqrt(float64(cbx*cby)))
 			placeLLF := func(dc []float32, blk []float32) {
-				// dct2d uses the opposite row/col convention from libjxl's
-				// ComputeScaledDCT (same transpose as idct2d), so place the LLF
-				// transposed into the block (it is transposed back with the rest
-				// before the IDCT).
+				// dct2d returns the forward DCT in [vert][horiz] = D[r*cbx+c]
+				// order; write it into the block in libjxl's coefficient storage
+				// layout so it lines up with the dequantized AC before the IDCT.
 				D := dct2d(dc, cbx, cby)
-				for ly := 0; ly < cby; ly++ {
-					for lx := 0; lx < cbx; lx++ {
-						blk[lx*pw+ly] = D[ly*cbx+lx] * llfNorm * scale[ly] * scale[lx]
+				for r := 0; r < cby; r++ {
+					for c := 0; c < cbx; c++ {
+						val := D[r*cbx+c] * llfNorm * scaleRow[r] * scaleCol[c]
+						if transpose {
+							blk[c*ph+r] = val
+						} else {
+							blk[r*pw+c] = val
+						}
 					}
 				}
 			}
@@ -216,17 +244,19 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			placeLLF(dcX, blkX)
 			placeLLF(dcB, blkB)
 
-			transposeSquare(blkY, pw)
-			transposeSquare(blkX, pw)
-			transposeSquare(blkB, pw)
+			// Reinterpret into row-major [ROWS][COLS], apply the uniform
+			// normalization bridge, then the separable inverse DCT.
+			rmY := transposeRect(blkY, pw, ph, transpose)
+			rmX := transposeRect(blkX, pw, ph, transpose)
+			rmB := transposeRect(blkB, pw, ph, transpose)
 			for k := 0; k < nc; k++ {
-				blkY[k] *= bridge
-				blkX[k] *= bridge
-				blkB[k] *= bridge
+				rmY[k] *= bridge
+				rmX[k] *= bridge
+				rmB[k] *= bridge
 			}
-			pixY := idct2d(blkY, pw, ph)
-			pixX := idct2d(blkX, pw, ph)
-			pixB := idct2d(blkB, pw, ph)
+			pixY := idct2d(rmY, pw, ph)
+			pixX := idct2d(rmX, pw, ph)
+			pixB := idct2d(rmB, pw, ph)
 
 			for yy := 0; yy < ph; yy++ {
 				py := by*acBlockDim + yy

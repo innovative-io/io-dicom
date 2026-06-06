@@ -66,11 +66,12 @@ func TestDefaultLibraryDCTMatchesHardcoded(t *testing.T) {
 	}
 }
 
-// TestDefaultLibraryUnsupportedNil documents that AFV and the 64-256 DCTs are
-// not yet in the default library (decoder must reject those strategies).
+// TestDefaultLibraryUnsupportedNil documents that AFV and the 128/256 DCTs are
+// not yet in the default library (decoder must reject those strategies). The
+// DCT64X64 and DCT32X64 kinds are now populated.
 func TestDefaultLibraryUnsupportedNil(t *testing.T) {
 	lib := buildDefaultQuantLibrary()
-	for _, kind := range []int{qtAFV0, qtDCT64X64, qtDCT32X64, qtDCT128X128, qtDCT64X128, qtDCT256X256, qtDCT128X256} {
+	for _, kind := range []int{qtAFV0, qtDCT128X128, qtDCT64X128, qtDCT256X256, qtDCT128X256} {
 		if lib[kind] != nil {
 			t.Errorf("kind %d unexpectedly populated", kind)
 		}

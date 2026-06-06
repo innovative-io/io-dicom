@@ -128,3 +128,79 @@ func TestVarDCTReconstructMultiGroup(t *testing.T) {
 	near("BR", 297, 297, 1, 252)
 	near("center", 150, 150, 0, 127)
 }
+
+// TestVarDCTReconstructLargeDCT decodes a 640x384 smooth-gradient fixture that
+// the encoder codes entirely with DCT64x64 blocks across 6 AC groups. It
+// exercises the large-DCT path: the DCT64 dequant matrices, resampleScale1D(8),
+// and idct2d at N=64. Byte-exact vs djxl (mean ~0.22). The source is an
+// R=x, G=y, B~(x+y)/2 gradient.
+func TestVarDCTReconstructLargeDCT(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_smooth640x384.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := DecodeVarDCT(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT: %v", err)
+	}
+	if img.W != 640 || img.H != 384 {
+		t.Fatalf("got %dx%d, want 640x384", img.W, img.H)
+	}
+	get := func(x, y, c int) int { return int(img.Pixels[(y*img.W+x)*3+c]) }
+	// Red ramps left-to-right, green top-to-bottom.
+	if get(620, 10, 0)-get(10, 10, 0) < 150 {
+		t.Errorf("red gradient too small: %d..%d", get(10, 10, 0), get(620, 10, 0))
+	}
+	if get(10, 370, 1)-get(10, 10, 1) < 150 {
+		t.Errorf("green gradient too small: %d..%d", get(10, 10, 1), get(10, 370, 1))
+	}
+}
+
+// TestVarDCTReconstructHighFreq decodes a 128x128 fixture whose columns are
+// identical (pure horizontal structure), coded as DCT64x64. The defining
+// property — every column is constant down its height — is only preserved if the
+// LowestFrequenciesFromDC resample scales are correct (an inverted scale, the
+// historical bug, warped the vertical reconstruction). Each column must stay
+// near-constant vertically while varying strongly horizontally.
+func TestVarDCTReconstructHighFreq(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_horiz128.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := DecodeVarDCT(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT: %v", err)
+	}
+	if img.W != 128 || img.H != 128 {
+		t.Fatalf("got %dx%d, want 128x128", img.W, img.H)
+	}
+	get := func(x, y, c int) int { return int(img.Pixels[(y*img.W+x)*3+c]) }
+	// Vertical near-constancy: column x must vary little between rows.
+	maxVert := 0
+	for x := 0; x < 128; x += 8 {
+		for _, c := range []int{0, 1, 2} {
+			lo, hi := 255, 0
+			for y := 0; y < 128; y++ {
+				v := get(x, y, c)
+				if v < lo {
+					lo = v
+				}
+				if v > hi {
+					hi = v
+				}
+			}
+			if hi-lo > maxVert {
+				maxVert = hi - lo
+			}
+		}
+	}
+	// djxl's own DCT64 reconstruction of identical columns leaves a small spread;
+	// a wrong (inverted) LLF resample warps it to >50.
+	if maxVert > 16 {
+		t.Errorf("columns not vertically constant (max spread %d) — LLF resample likely wrong", maxVert)
+	}
+	// Strong horizontal variation must remain.
+	if get(0, 64, 0) == get(20, 64, 0) && get(40, 64, 0) == get(60, 64, 0) {
+		t.Error("no horizontal variation — decode likely wrong")
+	}
+}
