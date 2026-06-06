@@ -3,6 +3,7 @@ package gojxl
 import "errors"
 
 var errInvalidCfL = errors.New("gojxl: invalid color-correlation parameters")
+var errInvalidBlockCtx = errors.New("gojxl: invalid block context map")
 
 // Chroma-from-luma (CfL) for VarDCT, ported from lib/jxl/chroma_from_luma.h and
 // the apply in dec_group.cc DequantLane. The X and B (chroma) coefficients are
