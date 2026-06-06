@@ -31,6 +31,7 @@ type FrameHeader struct {
 	PassShift      [kMaxNumPasses]uint32
 	IsLast         bool
 	CustomSize     bool
+	LoopFilter     loopFilter
 	FrameW, FrameH uint32
 	OriginX        int32
 	OriginY        int32
@@ -77,20 +78,39 @@ func readBlendingInfo(b *bitReader, numExtra int, isPartial bool) {
 }
 
 // readLoopFilter consumes a LoopFilter (loop_filter.cc).
-func readLoopFilter(b *bitReader, isModular bool) {
+// loopFilter holds the parsed loop-filter parameters needed for reconstruction.
+type loopFilter struct {
+	gab                                            bool
+	gabXW1, gabXW2, gabYW1, gabYW2, gabBW1, gabBW2 float32
+	epfIters                                       uint32
+}
+
+func defaultLoopFilter() loopFilter {
+	w1 := float32(1.1 * 0.104699568)
+	w2 := float32(1.1 * 0.055680538)
+	return loopFilter{gab: true, gabXW1: w1, gabXW2: w2, gabYW1: w1, gabYW2: w2, gabBW1: w1, gabBW2: w2, epfIters: 2}
+}
+
+func readLoopFilter(b *bitReader, isModular bool) loopFilter {
+	lf := defaultLoopFilter()
 	if b.ReadBool() { // all_default
-		return
+		return lf
 	}
 	gab := b.ReadBool() // default true
+	lf.gab = gab
 	if gab {
 		gabCustom := b.ReadBool()
 		if gabCustom {
-			for i := 0; i < 6; i++ {
-				b.ReadF16()
-			}
+			lf.gabXW1, _ = b.ReadF16()
+			lf.gabXW2, _ = b.ReadF16()
+			lf.gabYW1, _ = b.ReadF16()
+			lf.gabYW2, _ = b.ReadF16()
+			lf.gabBW1, _ = b.ReadF16()
+			lf.gabBW2, _ = b.ReadF16()
 		}
 	}
 	epfIters := b.ReadBits(2) // default 2
+	lf.epfIters = epfIters
 	if epfIters > 0 {
 		if !isModular {
 			if b.ReadBool() { // epf_sharp_custom
@@ -117,6 +137,7 @@ func readLoopFilter(b *bitReader, isModular bool) {
 		}
 	}
 	skipExtensions(b)
+	return lf
 }
 
 // readFrameHeader parses a frame header. meta provides codestream-level context.
@@ -227,7 +248,7 @@ func readFrameHeader(b *bitReader, meta *ImageMetadata) (FrameHeader, error) {
 
 	_ = visitNameString(b) // frame name
 
-	readLoopFilter(b, isModular)
+	h.LoopFilter = readLoopFilter(b, isModular)
 
 	if err := skipExtensions(b); err != nil {
 		return h, err

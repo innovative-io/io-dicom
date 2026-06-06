@@ -121,6 +121,13 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 		}
 	}
 
+	// Gaborish loop filter (applied on the XYB planes before color conversion).
+	if lf := st.fh.LoopFilter; lf.gab {
+		planeX = applyGaborish(planeX, W, H, lf.gabXW1, lf.gabXW2)
+		planeY = applyGaborish(planeY, W, H, lf.gabYW1, lf.gabYW2)
+		planeB = applyGaborish(planeB, W, H, lf.gabBW1, lf.gabBW2)
+	}
+
 	pix := make([]byte, W*H*3)
 	for i := 0; i < W*H; i++ {
 		r, g, b := xybToLinearRGB(planeX[i], planeY[i], planeB[i])
