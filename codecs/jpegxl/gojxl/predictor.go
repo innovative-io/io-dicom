@@ -76,6 +76,46 @@ func (s *wpState) weightedAverage(p [kNumWPPredictors]int64, w [kNumWPPredictors
 	return (sum * int64(wpDivLookup[weightSum-1])) >> 24
 }
 
+// predictProp is predict() but also writes the weighted-predictor property
+// (max abs neighbor error) into props[propOff] — the compute_properties path
+// of State::Predict.
+func (s *wpState) predictProp(x, y, xsize int, N, W, NE, NW, NN int64, props []int64, propOff int) int64 {
+	var curRow, prevRow int
+	if y&1 != 0 {
+		prevRow = xsize + 2
+	} else {
+		curRow = xsize + 2
+	}
+	posN := prevRow + x
+	posNE := posN
+	if x < xsize-1 {
+		posNE = posN + 1
+	}
+	posNW := posN
+	if x > 0 {
+		posNW = posN - 1
+	}
+	var teW int64
+	if x != 0 {
+		teW = s.errors[curRow+x-1]
+	}
+	teN := s.errors[posN]
+	teNW := s.errors[posNW]
+	teNE := s.errors[posNE]
+	p := teW
+	if absI64(teN) > absI64(p) {
+		p = teN
+	}
+	if absI64(teNW) > absI64(p) {
+		p = teNW
+	}
+	if absI64(teNE) > absI64(p) {
+		p = teNE
+	}
+	props[propOff] = p
+	return s.predict(x, y, xsize, N, W, NE, NW, NN)
+}
+
 // predict returns the weighted-predictor guess for pixel (x,y) given neighbors.
 func (s *wpState) predict(x, y, xsize int, N, W, NE, NW, NN int64) int64 {
 	var curRow, prevRow int

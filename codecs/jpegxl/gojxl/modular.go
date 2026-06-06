@@ -54,62 +54,6 @@ func unpackSignedU(u uint32) int64 {
 
 func unpackSigned32(u uint32) int32 { return int32(u>>1) ^ -int32(u&1) }
 
-// decodeWPChannel decodes one channel whose MA tree is a single Weighted-
-// predictor leaf (the common lossless case). General trees (property splits,
-// other predictors) and inverse transforms are handled separately as they are
-// implemented. Returns the channel pixels (row-major, w*h).
-func decodeWPChannel(reader *ansSymbolReader, b *bitReader, ctx, w, h int, wpH wpHeader) []int32 {
-	wp := newWPState(wpH, w)
-	pix := make([]int32, w*h)
-	get := func(xx, yy int) int64 { return int64(pix[yy*w+xx]) }
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			var N, W, NE, NW, NN int64
-			switch {
-			case x == 0:
-				if y > 0 {
-					N = get(0, y-1)
-					W = N
-					NW = N
-					if w > 1 {
-						NE = get(1, y-1)
-					} else {
-						NE = N
-					}
-					if y > 1 {
-						NN = get(0, y-2)
-					} else {
-						NN = N
-					}
-				}
-			case y == 0:
-				W = get(x-1, 0)
-				N, NE, NW, NN = W, W, W, W
-			default:
-				W = get(x-1, y)
-				N = get(x, y-1)
-				NW = get(x-1, y-1)
-				if x < w-1 {
-					NE = get(x+1, y-1)
-				} else {
-					NE = N
-				}
-				if y > 1 {
-					NN = get(x, y-2)
-				} else {
-					NN = N
-				}
-			}
-			guess := wp.predict(x, y, w, N, W, NE, NW, NN)
-			v := reader.readHybridUintClustered(ctx, b)
-			val := int64(unpackSigned32(v)) + guess
-			pix[y*w+x] = int32(val)
-			wp.updateErrors(val, x, y, w)
-		}
-	}
-	return pix
-}
-
 // readDequantMatricesDC consumes DequantMatrices::DecodeDC (quant_weights.cc):
 // a 1-bit all_default flag, then 3 F16 DC quants if not default. This runs in
 // LfGlobal before DecodeGlobalInfo for both modular and VarDCT frames.

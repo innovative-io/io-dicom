@@ -92,8 +92,6 @@ func newANSSymbolReader(code *ansCode, b *bitReader, distanceMultiplier int) *an
 	return r
 }
 
-func (r *ansSymbolReader) usesLZ77() bool { return r.lz77Window != nil }
-
 func (r *ansSymbolReader) readSymbolANS(histoIdx int, b *bitReader) int {
 	res := int(r.state & (ansTabSize - 1))
 	table := r.aliasTables[histoIdx<<uint(r.logAlphaSize):]
@@ -104,14 +102,6 @@ func (r *ansSymbolReader) readSymbolANS(histoIdx int, b *bitReader) int {
 		b.Consume(16)
 	}
 	return sym.value
-}
-
-func (r *ansSymbolReader) readSymbol(histoIdx int, b *bitReader) int {
-	b.Refill()
-	if r.usePrefixCode {
-		return int(r.huffmanData[histoIdx].ReadSymbol(b))
-	}
-	return r.readSymbolANS(histoIdx, b)
 }
 
 func (r *ansSymbolReader) checkFinalState() bool {
