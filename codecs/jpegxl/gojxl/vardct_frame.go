@@ -19,6 +19,13 @@ type vardctState struct {
 	ctxMap  []uint8
 	dc      *dcChannels
 	acm     *acMetadata
+
+	quantLib      [kNumQuantTables]*quantEncoding
+	numHistograms int
+	usedACS       uint32
+	coeffOrders   map[int][3][]int
+	acCode        *ansCode
+	acCtxMap      []uint8
 }
 
 // decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
@@ -102,7 +109,125 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		return st, err
 	}
 
+	// ----- ACGlobal / HfGlobal -----
+	if err := decodeHfGlobal(b, st); err != nil {
+		return st, err
+	}
+
 	return st, errVarDCTIncomplete
+}
+
+// kOrderEnc = U32Enc(Val(0x5F), Val(0x13), Val(0), Bits(13)) (frame_header.h).
+var kOrderEnc = [4]u32d{u32Val(0x5F), u32Val(0x13), u32Val(0), u32Bits(kNumOrders)}
+
+// decodeHfGlobal parses the AC global section: the AC dequant matrices, the
+// histogram count, the coefficient orders, and the AC entropy histograms.
+func decodeHfGlobal(b *bitReader, st *vardctState) error {
+	// AC DequantMatrices. all_default -> use the built-in default library.
+	allDefault := b.ReadBits(1) == 1
+	if !allDefault {
+		return errors.New("gojxl: non-default AC dequant matrices not yet supported")
+	}
+	st.quantLib = buildDefaultQuantLibrary()
+
+	// Number of histogram sets.
+	numHistoBits := ceilLog2Nonzero(st.fd.numGroups)
+	st.numHistograms = 1 + int(b.ReadBits(numHistoBits))
+
+	// used_acs: the set of AC strategies actually present in the frame.
+	var usedACS uint32
+	for _, s := range st.acm.strategy {
+		// Only the valid (top-left) blocks carry a real strategy; default 0
+		// (DCT) for the covered ones is harmless since DCT is always present
+		// when any block is DCT, but restrict to valid entries to be exact.
+		usedACS |= 1 << uint(s)
+	}
+	st.usedACS = usedACS
+
+	// Single pass only for this subset.
+	if st.fh.NumPasses != 1 {
+		return errors.New("gojxl: multi-pass VarDCT not yet supported")
+	}
+	orders, err := decodeCoeffOrders(b, st.usedACS)
+	if err != nil {
+		return err
+	}
+	st.coeffOrders = orders
+
+	// AC histograms.
+	numContexts := st.numHistograms * st.blockCtx.numACContexts()
+	st.acCode, st.acCtxMap, err = decodeHistograms(b, numContexts, false)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// decodeCoeffOrders reads the coefficient orders for all used AC strategies
+// (DecodeCoeffOrders). Returns a map keyed by [orderClass][channel] -> order.
+func decodeCoeffOrders(b *bitReader, usedACS uint32) (map[int][3][]int, error) {
+	usedOrders := b.ReadU32(kOrderEnc[0], kOrderEnc[1], kOrderEnc[2], kOrderEnc[3])
+
+	var reader *ansSymbolReader
+	var ctxMap []uint8
+	if usedOrders != 0 {
+		code, cm, err := decodeHistograms(b, kPermutationContexts, false)
+		if err != nil {
+			return nil, err
+		}
+		ctxMap = cm
+		reader = newANSSymbolReader(code, b, 0)
+	}
+
+	acsMask := uint32(0)
+	for o := 0; o < acNumValidStrategies; o++ {
+		if usedACS&(1<<uint(o)) == 0 {
+			continue
+		}
+		acsMask |= 1 << kStrategyOrder[o]
+	}
+
+	orders := map[int][3][]int{}
+	computed := uint32(0)
+	for o := 0; o < acNumValidStrategies; o++ {
+		ord := int(kStrategyOrder[o])
+		if computed&(1<<uint(ord)) != 0 {
+			continue
+		}
+		computed |= 1 << uint(ord)
+		t := acStrategyType(o)
+		used := acsMask&(1<<uint(ord)) != 0
+
+		if usedOrders&(1<<uint(ord)) == 0 {
+			// Natural order (only needed if actually used).
+			if used {
+				natural := naturalCoeffOrder(t.coveredBlocksX(), t.coveredBlocksY())
+				var triplet [3][]int
+				for c := 0; c < 3; c++ {
+					triplet[c] = natural
+				}
+				orders[ord] = triplet
+			}
+		} else {
+			var triplet [3][]int
+			for c := 0; c < 3; c++ {
+				order, err := decodeCoeffOrder(t, reader, b, ctxMap)
+				if err != nil {
+					return nil, err
+				}
+				if used {
+					triplet[c] = order
+				}
+			}
+			if used {
+				orders[ord] = triplet
+			}
+		}
+	}
+	if usedOrders != 0 && !reader.checkFinalState() {
+		return nil, errors.New("gojxl: coeff-order ANS final state failed")
+	}
+	return orders, nil
 }
 
 // acMetadata holds per-block transform/quant info for a DC group.

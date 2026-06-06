@@ -116,3 +116,37 @@ func TestVarDCTAcMetadata(t *testing.T) {
 		}
 	}
 }
+
+// TestVarDCTHfGlobal checks the AC global section parses: AC dequant matrices,
+// histogram count, coefficient orders, and the AC histograms. The strongest
+// signal is that the AC histograms decode with exactly numHistograms ×
+// NumACContexts contexts — a desync anywhere earlier would corrupt that count.
+func TestVarDCTHfGlobal(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_rgb16x16.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	st, err := decodeVarDCTFrame(data)
+	if err != nil && !errors.Is(err, errVarDCTIncomplete) {
+		t.Fatalf("decode failed before HfGlobal: %v", err)
+	}
+	if st.numHistograms != 1 {
+		t.Errorf("numHistograms=%d, want 1", st.numHistograms)
+	}
+	if st.usedACS != 1 {
+		t.Errorf("usedACS=%b, want 1 (DCT8x8 only)", st.usedACS)
+	}
+	order, ok := st.coeffOrders[0]
+	if !ok {
+		t.Fatal("no coefficient order for the DCT8x8 order class")
+	}
+	if len(order[0]) != 64 || order[0][0] != 0 {
+		t.Errorf("order[0] len=%d order[0][0]=%d, want 64 / DC-first", len(order[0]), order[0][0])
+	}
+	if st.acCode == nil {
+		t.Fatal("AC histograms not decoded")
+	}
+	if want := st.numHistograms * st.blockCtx.numACContexts(); len(st.acCtxMap) != want {
+		t.Errorf("AC context map len=%d, want %d", len(st.acCtxMap), want)
+	}
+}
