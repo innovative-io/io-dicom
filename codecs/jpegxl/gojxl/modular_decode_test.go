@@ -52,6 +52,23 @@ func TestModularDecodeFixtures(t *testing.T) {
 			pal := [4][3]int32{{10, 20, 30}, {200, 100, 50}, {0, 0, 0}, {255, 255, 255}}
 			return pal[(x/8+y/8)%4][c]
 		}},
+		// multi-group grayscale (1500x48 → 6 groups).
+		{"wide_e7.jxl", 1500, 48, 1, func(i, c int) int32 {
+			x, y := i%1500, i/1500
+			return int32((x + y*5 + (x*y)/64) & 0xFF)
+		}},
+		// multi-group RGB with per-group RCT (1300x40).
+		{"wrgb_e7.jxl", 1300, 40, 3, func(i, c int) int32 {
+			x, y := i%1300, i/1300
+			switch c {
+			case 0:
+				return int32((x + y) & 0xFF)
+			case 1:
+				return int32((x*2 + y) & 0xFF)
+			default:
+				return int32((x + y*3) & 0xFF)
+			}
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {

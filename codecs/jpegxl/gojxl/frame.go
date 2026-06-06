@@ -271,12 +271,17 @@ func computeFrameDimensions(xsize, ysize, groupSizeShift, upsampling uint32) fra
 	return fd
 }
 
+// acGroupIndex is toc.h AcGroupIndex: the TOC index of AC group `group` in pass
+// `pass`. TOC sections [0, 2+numDCGroups) are LfGlobal, DC groups and HfGlobal.
+func acGroupIndex(pass, group, numGroups, numDCGroups uint32) uint32 {
+	return 2 + numDCGroups + pass*numGroups + group
+}
+
 func numTocEntries(numGroups, numDCGroups, numPasses uint32) uint32 {
 	if numGroups == 1 && numPasses == 1 {
 		return 1
 	}
-	// AcGroupIndex(0,0,...) = 1 (LfGlobal) + numDCGroups + 1 (HfGlobal) + numDCGroups*? — for our scope (single group) we only need the ==1 case.
-	return 1 + numDCGroups + 1 + numDCGroups + numGroups*numPasses
+	return acGroupIndex(0, 0, numGroups, numDCGroups) + numGroups*numPasses
 }
 
 // readTOC reads the table-of-contents section sizes (toc.cc ReadToc).
