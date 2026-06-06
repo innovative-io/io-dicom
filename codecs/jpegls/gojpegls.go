@@ -67,7 +67,7 @@ type jlsBitReader struct {
 	data      []byte
 	pos       int
 	acc       uint64 // valid bits live in the low nbits; next bit is bit (nbits-1)
-	nbits     int    // number of valid bits currently in acc (0..63)
+	nbits     int    // number of valid bits currently in acc (0..64)
 	lastWasFF bool   // the previously loaded byte was 0xFF
 }
 
