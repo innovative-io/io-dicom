@@ -293,8 +293,13 @@ func (d *jlsDecoder) quantize(diff int) int {
 // decodeValue decodes a limited-length Golomb code with parameter k and the
 // given limit (CharLS DecodeValue / T.87 A.5.3).
 func (d *jlsDecoder) decodeValue(k, limit int) int {
-	high := d.br.readZeros(limit + d.qbpp + 64)
-	if high >= limit+d.qbpp+64 {
+	// runCap bounds the unary zero-run for malformed input; it is far beyond any
+	// valid prefix length. Read runCap+1 so a legitimate run of exactly runCap
+	// zeros (terminated by a 1) stays decodable, while only a strictly longer
+	// run — or EOF — trips the runaway guard.
+	runCap := limit + d.qbpp + 64
+	high := d.br.readZeros(runCap + 1)
+	if high > runCap {
 		return 0 // guard against runaway on malformed input
 	}
 	if high >= limit-(d.qbpp+1) {
