@@ -78,10 +78,7 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			var blkY, blkX, blkB [64]float32
 			for k := 1; k < 64; k++ {
 				blkY[k] = adjustQuantBias(1, st.acCoeffs[1][idx*64+k], &kDefaultQuantBias) * mat[1*64+k] * sdY
-				// The X (red-green) AC coefficients are sign-inverted relative to
-				// the display X convention; negate them so the reconstructed
-				// chroma matches a conforming decoder. (DC X is already correct.)
-				blkX[k] = -adjustQuantBias(0, st.acCoeffs[0][idx*64+k], &kDefaultQuantBias) * mat[0*64+k] * sdX
+				blkX[k] = adjustQuantBias(0, st.acCoeffs[0][idx*64+k], &kDefaultQuantBias) * mat[0*64+k] * sdX
 				blkB[k] = adjustQuantBias(2, st.acCoeffs[2][idx*64+k], &kDefaultQuantBias) * mat[2*64+k] * sdB
 			}
 			// Chroma-from-luma on AC coefficients.
@@ -96,6 +93,12 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			blkY[0] = inY
 			blkX[0] = inY*cflFacX + inX
 			blkB[0] = inY*cflFacB + inB
+
+			// libjxl's coefficient block is laid out transposed relative to this
+			// decoder's idct2d (column/row) convention; transpose before the IDCT.
+			transposeBlock8(&blkY)
+			transposeBlock8(&blkX)
+			transposeBlock8(&blkB)
 
 			for k := 0; k < 64; k++ {
 				blkY[k] *= bridge[k]
@@ -139,6 +142,15 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 		pix[i*3+2] = clamp8(linearToSRGB(b))
 	}
 	return &Image{W: W, H: H, Channels: 3, BitDepth: 8, Pixels: pix}, nil
+}
+
+// transposeBlock8 transposes an 8x8 coefficient block in place.
+func transposeBlock8(b *[64]float32) {
+	for y := 0; y < 8; y++ {
+		for x := y + 1; x < 8; x++ {
+			b[y*8+x], b[x*8+y] = b[x*8+y], b[y*8+x]
+		}
+	}
 }
 
 func clamp8(v float32) byte {
