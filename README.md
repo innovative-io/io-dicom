@@ -160,8 +160,9 @@ Latest architecture cleanup includes package path renames.
   - MPEG-2 / MPEG-4 AVC / HEVC passthrough encode helpers (`codecs/mpeg`)
 
 - The JPEG family (baseline/extended/lossless) and JPEG-LS (lossless and near-lossless, single- and multi-component) decode and encode entirely in pure Go — no build tag or cgo required. The former `libjpeg` (JPEG) and `charls` (JPEG-LS) cgo backends have been retired; their correctness is preserved by frozen golden vectors under `codecs/jpeg/golden` and `codecs/jpegls/golden`.
-- JPEG 2000 — both classic (EBCOT) and High-Throughput (HTJ2K) — decodes (lossless and lossy) in pure Go, and encodes lossless (5/3) in pure Go. The former `openjpeg` cgo backend has been retired; out-of-scope codestreams (multi-tile, custom precincts, MCT, non-LRCP) and lossy encode are not yet covered.
-- For the remaining cgo-only codecs, decode without the matching native backend fails explicitly instead of returning compressed payload bytes as if they were decoded pixels. Build with the matching tag (`libjxl`, `openjph`, `ffmpeg`, `st2110`) for those production decode/transcode paths.
+- JPEG 2000 — both classic (EBCOT) and High-Throughput (HTJ2K) — decodes (lossless and lossy) in pure Go, and encodes lossless in pure Go (classic 5/3 and HTJ2K). The former `openjpeg` cgo backend has been retired; out-of-scope codestreams (multi-tile, custom precincts, MCT, non-LRCP) and lossy encode are not yet covered.
+- JPIP / HTJ2K (`.204` / `.205`) decode and encode entirely in pure Go via the JPEG 2000 HTJ2K codec; the former `openjph` cgo backend has been retired.
+- For the remaining cgo-only codecs, decode without the matching native backend fails explicitly instead of returning compressed payload bytes as if they were decoded pixels. Build with the matching tag (`libjxl`, `ffmpeg`, `st2110`) for those production decode/transcode paths.
 
 ## Codec-Backed Transfer Syntaxes
 
@@ -288,14 +289,12 @@ the supported syntax families.
       `libswscale.pc`).
 - `codecs/jpip` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
-- `codecs/jpip` now includes a build-tagged `openjph` backend registration path:
-  - default builds keep pure-Go passthrough (`CGOEnabled == false`),
-  - `-tags openjph` with cgo enables `CGOEnabled == true` and registers backend name `openjph`.
-  - the `openjph` backend now links directly against the OpenJPH library for
-    in-memory encode/decode rather than shelling out to CLI tools.
-  - prerequisites for tagged builds:
-    - `pkg-config`, and
-    - an OpenJPH development package that exposes `openjph.pc`.
+- `codecs/jpip` is pure Go (no cgo, no build tag). The JPIP transfer syntaxes
+  (`.204` / `.205`) carry HTJ2K, so it decodes via the pure-Go JPEG 2000 decoder
+  and encodes via the pure-Go HTJ2K encoder (registered backend `gojpip`). The
+  former `openjph` cgo backend has been retired; `CGOEnabled` is always `false`.
+  The HTJ2K encoder was validated byte-exact against OpenJPH's block encoder and
+  its codestreams decode byte-exact under `ojph_expand`.
 - `codecs/smpte2110` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
 - `codecs/smpte2110` now includes a build-tagged `st2110` backend registration path:

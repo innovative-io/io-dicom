@@ -39,31 +39,53 @@ func (m *mockBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uint16,
 }
 
 func TestCGOEnabled(t *testing.T) {
-	SetBackend(nil)
-	t.Cleanup(func() { SetBackend(nil) })
-
-	if CGOEnabled != nativeBackendEnabled {
-		t.Fatalf("unexpected CGOEnabled value: got %v want %v", CGOEnabled, nativeBackendEnabled)
+	if CGOEnabled {
+		t.Fatalf("CGOEnabled should be false (openjph retired), got %v", CGOEnabled)
 	}
 }
 
-func TestJPIPPassthroughDecodeFails(t *testing.T) {
+// TestJPIPPureGoRoundTrip exercises the default pure-Go HTJ2K backend: encode
+// raw pixels to an HTJ2K codestream and decode them back losslessly.
+func TestJPIPPureGoRoundTrip(t *testing.T) {
 	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
 
-	raw := []byte{10, 20, 30, 40}
-	var out []byte
-	var outSize int
-	if err := JPIPencode(raw, 2, 2, 1, 8, &out, &outSize, "1.2.840.10008.1.2.4.204"); err != nil {
-		t.Fatalf("JPIPencode failed: %v", err)
-	}
-	if outSize != len(raw) {
-		t.Fatalf("unexpected outSize: got %d want %d", outSize, len(raw))
+	if BackendName() != "gojpip" {
+		t.Fatalf("expected default backend gojpip, got %s", BackendName())
 	}
 
-	decoded := make([]byte, len(raw))
-	if err := JPIPdecode(out, uint32(outSize), decoded, "1.2.840.10008.1.2.4.204"); err == nil {
-		t.Fatal("expected JPIPdecode to fail without native backend")
+	cases := []struct {
+		w, h, samples, bitsa int
+	}{
+		{4, 4, 1, 8}, {16, 16, 1, 8}, {8, 8, 3, 8}, {10, 7, 1, 16},
+	}
+	for _, c := range cases {
+		bps := 1
+		if c.bitsa > 8 {
+			bps = 2
+		}
+		raw := make([]byte, c.w*c.h*c.samples*bps)
+		for i := range raw {
+			raw[i] = byte((i*7 + 11) & 0xFF)
+		}
+		var out []byte
+		var outSize int
+		uid := "1.2.840.10008.1.2.4.204"
+		if err := JPIPencode(raw, uint16(c.w), uint16(c.h), uint16(c.samples), uint16(c.bitsa), &out, &outSize, uid); err != nil {
+			t.Fatalf("%+v JPIPencode: %v", c, err)
+		}
+		if outSize == 0 || len(out) == 0 {
+			t.Fatalf("%+v: empty encoded output", c)
+		}
+		decoded := make([]byte, len(raw))
+		if err := JPIPdecode(out, uint32(outSize), decoded, uid); err != nil {
+			t.Fatalf("%+v JPIPdecode: %v", c, err)
+		}
+		for i := range raw {
+			if raw[i] != decoded[i] {
+				t.Fatalf("%+v: byte %d differs: got %d want %d", c, i, decoded[i], raw[i])
+			}
+		}
 	}
 }
 

@@ -127,15 +127,20 @@ func representativePixelRoundTripCases() []representativeRoundTripCase {
 			passthroughCannotEncode: true,
 		},
 		{
-			name:              "JPIPHTJ2KReferenced",
-			ts:                transfersyntax.JPIPHTJ2KReferenced,
-			newObj:            func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
-			want:              []byte{7, 17, 27, 37},
-			passthroughMode:   roundTripAssertionExact,
-			nativeFamily:      "jpip",
-			nativeBackend:     "openjph",
-			nativeMode:        roundTripAssertionExact,
-			nativeToolingHint: "tooling is unavailable",
+			// JPIP (.204/.205) carries HTJ2K; encode + decode are pure-Go now
+			// (gojpip → gojp2k HTJ2K), mirroring JPEG2000Lossless. The forced-
+			// passthrough backend cannot encode, so the forward transcode must
+			// fail there; the gojpip backend round-trips exactly.
+			name:                    "JPIPHTJ2KReferenced",
+			ts:                      transfersyntax.JPIPHTJ2KReferenced,
+			newObj:                  func() media.DICOMObject { return newMonoRoundTripObject(transfersyntax.ExplicitVRLittleEndian) },
+			want:                    []byte{7, 17, 27, 37},
+			passthroughMode:         roundTripAssertionExact,
+			nativeFamily:            "jpip",
+			nativeBackend:           "gojpip",
+			nativeMode:              roundTripAssertionExact,
+			nativeToolingHint:       "tooling is unavailable",
+			passthroughCannotEncode: true,
 		},
 		{
 			name:              "MPEG2MPML",

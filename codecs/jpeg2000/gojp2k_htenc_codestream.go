@@ -12,6 +12,19 @@ package jpeg2000
 
 import "encoding/binary"
 
+// HTJ2Kencode encodes raw interleaved samples into a lossless HTJ2K (ISO
+// 15444-15) codestream. It is the pure-Go replacement for the openjph-based
+// JPIP/HTJ2K encoder. A panic on malformed input is converted to an error so it
+// is safe on hostile data.
+func HTJ2Kencode(raw []byte, width, height, samples, bitsa int) (data []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			data, err = nil, errJ2KMalformed
+		}
+	}()
+	return goHTJ2Kencode(raw, width, height, samples, bitsa)
+}
+
 // goHTJ2Kencode encodes raw interleaved samples into a single-tile, single-layer
 // LRCP HTJ2K codestream (reversible 5/3, no MCT).
 func goHTJ2Kencode(raw []byte, w, h, nc, prec int) ([]byte, error) {
