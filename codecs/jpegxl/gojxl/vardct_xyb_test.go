@@ -1,7 +1,6 @@
 package gojxl
 
 import (
-	"math"
 	"testing"
 )
 
@@ -69,4 +68,3 @@ func TestSRGBTransfer(t *testing.T) {
 	}
 }
 
-func absf(v float32) float32 { return float32(math.Abs(float64(v))) }

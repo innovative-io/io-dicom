@@ -69,6 +69,14 @@ func linearRGBToXYB(r, g, b float32) (x, y, bl float32) {
 	return x, y, bl
 }
 
+// absf is the absolute value of a float32.
+func absf(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 func zeroIfNeg(v float32) float32 {
 	if v < 0 {
 		return 0

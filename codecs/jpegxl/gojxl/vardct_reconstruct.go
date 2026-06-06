@@ -1,9 +1,6 @@
 package gojxl
 
-import (
-	"errors"
-	"math"
-)
+import "errors"
 
 // kInvDCQuant / kDCQuant: per-channel DC quantization weights (quant_weights.h).
 var kDCQuant = [3]float32{1.0 / 4096.0, 1.0 / 512.0, 1.0 / 256.0}
@@ -44,19 +41,14 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 		}
 	}
 
-	// Orthonormal->libjxl DCT normalization bridge: scale coeff by 1/(alpha_kx*
-	// alpha_ky); alpha(0)=1/sqrt(8), alpha(k>0)=1/2. pixel = idct2d(coeff*bridge).
+	// Orthonormal->libjxl DCT normalization bridge. libjxl's IDCT has DC gain 1
+	// and an extra sqrt(2) per AC axis relative to this decoder's orthonormal
+	// idct2d; that is exactly a uniform per-axis factor of sqrt(blockDim), i.e.
+	// bridge = blockDim for every coefficient. pixel = idct2d(coeff*bridge).
+	const bridgeVal = float32(acBlockDim) // 8 for DCT8x8
 	var bridge [64]float32
-	af := func(k int) float32 {
-		if k == 0 {
-			return float32(math.Sqrt(8))
-		}
-		return 2
-	}
-	for ky := 0; ky < 8; ky++ {
-		for kx := 0; kx < 8; kx++ {
-			bridge[ky*8+kx] = af(kx) * af(ky)
-		}
+	for k := range bridge {
+		bridge[k] = bridgeVal
 	}
 
 	planeX := make([]float32, W*H)
@@ -128,10 +120,33 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 	}
 
 	// Gaborish loop filter (applied on the XYB planes before color conversion).
-	if lf := st.fh.LoopFilter; lf.gab {
+	lf := st.fh.LoopFilter
+	if lf.gab {
 		planeX = applyGaborish(planeX, W, H, lf.gabXW1, lf.gabXW2)
 		planeY = applyGaborish(planeY, W, H, lf.gabYW1, lf.gabYW2)
 		planeB = applyGaborish(planeB, W, H, lf.gabBW1, lf.gabBW2)
+	}
+
+	// EPF (edge-preserving filter): for epf_iters>=1 run EPF1, >=2 also EPF2.
+	if lf.epfIters > 0 {
+		ep := defaultEPFParams()
+		quantScale := st.quant.scale()
+		sigmaGrid := make([]float32, bw*bh)
+		for i := 0; i < bw*bh; i++ {
+			sharp := int(st.acm.epf[i])
+			if sharp < 0 || sharp >= kEpfSharpEntries {
+				sharp = 0
+			}
+			sigmaGrid[i] = computeEPFSigma(quantScale, st.acm.quantF[i], sharp, &ep)
+		}
+		planes := [3][]float32{planeX, planeY, planeB}
+		if lf.epfIters >= 1 {
+			planes = applyEPF1(&planes, W, H, sigmaGrid, bw, &ep)
+		}
+		if lf.epfIters >= 2 {
+			planes = applyEPF2(&planes, W, H, sigmaGrid, bw, &ep)
+		}
+		planeX, planeY, planeB = planes[0], planes[1], planes[2]
 	}
 
 	pix := make([]byte, W*H*3)
