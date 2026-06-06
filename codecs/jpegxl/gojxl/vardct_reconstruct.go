@@ -23,6 +23,51 @@ func resampleScale1D(cb int) []float32 {
 	}
 }
 
+// adaptiveDCSmoothing smooths the dequantized DC image (compressed_dc.cc
+// AdaptiveDCSmoothing): each interior DC pixel is blended toward a 3x3 weighted
+// average by a factor that shrinks where the change is large relative to the DC
+// quant step (preserving edges). dcFactor is the per-channel MulDC. Skipped for
+// DC images <=2 in either dimension. Planes are X, Y, B.
+func adaptiveDCSmoothing(planes [3][]float32, w, h int, dcFactor [3]float32) {
+	if h <= 2 || w <= 2 {
+		return
+	}
+	const w1 = float32(0.20345139757231578)
+	const w2 = float32(0.0334829185968739)
+	const w0 = float32(1.0 - 4.0*(0.20345139757231578+0.0334829185968739))
+	var out [3][]float32
+	for c := range out {
+		out[c] = append([]float32(nil), planes[c]...) // borders stay unchanged
+	}
+	for y := 1; y < h-1; y++ {
+		for x := 1; x < w-1; x++ {
+			var mc, sm [3]float32
+			gap := float32(0.5)
+			for c := 0; c < 3; c++ {
+				p := planes[c]
+				tl, tc, tr := p[(y-1)*w+x-1], p[(y-1)*w+x], p[(y-1)*w+x+1]
+				ml, m, mr := p[y*w+x-1], p[y*w+x], p[y*w+x+1]
+				bl, bc, br := p[(y+1)*w+x-1], p[(y+1)*w+x], p[(y+1)*w+x+1]
+				s := w0*m + w1*(ml+mr+tc+bc) + w2*(tl+tr+bl+br)
+				mc[c], sm[c] = m, s
+				if g := absf(m-s) / dcFactor[c]; g > gap {
+					gap = g
+				}
+			}
+			factor := 3.0 - 4.0*gap
+			if factor < 0 {
+				factor = 0
+			}
+			for c := 0; c < 3; c++ {
+				out[c][y*w+x] = mc[c] + factor*(sm[c]-mc[c])
+			}
+		}
+	}
+	for c := 0; c < 3; c++ {
+		copy(planes[c], out[c])
+	}
+}
+
 // transposeSquare transposes an n x n block in place.
 func transposeSquare(b []float32, n int) {
 	for y := 0; y < n; y++ {
@@ -81,6 +126,22 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 		return m, nil
 	}
 
+	// Dequantize the DC image (with DC chroma-from-luma) once, then adaptively
+	// smooth it; the LLF of every varblock reads from this smoothed DC image.
+	dcH := st.dc.h
+	dcImg := [3][]float32{
+		make([]float32, dcW*dcH), make([]float32, dcW*dcH), make([]float32, dcW*dcH),
+	}
+	for i := 0; i < dcW*dcH; i++ {
+		inY := float32(st.dc.y[i]) * mulDC[1] * mul
+		inX := float32(st.dc.x[i]) * mulDC[0] * mul
+		inB := float32(st.dc.bch[i]) * mulDC[2] * mul
+		dcImg[0][i] = inY*cflFacX + inX // X
+		dcImg[1][i] = inY               // Y
+		dcImg[2][i] = inY*cflFacB + inB // B
+	}
+	adaptiveDCSmoothing(dcImg, dcW, dcH, mulDC)
+
 	planeX := make([]float32, W*H)
 	planeY := make([]float32, W*H)
 	planeB := make([]float32, W*H)
@@ -132,13 +193,10 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			for iy := 0; iy < cby; iy++ {
 				for ix := 0; ix < cbx; ix++ {
 					di := (by+iy)*dcW + (bx + ix)
-					inY := float32(st.dc.y[di]) * mulDC[1] * mul
-					inX := float32(st.dc.x[di]) * mulDC[0] * mul
-					inB := float32(st.dc.bch[di]) * mulDC[2] * mul
 					p := iy*cbx + ix
-					dcY[p] = inY
-					dcX[p] = inY*cflFacX + inX
-					dcB[p] = inY*cflFacB + inB
+					dcX[p] = dcImg[0][di]
+					dcY[p] = dcImg[1][di]
+					dcB[p] = dcImg[2][di]
 				}
 			}
 			llfNorm := float32(1.0 / math.Sqrt(float64(cbx*cby)))
