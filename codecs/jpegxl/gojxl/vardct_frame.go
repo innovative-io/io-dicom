@@ -123,7 +123,19 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		return st, err
 	}
 
-	return st, errVarDCTIncomplete
+	return st, nil
+}
+
+// DecodeVarDCT decodes a lossy VarDCT JPEG XL frame to an 8-bit sRGB image.
+// Restricted to the currently-supported subset (XYB, single group/pass, all
+// DCT8x8 blocks). Loop filters (Gaborish/EPF) are not yet applied, so block
+// edges differ slightly from a conforming decoder; interiors match.
+func DecodeVarDCT(data []byte) (*Image, error) {
+	st, err := decodeVarDCTFrame(data)
+	if err != nil {
+		return nil, err
+	}
+	return reconstructVarDCT(st)
 }
 
 // decodeACGroup decodes the quantized AC coefficients of one AC group
