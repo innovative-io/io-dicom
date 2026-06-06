@@ -11,7 +11,7 @@ import (
 // multi-group); inputs outside that subset (VarDCT lossy, JPEG recompression,
 // animation, ICC, non-identity orientation) return an error so a higher-
 // priority native backend (libjxl, when built with -tags libjxl) can take over.
-// There is no pure-Go encoder yet.
+// Encoding supports the lossless Modular subset via gojxl.Encode.
 type gojpegxlBackend struct{}
 
 func (gojpegxlBackend) Name() string { return "gojpegxl" }
@@ -42,9 +42,19 @@ func (gojpegxlBackend) Decode(encoded []byte, output []byte) (err error) {
 	return nil
 }
 
-// Encode is not implemented in pure Go.
-func (gojpegxlBackend) Encode(_ []byte, _ uint16, _ uint16, _ uint16, _ uint16, _ bool) ([]byte, error) {
-	return nil, errors.New("jpegxl: pure-Go encoder not implemented")
+// Encode losslessly compresses raw interleaved samples to a JPEG XL codestream
+// (pure-Go Modular encoder). Lossy (VarDCT) encoding is not implemented, so a
+// non-lossless request errors so a native backend can take over.
+func (gojpegxlBackend) Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, lossless bool) (out []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out, err = nil, errors.New("jpegxl: encode failed")
+		}
+	}()
+	if !lossless {
+		return nil, errors.New("jpegxl: pure-Go encoder is lossless-only")
+	}
+	return gojxl.Encode(raw, int(width), int(height), int(samples), int(bitsa))
 }
 
 func registerPureGoBackend() {
