@@ -116,10 +116,12 @@ func goHTJ2Kencode(raw []byte, w, h, nc, prec int) ([]byte, error) {
 			for si := range tc.resolutions[ri].subbands {
 				sb := &tc.resolutions[ri].subbands[si]
 				for _, v := range band[sb.expIdx] {
-					if v < 0 {
-						v = -v
+					// abs via int64 so v == math.MinInt32 does not overflow.
+					av := int64(v)
+					if av < 0 {
+						av = -av
 					}
-					if b := bitLen(int(v)) - 1; b > expsRaw[sb.expIdx] {
+					if b := bitLen(int(av)) - 1; b > expsRaw[sb.expIdx] {
 						expsRaw[sb.expIdx] = b
 					}
 				}
@@ -163,11 +165,13 @@ func goHTJ2Kencode(raw []byte, w, h, nc, prec int) ([]byte, error) {
 								continue
 							}
 							any = true
+							// abs via int64 so v == math.MinInt32 does not
+							// overflow when packing sign-magnitude.
 							var sign uint32
-							mag := v
-							if v < 0 {
+							mag := int64(v)
+							if mag < 0 {
 								sign = 0x80000000
-								mag = -v
+								mag = -mag
 							}
 							buf[yy*cw+xx] = sign | (uint32(mag) << shift)
 						}
