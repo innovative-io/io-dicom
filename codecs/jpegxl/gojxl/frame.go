@@ -182,6 +182,10 @@ func readFrameHeader(b *bitReader, meta *ImageMetadata) (FrameHeader, error) {
 		}
 	}
 
+	// group_size_shift defaults to 1 and is only coded for modular frames; VarDCT
+	// frames always use the default (group dim 256). Getting this wrong for
+	// VarDCT miscounts the groups/TOC for images between 129 and 256 px.
+	h.GroupSizeShift = 1
 	if h.Encoding == frameModular {
 		h.GroupSizeShift = b.ReadBits(2)
 	} else if h.Encoding == frameVarDCT && meta.XYBEncoded {
