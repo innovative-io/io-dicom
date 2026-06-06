@@ -71,9 +71,9 @@ func decodeModularFrame(data []byte) ([]modChannel, *ImageMetadata, error) {
 		nbColor = 1
 	}
 	nbExtra := len(meta.ExtraChannels)
-	image := make([]modChannel, nbColor+nbExtra)
-	for i := range image {
-		image[i] = modChannel{w: w, h: h, pix: make([]int32, w*h)}
+	img := &modImage{bitdepth: int(meta.BitDepth.BitsPerSample)}
+	for i := 0; i < nbColor+nbExtra; i++ {
+		img.channel = append(img.channel, modChannel{w: w, h: h, pix: make([]int32, w*h)})
 	}
 
 	gh, err := readGroupHeader(b)
@@ -83,22 +83,34 @@ func decodeModularFrame(data []byte) ([]modChannel, *ImageMetadata, error) {
 	if !gh.useGlobalTree {
 		return nil, nil, errors.New("gojxl: local trees not yet supported")
 	}
-	for _, t := range gh.transforms {
-		if t.id != transformRCT {
-			return nil, nil, errors.New("gojxl: Palette/Squeeze transforms not yet supported")
+
+	// Apply each transform's MetaApply (sets up channel layout) in order.
+	for i := range gh.transforms {
+		if err := metaApplyTransform(img, &gh.transforms[i]); err != nil {
+			return nil, nil, err
 		}
 	}
 
-	reader := newANSSymbolReader(code, b, w)
-	for ci := range image {
-		decodeChannel(reader, b, tree, ctxMap, image, ci, 0, gh.wp)
+	// Distance multiplier = max channel width across the post-MetaApply list.
+	distMult := 0
+	for i := range img.channel {
+		if img.channel[i].w > distMult {
+			distMult = img.channel[i].w
+		}
+	}
+	reader := newANSSymbolReader(code, b, distMult)
+	for ci := range img.channel {
+		decodeChannel(reader, b, tree, ctxMap, img.channel, ci, 0, gh.wp)
 	}
 	if !reader.checkFinalState() {
 		return nil, nil, errors.New("gojxl: modular ANS final state failed")
 	}
 
-	if !applyInverseTransforms(image, gh.transforms, 0) {
-		return nil, nil, errors.New("gojxl: unsupported transform during inverse")
+	// Undo transforms in reverse order.
+	for i := len(gh.transforms) - 1; i >= 0; i-- {
+		if err := inverseTransform(img, gh.transforms[i], gh.wp); err != nil {
+			return nil, nil, err
+		}
 	}
-	return image, &meta, nil
+	return img.channel[img.nbMeta:], &meta, nil
 }

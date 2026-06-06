@@ -36,6 +36,22 @@ func TestModularDecodeFixtures(t *testing.T) {
 		{"gray8_300x200_lossless.jxl", 300, 200, 1, func(i, c int) int32 {
 			return int32(((i % 300) + (i / 300)) & 0xFF)
 		}},
+		// photo: big multi-node tree, no transform.
+		{"photo_e7.jxl", 64, 48, 1, func(i, c int) int32 {
+			x, y := i%64, i/64
+			return int32((x*2 + y*3 + (x*y)/16 + (x ^ y)) & 0xFF)
+		}},
+		// responsive: Squeeze transform.
+		{"sq_resp.jxl", 64, 48, 1, func(i, c int) int32 {
+			x, y := i%64, i/64
+			return int32((x*2 + y*3 + (x*y)/16 + (x ^ y)) & 0xFF)
+		}},
+		// palette: Palette transform (4 colors).
+		{"pal_e7.jxl", 32, 32, 3, func(i, c int) int32 {
+			x, y := i%32, i/32
+			pal := [4][3]int32{{10, 20, 30}, {200, 100, 50}, {0, 0, 0}, {255, 255, 255}}
+			return pal[(x/8+y/8)%4][c]
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
