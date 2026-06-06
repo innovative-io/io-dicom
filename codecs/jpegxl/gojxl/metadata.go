@@ -235,6 +235,43 @@ func skipExtensions(b *bitReader) error {
 	return nil
 }
 
+// readOpsinInverseMatrix consumes an OpsinInverseMatrix bundle (9+3+4 F16s).
+func readOpsinInverseMatrix(b *bitReader) {
+	if b.ReadBool() { // all_default
+		return
+	}
+	for i := 0; i < 16; i++ {
+		b.ReadF16()
+	}
+}
+
+// readTransformData consumes the CustomTransformData bundle that follows
+// ImageMetadata in the codestream (image_metadata.cc).
+func readTransformData(b *bitReader, xybEncoded bool) {
+	if b.ReadBool() { // all_default
+		return
+	}
+	if xybEncoded {
+		readOpsinInverseMatrix(b)
+	}
+	mask := b.ReadBits(3)
+	if mask&0x1 != 0 {
+		for i := 0; i < 15; i++ {
+			b.ReadF16()
+		}
+	}
+	if mask&0x2 != 0 {
+		for i := 0; i < 55; i++ {
+			b.ReadF16()
+		}
+	}
+	if mask&0x4 != 0 {
+		for i := 0; i < 210; i++ {
+			b.ReadF16()
+		}
+	}
+}
+
 // ImageMetadata (image_metadata.cc ImageMetadata::VisitFields).
 type ImageMetadata struct {
 	Orientation      uint32
