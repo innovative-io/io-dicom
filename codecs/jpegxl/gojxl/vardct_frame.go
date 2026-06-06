@@ -26,6 +26,7 @@ type vardctState struct {
 	coeffOrders   map[int][3][]int
 	acCode        *ansCode
 	acCtxMap      []uint8
+	acCoeffs      [3][]int32
 }
 
 // decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
@@ -114,7 +115,105 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		return st, err
 	}
 
+	// ----- AC group: quantized coefficient decode -----
+	if st.fd.numGroups != 1 {
+		return st, errors.New("gojxl: multi-AC-group VarDCT not yet supported")
+	}
+	if err := decodeACGroup(b, st); err != nil {
+		return st, err
+	}
+
 	return st, errVarDCTIncomplete
+}
+
+// decodeACGroup decodes the quantized AC coefficients of one AC group
+// (dec_group.cc DecodeGroupImpl / DecodeACVarBlock). Restricted to the single
+// group / single pass / no-chroma-subsampling subset. Coefficients are stored
+// per channel as bw*bh blocks of 64 (DCT8x8 etc.; the LLF/DC slot stays 0 here
+// and is filled from the DC image during reconstruction).
+func decodeACGroup(b *bitReader, st *vardctState) error {
+	bw, bh := st.acm.bw, st.acm.bh
+	// AC coefficient blocks per channel (index 0=X,1=Y,2=B), bw*bh blocks of 64.
+	coeffs := [3][]int32{
+		make([]int32, bw*bh*64),
+		make([]int32, bw*bh*64),
+		make([]int32, bw*bh*64),
+	}
+	// Per-channel non-zero count grids for prediction.
+	nzeros := [3][]int32{
+		make([]int32, bw*bh),
+		make([]int32, bw*bh),
+		make([]int32, bw*bh),
+	}
+
+	// Single histogram set -> no histogram selector bits, ctx_offset 0.
+	reader := newANSSymbolReader(st.acCode, b, 0)
+
+	for by := 0; by < bh; by++ {
+		for bx := 0; bx < bw; bx++ {
+			idx := by*bw + bx
+			if !st.acm.valid[idx] {
+				continue
+			}
+			acs := st.acm.strategy[idx]
+			ord := int(kStrategyOrder[acs])
+			coveredBlocks := acs.numBlocks()
+			log2cov := acs.log2CoveredBlocks()
+			size := coveredBlocks * 64
+			qf := st.acm.quantF[idx]
+
+			// Channel decode order is Y, X, B = {1, 0, 2}.
+			for _, c := range [3]int{1, 0, 2} {
+				var rowTop []int32
+				if by > 0 {
+					rowTop = nzeros[c][(by-1)*bw : by*bw]
+				}
+				row := nzeros[c][by*bw : (by+1)*bw]
+				predicted := int(predictFromTopAndLeft(rowTop, row, bx, 32))
+
+				blockCtx := st.blockCtx.blockContext(0, uint32(qf), ord, c)
+				nzeroCtx := st.blockCtx.nonZeroContext(predicted, blockCtx)
+				nz := int(reader.readHybridUint(nzeroCtx, b, st.acCtxMap))
+				if nz > size-coveredBlocks {
+					return errors.New("gojxl: AC nzeros too large")
+				}
+				// Record nzeros for the covered region (prediction of neighbors).
+				val := int32((nz + coveredBlocks - 1) >> uint(log2cov))
+				for yy := 0; yy < acs.coveredBlocksY(); yy++ {
+					for xx := 0; xx < acs.coveredBlocksX(); xx++ {
+						nzeros[c][(by+yy)*bw+(bx+xx)] = val
+					}
+				}
+
+				histoOffset := st.blockCtx.zeroDensityContextsOffset(blockCtx)
+				prev := 0
+				if nz <= size/16 {
+					prev = 1
+				}
+				order := st.coeffOrders[ord][c]
+				block := coeffs[c][idx*64 : idx*64+size]
+				for k := coveredBlocks; k < size && nz != 0; k++ {
+					ctx := histoOffset + zeroDensityContext(nz, k, coveredBlocks, log2cov, prev)
+					u := reader.readHybridUint(ctx, b, st.acCtxMap)
+					block[order[k]] += unpackSigned32(u)
+					if u != 0 {
+						prev = 1
+					} else {
+						prev = 0
+					}
+					nz -= prev
+				}
+				if nz != 0 {
+					return errors.New("gojxl: AC nzeros not exhausted at block end")
+				}
+			}
+		}
+	}
+	if !reader.checkFinalState() {
+		return errors.New("gojxl: AC group ANS final state failed")
+	}
+	st.acCoeffs = coeffs
+	return nil
 }
 
 // kOrderEnc = U32Enc(Val(0x5F), Val(0x13), Val(0), Bits(13)) (frame_header.h).

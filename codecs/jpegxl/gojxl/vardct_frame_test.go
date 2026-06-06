@@ -150,3 +150,40 @@ func TestVarDCTHfGlobal(t *testing.T) {
 		t.Errorf("AC context map len=%d, want %d", len(st.acCtxMap), want)
 	}
 }
+
+// TestVarDCTACCoeffs checks the per-group AC coefficient decode: the ANS stream
+// finalizes cleanly (proving the entire bitstream is aligned) and coefficients
+// are sane — the DC slot of each block stays 0 (AC never writes the LLF), and
+// there is non-trivial AC energy.
+func TestVarDCTACCoeffs(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_rgb16x16.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	st, err := decodeVarDCTFrame(data)
+	if err != nil && !errors.Is(err, errVarDCTIncomplete) {
+		t.Fatalf("decode failed in AC coefficients: %v", err)
+	}
+	if st.acCoeffs[0] == nil {
+		t.Fatal("AC coefficients not decoded")
+	}
+	total := 0
+	for c := 0; c < 3; c++ {
+		if len(st.acCoeffs[c]) != st.acm.bw*st.acm.bh*64 {
+			t.Fatalf("channel %d coeff len %d, want %d", c, len(st.acCoeffs[c]), st.acm.bw*st.acm.bh*64)
+		}
+		for blk := 0; blk < st.acm.bw*st.acm.bh; blk++ {
+			if st.acCoeffs[c][blk*64] != 0 {
+				t.Errorf("channel %d block %d DC slot = %d, want 0 (AC must not touch LLF)", c, blk, st.acCoeffs[c][blk*64])
+			}
+		}
+		for _, v := range st.acCoeffs[c] {
+			if v != 0 {
+				total++
+			}
+		}
+	}
+	if total == 0 {
+		t.Error("all AC coefficients zero — decode likely wrong")
+	}
+}

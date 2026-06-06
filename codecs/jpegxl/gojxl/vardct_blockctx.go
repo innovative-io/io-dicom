@@ -104,6 +104,30 @@ func (m *blockCtxMap) blockContext(dcIdx int, qf uint32, ord, c int) int {
 	return int(m.ctxMap[idx])
 }
 
+// predictFromTopAndLeft predicts a block's non-zero count from its top and left
+// neighbors (entropy_coder.h PredictFromTopAndLeft). rowTop is nil for the first
+// block row.
+func predictFromTopAndLeft(rowTop, row []int32, x int, def int32) int32 {
+	if x == 0 {
+		if rowTop == nil {
+			return def
+		}
+		return rowTop[0]
+	}
+	if rowTop == nil {
+		return row[x-1]
+	}
+	return (rowTop[x] + row[x-1] + 1) / 2
+}
+
+// zeroDensityContext is the per-coefficient context for AC symbol decoding
+// (ac_context.h ZeroDensityContext).
+func zeroDensityContext(nonzerosLeft, k, coveredBlocks, log2CoveredBlocks, prev int) int {
+	nonzerosLeft = (nonzerosLeft + coveredBlocks - 1) >> uint(log2CoveredBlocks)
+	k >>= uint(log2CoveredBlocks)
+	return (int(kCoeffNumNonzeroContext[nonzerosLeft])+int(kCoeffFreqContext[k]))*2 + prev
+}
+
 // Threshold distributions (entropy_coder.h).
 var (
 	kDCThresholdDist = [4]u32d{u32Bits(4), u32Off(8, 16), u32Off(16, 272), u32Off(32, 65808)}
