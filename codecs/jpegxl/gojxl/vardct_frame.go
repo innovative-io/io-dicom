@@ -17,6 +17,7 @@ type vardctState struct {
 	tree    []treeNode
 	code    *ansCode
 	ctxMap  []uint8
+	dc      *dcChannels
 }
 
 // decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
@@ -83,5 +84,76 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		return nil, err
 	}
 
+	// ----- DC group: VarDCT DC (LF) image -----
+	// Single DC group only (16-bit-friendly small images) for now.
+	if st.fd.numDCGroups != 1 {
+		return st, errors.New("gojxl: multi-DC-group VarDCT not yet supported")
+	}
+	if err := decodeVarDCTDCImage(b, st, 0); err != nil {
+		return st, err
+	}
+
 	return st, errVarDCTIncomplete
+}
+
+// dcChannels holds the decoded (still-quantized) LF/DC planes in [Y, X, B] order.
+type dcChannels struct {
+	w, h           int
+	extraPrecision int
+	y, x, bch      []int32
+}
+
+// decodeVarDCTDCImage decodes the LF/DC image for a DC group: a 3-channel
+// modular sub-stream at 1/8 resolution (ModularFrameDecoder::DecodeVarDCTDC),
+// using the global tree/histograms. The result is left quantized; dequant
+// happens during reconstruction.
+func decodeVarDCTDCImage(b *bitReader, st *vardctState, groupID int) error {
+	dcW := int(divCeil(st.fd.xsize, acBlockDim))
+	dcH := int(divCeil(st.fd.ysize, acBlockDim))
+
+	b.Refill()
+	extraPrecision := int(b.ReadBits(2))
+
+	// 3 channels at DC resolution, decoded as a modular image. Channel storage
+	// order matches libjxl: index 0 = Y (c=1), 1 = X (c=0), 2 = B (c=2).
+	img := &modImage{bitdepth: int(st.meta.BitDepth.BitsPerSample)}
+	for i := 0; i < 3; i++ {
+		img.channel = append(img.channel, modChannel{w: dcW, h: dcH, pix: make([]int32, dcW*dcH)})
+	}
+
+	gh, err := readGroupHeader(b)
+	if err != nil {
+		return err
+	}
+	if !gh.useGlobalTree {
+		return errors.New("gojxl: VarDCT DC local trees not supported")
+	}
+	for i := range gh.transforms {
+		if err := metaApplyTransform(img, &gh.transforms[i]); err != nil {
+			return err
+		}
+	}
+	// VarDCTDC stream id = 1 + group_id.
+	streamID := 1 + groupID
+	reader := newANSSymbolReader(st.code, b, maxChannelWidth(img.channel))
+	for ci := range img.channel {
+		decodeChannel(reader, b, st.tree, st.ctxMap, img.channel, ci, streamID, gh.wp)
+	}
+	if !reader.checkFinalState() {
+		return errors.New("gojxl: VarDCT DC ANS final state failed")
+	}
+	for i := len(gh.transforms) - 1; i >= 0; i-- {
+		if err := inverseTransform(img, gh.transforms[i], gh.wp); err != nil {
+			return err
+		}
+	}
+
+	base := img.nbMeta
+	st.dc = &dcChannels{
+		w: dcW, h: dcH, extraPrecision: extraPrecision,
+		y:   img.channel[base+0].pix,
+		x:   img.channel[base+1].pix,
+		bch: img.channel[base+2].pix,
+	}
+	return nil
 }

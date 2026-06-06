@@ -48,3 +48,39 @@ func TestVarDCTLfGlobalParse(t *testing.T) {
 		t.Error("histograms not decoded")
 	}
 }
+
+// TestVarDCTDCImage checks the LF/DC image decodes correctly: the ANS stream
+// finalizes cleanly and the quantized DC values match the source structure of
+// the 16x16 gradient (R=x*16, G=y*16, B=(x+y)*8) at 1/8 resolution (2x2 DC).
+func TestVarDCTDCImage(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_rgb16x16.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	st, err := decodeVarDCTFrame(data)
+	if err != nil && !errors.Is(err, errVarDCTIncomplete) {
+		t.Fatalf("decode failed before DC: %v", err)
+	}
+	if st.dc == nil {
+		t.Fatal("DC image not decoded")
+	}
+	if st.dc.w != 2 || st.dc.h != 2 {
+		t.Fatalf("DC size %dx%d, want 2x2", st.dc.w, st.dc.h)
+	}
+	// Y (luma) increases with image brightness; blocks are row-major
+	// (0,0),(1,0),(0,1),(1,1).
+	for i := 1; i < 4; i++ {
+		if st.dc.y[i] <= st.dc.y[i-1] {
+			t.Errorf("DC luma not increasing: %v", st.dc.y)
+			break
+		}
+	}
+	// X (red-green): block (1,0) is red-dominant (R>G) -> positive; block (0,1)
+	// is green-dominant -> negative.
+	if st.dc.x[1] <= 0 {
+		t.Errorf("DC X[red-dominant block] = %d, want positive", st.dc.x[1])
+	}
+	if st.dc.x[2] >= 0 {
+		t.Errorf("DC X[green-dominant block] = %d, want negative", st.dc.x[2])
+	}
+}
