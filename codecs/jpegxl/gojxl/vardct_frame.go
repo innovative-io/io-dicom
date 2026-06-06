@@ -18,6 +18,7 @@ type vardctState struct {
 	code    *ansCode
 	ctxMap  []uint8
 	dc      *dcChannels
+	acm     *acMetadata
 }
 
 // decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
@@ -92,9 +93,143 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 	if err := decodeVarDCTDCImage(b, st, 0); err != nil {
 		return st, err
 	}
+	// DecodeGroup(ModularDC) for extra channels is a no-op with no extra
+	// channels (this subset). AC metadata follows.
+	if len(st.meta.ExtraChannels) != 0 {
+		return st, errors.New("gojxl: VarDCT with extra channels not yet supported")
+	}
+	if err := decodeAcMetadata(b, st, 0); err != nil {
+		return st, err
+	}
 
 	return st, errVarDCTIncomplete
 }
+
+// acMetadata holds per-block transform/quant info for a DC group.
+type acMetadata struct {
+	bw, bh    int             // block grid dimensions
+	strategy  []acStrategyType // per-block AC strategy (top-left of each varblock)
+	valid     []bool          // whether a block position is the top-left of a varblock
+	quantF    []int32         // per-block raw quant field
+	epf       []uint8         // per-block EPF sharpness
+	ytoxMap   []int32         // per-color-tile CfL X factor
+	ytobMap   []int32         // per-color-tile CfL B factor
+	ctW, ctH  int             // color-tile grid dims
+}
+
+// decodeAcMetadata decodes the AC metadata for a DC group
+// (ModularFrameDecoder::DecodeAcMetadata): a 4-channel modular stream giving the
+// per-color-tile CfL maps, the per-block AC strategy + raw quant field, and the
+// EPF sharpness field.
+func decodeAcMetadata(b *bitReader, st *vardctState, groupID int) error {
+	bw := int(divCeil(st.fd.xsize, acBlockDim))
+	bh := int(divCeil(st.fd.ysize, acBlockDim))
+	upperBound := bw * bh
+	b.Refill()
+	count := int(b.ReadBits(ceilLog2Nonzero(uint32(upperBound)))) + 1
+
+	ctW := (bw + 7) >> 3
+	ctH := (bh + 7) >> 3
+
+	img := &modImage{bitdepth: int(st.meta.BitDepth.BitsPerSample)}
+	img.channel = []modChannel{
+		{w: ctW, h: ctH, hshift: 3, vshift: 3, pix: make([]int32, ctW*ctH)}, // ytox
+		{w: ctW, h: ctH, hshift: 3, vshift: 3, pix: make([]int32, ctW*ctH)}, // ytob
+		{w: count, h: 2, pix: make([]int32, count*2)},                       // ACS + QF
+		{w: bw, h: bh, pix: make([]int32, bw*bh)},                           // EPF sharpness
+	}
+
+	gh, err := readGroupHeader(b)
+	if err != nil {
+		return err
+	}
+	if !gh.useGlobalTree {
+		return errors.New("gojxl: AC metadata local trees not supported")
+	}
+	for i := range gh.transforms {
+		if err := metaApplyTransform(img, &gh.transforms[i]); err != nil {
+			return err
+		}
+	}
+	streamID := 1 + 2*int(st.fd.numDCGroups) + groupID // ACMetadata stream id
+	reader := newANSSymbolReader(st.code, b, maxChannelWidth(img.channel))
+	// Two-pass decode order: channels with min(hshift,vshift) >= 3 first.
+	for _, dcPass := range []bool{true, false} {
+		for ci := range img.channel {
+			ch := &img.channel[ci]
+			isDC := ch.hshift >= 3 && ch.vshift >= 3
+			if isDC != dcPass {
+				continue
+			}
+			decodeChannel(reader, b, st.tree, st.ctxMap, img.channel, ci, streamID, gh.wp)
+		}
+	}
+	if !reader.checkFinalState() {
+		return errors.New("gojxl: AC metadata ANS final state failed")
+	}
+	for i := len(gh.transforms) - 1; i >= 0; i-- {
+		if err := inverseTransform(img, gh.transforms[i], gh.wp); err != nil {
+			return err
+		}
+	}
+
+	base := img.nbMeta
+	acsRow := img.channel[base+2].pix[0:count]     // row 0
+	qfRow := img.channel[base+2].pix[count : 2*count] // row 1
+	epfCh := img.channel[base+3].pix
+
+	md := &acMetadata{
+		bw: bw, bh: bh, ctW: ctW, ctH: ctH,
+		strategy: make([]acStrategyType, bw*bh),
+		valid:    make([]bool, bw*bh),
+		quantF:   make([]int32, bw*bh),
+		epf:      make([]uint8, bw*bh),
+		ytoxMap:  append([]int32(nil), img.channel[base+0].pix...),
+		ytobMap:  append([]int32(nil), img.channel[base+1].pix...),
+	}
+	num := 0
+	for by := 0; by < bh; by++ {
+		for bx := 0; bx < bw; bx++ {
+			idx := by*bw + bx
+			md.epf[idx] = uint8(epfCh[idx])
+			if md.valid[idx] {
+				continue // covered by an earlier multiblock strategy
+			}
+			if num >= count {
+				return errors.New("gojxl: AC metadata corrupted (count)")
+			}
+			rawACS := acsRow[num]
+			if rawACS < 0 || rawACS >= acNumValidStrategies {
+				return errors.New("gojxl: invalid AC strategy")
+			}
+			t := acStrategyType(rawACS)
+			cbx, cby := t.coveredBlocksX(), t.coveredBlocksY()
+			if bx+cbx > bw || by+cby > bh {
+				return errors.New("gojxl: AC strategy overflows block grid")
+			}
+			qf := qfRow[num]
+			if qf < 0 {
+				qf = 0
+			} else if qf > kQuantMax-1 {
+				qf = kQuantMax - 1
+			}
+			// Mark the covered blocks; the top-left carries the strategy.
+			for iy := 0; iy < cby; iy++ {
+				for ix := 0; ix < cbx; ix++ {
+					p := (by+iy)*bw + (bx + ix)
+					md.valid[p] = true
+				}
+			}
+			md.strategy[idx] = t
+			md.quantF[idx] = 1 + qf
+			num++
+		}
+	}
+	st.acm = md
+	return nil
+}
+
+const kQuantMax = 256
 
 // dcChannels holds the decoded (still-quantized) LF/DC planes in [Y, X, B] order.
 type dcChannels struct {

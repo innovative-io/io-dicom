@@ -84,3 +84,35 @@ func TestVarDCTDCImage(t *testing.T) {
 		t.Errorf("DC X[green-dominant block] = %d, want negative", st.dc.x[2])
 	}
 }
+
+// TestVarDCTAcMetadata checks the AC metadata decodes: a clean ANS stream and
+// sensible per-block transform/quant info. For this simple 16x16 gradient cjxl
+// chooses all DCT8x8 blocks with a uniform quant field and no CfL.
+func TestVarDCTAcMetadata(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_rgb16x16.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	st, err := decodeVarDCTFrame(data)
+	if err != nil && !errors.Is(err, errVarDCTIncomplete) {
+		t.Fatalf("decode failed before AC metadata: %v", err)
+	}
+	m := st.acm
+	if m == nil {
+		t.Fatal("AC metadata not decoded")
+	}
+	if m.bw != 2 || m.bh != 2 {
+		t.Fatalf("block grid %dx%d, want 2x2", m.bw, m.bh)
+	}
+	for i, s := range m.strategy {
+		if s != acDCT {
+			t.Errorf("block %d strategy = %d, want DCT8x8(0)", i, s)
+		}
+		if !m.valid[i] {
+			t.Errorf("block %d not marked valid", i)
+		}
+		if m.quantF[i] <= 0 {
+			t.Errorf("block %d quant field = %d, want positive", i, m.quantF[i])
+		}
+	}
+}
