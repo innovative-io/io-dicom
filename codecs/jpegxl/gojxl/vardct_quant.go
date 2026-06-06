@@ -80,3 +80,17 @@ func (q *quantizer) scale() float32 { return q.globalScaleF }
 func (q *quantizer) invQuantAC(blockQuant int32) float32 {
 	return q.invGlobalScale / float32(blockQuant)
 }
+
+// QuantizerParams field distributions (quantizer.cc QuantizerParams::VisitFields).
+var (
+	qGlobalScaleDist = [4]u32d{u32Off(11, 1), u32Off(11, 2049), u32Off(12, 4097), u32Off(16, 8193)}
+	qQuantDCDist     = [4]u32d{u32Val(16), u32Off(5, 1), u32Off(8, 1), u32Off(16, 1)}
+)
+
+// decodeQuantizer reads the QuantizerParams bundle (global_scale, quant_dc) from
+// the LfGlobal section (Quantizer::Decode) and returns the configured quantizer.
+func decodeQuantizer(b *bitReader) *quantizer {
+	gs := b.ReadU32(qGlobalScaleDist[0], qGlobalScaleDist[1], qGlobalScaleDist[2], qGlobalScaleDist[3])
+	qdc := b.ReadU32(qQuantDCDist[0], qQuantDCDist[1], qQuantDCDist[2], qQuantDCDist[3])
+	return newQuantizer(int(gs), int(qdc))
+}

@@ -29,6 +29,29 @@ func TestAdjustQuantBias(t *testing.T) {
 	}
 }
 
+func TestDecodeQuantizerRoundTrip(t *testing.T) {
+	cases := []struct{ gs, qdc int }{
+		{1, 16},      // both default-ish (first dist entries)
+		{2049, 1},    // global_scale second dist
+		{4097, 1},    // global_scale third dist
+		{8193, 5000}, // largest dists
+	}
+	for _, c := range cases {
+		w := newBitWriter()
+		w.WriteU32(uint32(c.gs), qGlobalScaleDist[0], qGlobalScaleDist[1], qGlobalScaleDist[2], qGlobalScaleDist[3])
+		w.WriteU32(uint32(c.qdc), qQuantDCDist[0], qQuantDCDist[1], qQuantDCDist[2], qQuantDCDist[3])
+		w.ZeroPadToByte()
+		q := decodeQuantizer(newBitReader(w.Bytes()))
+		if q.globalScale != c.gs || q.quantDC != c.qdc {
+			t.Errorf("decodeQuantizer: got gs=%d qdc=%d, want %d %d", q.globalScale, q.quantDC, c.gs, c.qdc)
+		}
+		// Derived fields must be consistent.
+		if absf(q.invGlobalScale-float32(kGlobalScaleDenom)/float32(c.gs)) > 1e-3 {
+			t.Errorf("invGlobalScale mismatch for gs=%d", c.gs)
+		}
+	}
+}
+
 func TestQuantizerScales(t *testing.T) {
 	// global_scale default-ish value; quant_dc arbitrary.
 	gs, qdc := 8192, 5
