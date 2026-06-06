@@ -7,12 +7,15 @@ import (
 	"github.com/innovative-io/io-dicom/codecs/internal/backendmgr"
 )
 
-var CGOEnabled = nativeBackendEnabled
+// CGOEnabled reports whether a native (cgo) JPIP backend is compiled in. The
+// openjph backend was retired in favor of the pure-Go HTJ2K codec (decode via
+// gojpeg2000, encode via gojp2k HTJ2K), so this is always false; it is retained
+// for API compatibility with callers/tests (matching codecs/jpeg* style).
+const CGOEnabled = false
 
 const maxCodecPayloadBytes = 512 << 20
 
 var errUnsupportedTransferSyntax = errors.New("unsupported JPIP transfer syntax")
-var errBackendUnavailable = errors.New("jpip decode requires the openjph native backend (build with -tags openjph)")
 
 var supportedTransferSyntaxUIDs = []string{
 	"1.2.840.10008.1.2.4.204",
@@ -44,26 +47,29 @@ func (passthroughBackend) SupportedTransferSyntaxUIDs() []string {
 }
 
 func (passthroughBackend) Decode(_ []byte, _ []byte, _ string) error {
-	return errBackendUnavailable
+	return errors.New("jpip: no decode backend available")
 }
 
-func (passthroughBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uint16, _ string) ([]byte, error) {
-	encoded := make([]byte, len(raw))
-	copy(encoded, raw)
-	return encoded, nil
+func (passthroughBackend) Encode(_ []byte, _ uint16, _ uint16, _ uint16, _ uint16, _ string) ([]byte, error) {
+	// No pure-Go encoder is active under the passthrough backend; erroring is
+	// correct rather than returning raw bytes as a fake compressed stream (the
+	// real pure-Go HTJ2K encoder lives in the gojpip backend).
+	return nil, errors.New("jpip: no encode backend available")
 }
 
 var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 
 func init() {
-	registerNativeBackends()
+	registerPureGoBackend() // pure-Go HTJ2K (decode via gojpeg2000, encode via gojp2k HTJ2K)
 	mgr.SelectDefault()
 }
 
-// SetBackend overrides the active JPIP backend. Passing nil resets to passthrough.
+// SetBackend overrides the active JPIP backend. Passing nil resets to the
+// default (the pure-Go gojpip HTJ2K backend).
 func SetBackend(backend Backend) {
 	if backend == nil {
 		mgr.Reset()
+		mgr.SelectDefault()
 		return
 	}
 	mgr.Set(backend)
