@@ -59,6 +59,32 @@ func (b *bitReader) ReadBits(n int) uint32 {
 // ReadBool reads a single bit as a boolean.
 func (b *bitReader) ReadBool() bool { return b.ReadBits(1) != 0 }
 
+// Refill tops up the internal bit buffer (exposes the private refill so the
+// entropy decoders can use the Refill / PeekBits / Consume idiom from libjxl).
+func (b *bitReader) Refill() { b.refill() }
+
+// PeekBits returns the next n bits without consuming them (n <= 32). Bits past
+// the end of the stream read as zero.
+func (b *bitReader) PeekBits(n int) uint32 {
+	b.refill()
+	if n == 0 {
+		return 0
+	}
+	return uint32(b.buf & ((1 << uint(n)) - 1))
+}
+
+// Consume advances past n bits previously peeked.
+func (b *bitReader) Consume(n int) {
+	if n <= b.nbits {
+		b.buf >>= uint(n)
+		b.nbits -= n
+		return
+	}
+	b.buf = 0
+	b.nbits = 0
+	b.overread = true
+}
+
 // bitsConsumed reports the total number of bits read so far.
 func (b *bitReader) bitsConsumed() int { return b.pos*8 - b.nbits }
 
