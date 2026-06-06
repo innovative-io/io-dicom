@@ -69,6 +69,23 @@ func TestModularDecodeFixtures(t *testing.T) {
 				return int32((x + y*3) & 0xFF)
 			}
 		}},
+		// large multi-group RGB (1200x800, 2.88M samples).
+		{"r_bigcolor.jxl", 1200, 800, 3, func(i, c int) int32 {
+			x, y := i%1200, i/1200
+			switch c {
+			case 0:
+				return int32((x + y) & 0xFF)
+			case 1:
+				return int32((x*2 + y) & 0xFF)
+			default:
+				return int32((x + y*3) & 0xFF)
+			}
+		}},
+		// large multi-group 16-bit grayscale (1100x900).
+		{"r_big16.jxl", 1100, 900, 1, func(i, c int) int32 {
+			x, y := i%1100, i/1100
+			return int32((x*7 + y*13) & 0xFFFF)
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
