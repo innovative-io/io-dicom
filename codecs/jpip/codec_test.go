@@ -1,6 +1,45 @@
 package jpip
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/innovative-io/io-dicom/codecs/jpeg2000"
+)
+
+// TestJPIPIndependentOfJPEG2000Backend verifies that the pure-Go jpip backend
+// round-trips even when the JPEG 2000 backend is forced to passthrough. jpip
+// uses the pure-Go HTJ2K encode/decode functions directly, so it must not be
+// affected by jpeg2000 backend selection (the tagged native matrix forces all
+// other families to passthrough while testing jpip).
+func TestJPIPIndependentOfJPEG2000Backend(t *testing.T) {
+	if err := jpeg2000.UseBackend("passthrough"); err != nil {
+		t.Fatalf("force jpeg2000 passthrough: %v", err)
+	}
+	t.Cleanup(func() { jpeg2000.SetBackend(nil) })
+
+	SetBackend(nil)
+	t.Cleanup(func() { SetBackend(nil) })
+
+	raw := make([]byte, 16*16)
+	for i := range raw {
+		raw[i] = byte((i*7 + 11) & 0xFF)
+	}
+	var out []byte
+	var outSize int
+	uid := "1.2.840.10008.1.2.4.204"
+	if err := JPIPencode(raw, 16, 16, 1, 8, &out, &outSize, uid); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	dec := make([]byte, len(raw))
+	if err := JPIPdecode(out, uint32(outSize), dec, uid); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for i := range raw {
+		if raw[i] != dec[i] {
+			t.Fatalf("byte %d: got %d want %d", i, dec[i], raw[i])
+		}
+	}
+}
 
 var mockSupportedTransferSyntaxUIDs = []string{"1.2.840.10008.1.2.4.204", "1.2.840.10008.1.2.4.205"}
 

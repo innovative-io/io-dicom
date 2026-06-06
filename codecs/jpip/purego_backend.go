@@ -37,7 +37,9 @@ func (gojpipBackend) DecodeContext(_ context.Context, encoded []byte, output []b
 	if len(encoded) > maxCodecPayloadBytes || len(output) > maxCodecPayloadBytes {
 		return errInvalidJPIPPayload
 	}
-	return jpeg2000.J2Kdecode(encoded, uint32(len(encoded)), output)
+	// Decode with the pure-Go HTJ2K decoder directly so JPIP is independent of
+	// the JPEG 2000 backend selection (callers may swap that backend).
+	return jpeg2000.HTJ2Kdecode(encoded, output)
 }
 
 func (gojpipBackend) Encode(raw []byte, width, height, samples, bitsa uint16, uid string) ([]byte, error) {

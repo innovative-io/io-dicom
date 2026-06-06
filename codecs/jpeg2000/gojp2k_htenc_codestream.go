@@ -12,6 +12,19 @@ package jpeg2000
 
 import "encoding/binary"
 
+// HTJ2Kdecode decodes a JPEG 2000 / HTJ2K codestream into output using the
+// pure-Go decoder directly, independent of the registered JPEG 2000 backend.
+// This lets the JPIP codec decode HTJ2K without being affected by jpeg2000
+// backend selection. A panic on malformed input is converted to an error.
+func HTJ2Kdecode(encoded []byte, output []byte) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = errJ2KMalformed
+		}
+	}()
+	return goJ2Kdecode(stripJP2(encoded), output)
+}
+
 // HTJ2Kencode encodes raw interleaved samples into a lossless HTJ2K (ISO
 // 15444-15) codestream. It is the pure-Go replacement for the openjph-based
 // JPIP/HTJ2K encoder. A panic on malformed input is converted to an error so it
