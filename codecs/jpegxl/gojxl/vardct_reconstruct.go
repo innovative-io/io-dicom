@@ -201,10 +201,14 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			}
 			llfNorm := float32(1.0 / math.Sqrt(float64(cbx*cby)))
 			placeLLF := func(dc []float32, blk []float32) {
+				// dct2d uses the opposite row/col convention from libjxl's
+				// ComputeScaledDCT (same transpose as idct2d), so place the LLF
+				// transposed into the block (it is transposed back with the rest
+				// before the IDCT).
 				D := dct2d(dc, cbx, cby)
 				for ly := 0; ly < cby; ly++ {
 					for lx := 0; lx < cbx; lx++ {
-						blk[ly*pw+lx] = D[ly*cbx+lx] * llfNorm * scale[ly] * scale[lx]
+						blk[lx*pw+ly] = D[ly*cbx+lx] * llfNorm * scale[ly] * scale[lx]
 					}
 				}
 			}

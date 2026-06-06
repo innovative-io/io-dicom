@@ -54,3 +54,41 @@ func TestVarDCTReconstruct(t *testing.T) {
 		t.Errorf("corners off: tl.R=%d br.R=%d", get(1, 1, 0), get(14, 14, 0))
 	}
 }
+
+// TestVarDCTReconstructMultiblock decodes a 64x64 lossy fixture that uses
+// variable block sizes (DCT8x8/16x16/32x32) end-to-end and checks the recovered
+// structure: a smooth gradient over most of the image plus a bright detail patch
+// in the bottom-right quadrant. Exercises the multiblock decode + LLF-from-DC
+// reconstruction path.
+func TestVarDCTReconstructMultiblock(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_rgb64x64.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := DecodeVarDCT(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT: %v", err)
+	}
+	if img.W != 64 || img.H != 64 || img.Channels != 3 {
+		t.Fatalf("got %dx%d ch=%d, want 64x64x3", img.W, img.H, img.Channels)
+	}
+	get := func(x, y, c int) int { return int(img.Pixels[(y*img.W+x)*3+c]) }
+	// Smooth region: red ramps left-to-right (R=x*4) along a top row.
+	if get(60, 2, 0)-get(2, 2, 0) < 150 {
+		t.Errorf("red gradient too small: %d..%d", get(2, 2, 0), get(60, 2, 0))
+	}
+	// Detail patch (x>=32,y>=32 checker of white) makes the bottom-right quadrant
+	// substantially brighter on average than the top-left.
+	avg := func(x0, y0 int) int {
+		s := 0
+		for y := y0; y < y0+16; y++ {
+			for x := x0; x < x0+16; x++ {
+				s += get(x, y, 0) + get(x, y, 1) + get(x, y, 2)
+			}
+		}
+		return s / (16 * 16 * 3)
+	}
+	if avg(40, 40) <= avg(8, 8) {
+		t.Errorf("detail patch not brighter: br=%d tl=%d", avg(40, 40), avg(8, 8))
+	}
+}
