@@ -67,11 +67,12 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			xcc := st.cmap.ytoXRatio(st.acm.ytoxMap[tile])
 			bcc := st.cmap.ytoBRatio(st.acm.ytobMap[tile])
 
+			cX, cY, cB := st.acCoeffs[0][idx], st.acCoeffs[1][idx], st.acCoeffs[2][idx]
 			var blkY, blkX, blkB [64]float32
 			for k := 1; k < 64; k++ {
-				blkY[k] = adjustQuantBias(1, st.acCoeffs[1][idx*64+k], &kDefaultQuantBias) * mat[1*64+k] * sdY
-				blkX[k] = adjustQuantBias(0, st.acCoeffs[0][idx*64+k], &kDefaultQuantBias) * mat[0*64+k] * sdX
-				blkB[k] = adjustQuantBias(2, st.acCoeffs[2][idx*64+k], &kDefaultQuantBias) * mat[2*64+k] * sdB
+				blkY[k] = adjustQuantBias(1, cY[k], &kDefaultQuantBias) * mat[1*64+k] * sdY
+				blkX[k] = adjustQuantBias(0, cX[k], &kDefaultQuantBias) * mat[0*64+k] * sdX
+				blkB[k] = adjustQuantBias(2, cB[k], &kDefaultQuantBias) * mat[2*64+k] * sdB
 			}
 			// Chroma-from-luma on AC coefficients.
 			for k := 1; k < 64; k++ {

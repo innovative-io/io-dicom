@@ -26,7 +26,7 @@ type vardctState struct {
 	coeffOrders   map[int][3][]int
 	acCode        *ansCode
 	acCtxMap      []uint8
-	acCoeffs      [3][]int32
+	acCoeffs      [3]map[int][]int32 // per channel: top-left block idx -> coeff block
 }
 
 // decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
@@ -145,12 +145,11 @@ func DecodeVarDCT(data []byte) (*Image, error) {
 // and is filled from the DC image during reconstruction).
 func decodeACGroup(b *bitReader, st *vardctState) error {
 	bw, bh := st.acm.bw, st.acm.bh
-	// AC coefficient blocks per channel (index 0=X,1=Y,2=B), bw*bh blocks of 64.
-	coeffs := [3][]int32{
-		make([]int32, bw*bh*64),
-		make([]int32, bw*bh*64),
-		make([]int32, bw*bh*64),
-	}
+	// AC coefficients per channel (0=X,1=Y,2=B), keyed by the varblock's top-left
+	// block index -> a coefficient block of strategy.numCoeffs() entries. A map
+	// (rather than a flat grid) avoids multiblock varblocks overlapping in
+	// storage. The LLF/DC slots stay 0 here and are filled from the DC image.
+	coeffs := [3]map[int][]int32{{}, {}, {}}
 	// Per-channel non-zero count grids for prediction.
 	nzeros := [3][]int32{
 		make([]int32, bw*bh),
@@ -203,7 +202,8 @@ func decodeACGroup(b *bitReader, st *vardctState) error {
 					prev = 1
 				}
 				order := st.coeffOrders[ord][c]
-				block := coeffs[c][idx*64 : idx*64+size]
+				block := make([]int32, size)
+				coeffs[c][idx] = block
 				for k := coveredBlocks; k < size && nz != 0; k++ {
 					ctx := histoOffset + zeroDensityContext(nz, k, coveredBlocks, log2cov, prev)
 					u := reader.readHybridUint(ctx, b, st.acCtxMap)
@@ -247,11 +247,10 @@ func decodeHfGlobal(b *bitReader, st *vardctState) error {
 
 	// used_acs: the set of AC strategies actually present in the frame.
 	var usedACS uint32
-	for _, s := range st.acm.strategy {
-		// Only the valid (top-left) blocks carry a real strategy; default 0
-		// (DCT) for the covered ones is harmless since DCT is always present
-		// when any block is DCT, but restrict to valid entries to be exact.
-		usedACS |= 1 << uint(s)
+	for i, s := range st.acm.strategy {
+		if st.acm.valid[i] { // only varblock top-lefts carry a real strategy
+			usedACS |= 1 << uint(s)
+		}
 	}
 	st.usedACS = usedACS
 
@@ -423,13 +422,18 @@ func decodeAcMetadata(b *bitReader, st *vardctState, groupID int) error {
 		ytoxMap:  append([]int32(nil), img.channel[base+0].pix...),
 		ytobMap:  append([]int32(nil), img.channel[base+1].pix...),
 	}
+	// covered tracks blocks already claimed by a multiblock varblock. valid marks
+	// only each varblock's top-left (libjxl IsFirstBlock) — the AC decode and
+	// reconstruction process those, not every covered 8x8 block. quantF is per
+	// 8x8 block (libjxl raw_quant_field) so EPF sigma is correct on covered cells.
+	covered := make([]bool, bw*bh)
 	num := 0
 	for by := 0; by < bh; by++ {
 		for bx := 0; bx < bw; bx++ {
 			idx := by*bw + bx
 			md.epf[idx] = uint8(epfCh[idx])
-			if md.valid[idx] {
-				continue // covered by an earlier multiblock strategy
+			if covered[idx] {
+				continue // part of an earlier multiblock strategy
 			}
 			if num >= count {
 				return errors.New("gojxl: AC metadata corrupted (count)")
@@ -449,15 +453,15 @@ func decodeAcMetadata(b *bitReader, st *vardctState, groupID int) error {
 			} else if qf > kQuantMax-1 {
 				qf = kQuantMax - 1
 			}
-			// Mark the covered blocks; the top-left carries the strategy.
 			for iy := 0; iy < cby; iy++ {
 				for ix := 0; ix < cbx; ix++ {
 					p := (by+iy)*bw + (bx + ix)
-					md.valid[p] = true
+					covered[p] = true
+					md.quantF[p] = 1 + qf
 				}
 			}
+			md.valid[idx] = true // top-left of this varblock only
 			md.strategy[idx] = t
-			md.quantF[idx] = 1 + qf
 			num++
 		}
 	}

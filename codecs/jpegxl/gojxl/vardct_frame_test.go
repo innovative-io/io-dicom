@@ -169,17 +169,22 @@ func TestVarDCTACCoeffs(t *testing.T) {
 	}
 	total := 0
 	for c := 0; c < 3; c++ {
-		if len(st.acCoeffs[c]) != st.acm.bw*st.acm.bh*64 {
-			t.Fatalf("channel %d coeff len %d, want %d", c, len(st.acCoeffs[c]), st.acm.bw*st.acm.bh*64)
-		}
-		for blk := 0; blk < st.acm.bw*st.acm.bh; blk++ {
-			if st.acCoeffs[c][blk*64] != 0 {
-				t.Errorf("channel %d block %d DC slot = %d, want 0 (AC must not touch LLF)", c, blk, st.acCoeffs[c][blk*64])
+		// One coeff block per varblock (keyed by top-left index).
+		for idx, block := range st.acCoeffs[c] {
+			if !st.acm.valid[idx] {
+				t.Errorf("channel %d: coeff block at non-top-left index %d", c, idx)
 			}
-		}
-		for _, v := range st.acCoeffs[c] {
-			if v != 0 {
-				total++
+			// The LLF/DC slots (the first coveredBlocks entries) must be zero.
+			llf := st.acm.strategy[idx].numBlocks()
+			for k := 0; k < llf; k++ {
+				if block[k] != 0 {
+					t.Errorf("channel %d block %d LLF[%d] = %d, want 0 (AC must not touch LLF)", c, idx, k, block[k])
+				}
+			}
+			for _, v := range block {
+				if v != 0 {
+					total++
+				}
 			}
 		}
 	}
