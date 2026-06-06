@@ -78,7 +78,10 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			var blkY, blkX, blkB [64]float32
 			for k := 1; k < 64; k++ {
 				blkY[k] = adjustQuantBias(1, st.acCoeffs[1][idx*64+k], &kDefaultQuantBias) * mat[1*64+k] * sdY
-				blkX[k] = adjustQuantBias(0, st.acCoeffs[0][idx*64+k], &kDefaultQuantBias) * mat[0*64+k] * sdX
+				// The X (red-green) AC coefficients are sign-inverted relative to
+				// the display X convention; negate them so the reconstructed
+				// chroma matches a conforming decoder. (DC X is already correct.)
+				blkX[k] = -adjustQuantBias(0, st.acCoeffs[0][idx*64+k], &kDefaultQuantBias) * mat[0*64+k] * sdX
 				blkB[k] = adjustQuantBias(2, st.acCoeffs[2][idx*64+k], &kDefaultQuantBias) * mat[2*64+k] * sdB
 			}
 			// Chroma-from-luma on AC coefficients.

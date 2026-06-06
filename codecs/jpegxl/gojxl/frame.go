@@ -32,6 +32,8 @@ type FrameHeader struct {
 	IsLast         bool
 	CustomSize     bool
 	LoopFilter     loopFilter
+	XQMScale       uint32
+	BQMScale       uint32
 	FrameW, FrameH uint32
 	OriginX        int32
 	OriginY        int32
@@ -183,8 +185,11 @@ func readFrameHeader(b *bitReader, meta *ImageMetadata) (FrameHeader, error) {
 	if h.Encoding == frameModular {
 		h.GroupSizeShift = b.ReadBits(2)
 	} else if h.Encoding == frameVarDCT && meta.XYBEncoded {
-		b.ReadBits(3) // x_qm_scale
-		b.ReadBits(3) // b_qm_scale
+		h.XQMScale = b.ReadBits(3) // x_qm_scale (default 3)
+		h.BQMScale = b.ReadBits(3) // b_qm_scale (default 2)
+	} else {
+		h.XQMScale = 3
+		h.BQMScale = 2
 	}
 
 	if h.Type != frameReferenceOnly {
