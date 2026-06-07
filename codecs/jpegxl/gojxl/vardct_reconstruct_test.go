@@ -204,3 +204,41 @@ func TestVarDCTReconstructHighFreq(t *testing.T) {
 		t.Error("no horizontal variation — decode likely wrong")
 	}
 }
+
+// TestVarDCTReconstructFullTransformSet decodes a 512x512 textured fixture whose
+// encoding exercises the full common transform set in a single frame: square
+// DCT8/16/32, the rectangular DCTs (DCT16x32/32x16/64x32/32x64/8x16), and the
+// special transforms (DCT2x2, DCT4x8, DCT8x4) — across 4 AC groups with CfL and
+// both loop filters active. It is byte-exact vs djxl (mean ~0.24). This is the
+// regression guard for the special-transform inverses and the x/b_dm_multiplier
+// AC dequant scaling. The source mixes smooth sinusoids with random detail tiles.
+func TestVarDCTReconstructFullTransformSet(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_rgb512x512.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := DecodeVarDCT(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT: %v", err)
+	}
+	if img.W != 512 || img.H != 512 || img.Channels != 3 {
+		t.Fatalf("got %dx%d ch=%d, want 512x512x3", img.W, img.H, img.Channels)
+	}
+	// Sanity: a textured image must show substantial local variation and a wide
+	// value range in every channel (a desync would flatten or saturate it).
+	for c := 0; c < 3; c++ {
+		lo, hi := 255, 0
+		for i := 0; i < img.W*img.H; i++ {
+			v := int(img.Pixels[i*3+c])
+			if v < lo {
+				lo = v
+			}
+			if v > hi {
+				hi = v
+			}
+		}
+		if hi-lo < 120 {
+			t.Errorf("channel %d range too narrow (%d..%d) — decode likely wrong", c, lo, hi)
+		}
+	}
+}

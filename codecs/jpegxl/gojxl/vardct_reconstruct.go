@@ -93,6 +93,21 @@ func adaptiveDCSmoothing(planes [3][]float32, w, h int, dcFactor [3]float32) {
 	}
 }
 
+// plainInverseDCT performs the inverse of libjxl's ComputeScaledIDCT<ROWS,COLS>
+// for a dequantized coefficient block in libjxl storage layout: reinterpret to
+// row-major [ROWS][COLS], apply the uniform normalization bridge sqrt(ROWS*COLS),
+// then the separable orthonormal inverse DCT. pw=COLS (width), ph=ROWS (height).
+// The caller must have already placed any LLF/DC into blk. Returns ph*pw pixels
+// row-major (pix[r*pw+c]). blk is consumed (modified).
+func plainInverseDCT(blk []float32, pw, ph int) []float32 {
+	rm := transposeRect(blk, pw, ph, ph >= pw)
+	bridge := float32(math.Sqrt(float64(pw * ph)))
+	for k := range rm {
+		rm[k] *= bridge
+	}
+	return idct2d(rm, pw, ph)
+}
+
 // reconstructVarDCT turns the decoded VarDCT state into an 8-bit sRGB image.
 // Supports the square DCT strategies (DCT8x8/16x16/32x32), XYB, single group.
 // Pipeline per varblock: dequant AC -> chroma-from-luma -> LLF from the DC image
@@ -107,8 +122,9 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			continue
 		}
 		t := st.acm.strategy[i]
-		if !t.usesPlainDCT() {
-			return nil, errors.New("gojxl: VarDCT reconstruction: special transforms (IDENTITY/DCT2x2/DCT4x4/DCT4x8/DCT8x4/AFV) not yet supported")
+		switch t {
+		case acAFV0, acAFV1, acAFV2, acAFV3:
+			return nil, errors.New("gojxl: VarDCT reconstruction: AFV transforms not yet supported")
 		}
 		if resampleScale1D(t.coveredBlocksX()) == nil || resampleScale1D(t.coveredBlocksY()) == nil {
 			return nil, errors.New("gojxl: VarDCT reconstruction: DCT128/256 not yet supported")
@@ -122,6 +138,11 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 	mul := float32(1.0) / float32(int(1)<<uint(st.dc.extraPrecision))
 	invQuantDC := q.invGlobalScale / float32(q.quantDC)
 	mulDC := [3]float32{invQuantDC * kDCQuant[0], invQuantDC * kDCQuant[1], invQuantDC * kDCQuant[2]}
+	// AC dequant per-channel multipliers for X and B (dec_cache.h): the X/B
+	// quant matrices are scaled by pow(1/1.25, qm_scale-2). Defaults x_qm_scale=3
+	// (-> 0.8), b_qm_scale=2 (-> 1.0). Applied to the AC dequant only, not DC.
+	xDM := float32(math.Pow(1.0/1.25, float64(st.fh.XQMScale)-2.0))
+	bDM := float32(math.Pow(1.0/1.25, float64(st.fh.BQMScale)-2.0))
 	cflFacX := st.cmap.ytoXRatio(st.cmap.ytoxDC)
 	cflFacB := st.cmap.ytoBRatio(st.cmap.ytobDC)
 
@@ -180,11 +201,10 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			if err != nil {
 				return nil, err
 			}
-			bridge := float32(math.Sqrt(float64(nc)))
 
 			qf := st.acm.quantF[idx]
 			sdY := q.invGlobalScale / float32(qf)
-			sdX, sdB := sdY, sdY // x/b_dm_multiplier default 1
+			sdX, sdB := sdY*xDM, sdY*bDM
 			tile := (by/kColorTileDimInBlocks)*st.acm.ctW + bx/kColorTileDimInBlocks
 			xcc := st.cmap.ytoXRatio(st.acm.ytoxMap[tile])
 			bcc := st.cmap.ytoBRatio(st.acm.ytobMap[tile])
@@ -244,19 +264,28 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			placeLLF(dcX, blkX)
 			placeLLF(dcB, blkB)
 
-			// Reinterpret into row-major [ROWS][COLS], apply the uniform
-			// normalization bridge, then the separable inverse DCT.
-			rmY := transposeRect(blkY, pw, ph, transpose)
-			rmX := transposeRect(blkX, pw, ph, transpose)
-			rmB := transposeRect(blkB, pw, ph, transpose)
-			for k := 0; k < nc; k++ {
-				rmY[k] *= bridge
-				rmX[k] *= bridge
-				rmB[k] *= bridge
+			// Inverse transform each channel block to pixels. Plain DCTs use the
+			// separable IDCT; the special transforms (IDENTITY/DCT2x2/DCT4x4/
+			// DCT4x8/DCT8x4) have bespoke inverses reading the block directly.
+			inverse := func(blk []float32) []float32 {
+				switch t {
+				case acDCT2X2:
+					return inverseDCT2X2(blk)
+				case acIDENTITY:
+					return inverseIdentity(blk)
+				case acDCT4X4:
+					return inverseDCT4X4(blk)
+				case acDCT4X8:
+					return inverseDCT4X8(blk)
+				case acDCT8X4:
+					return inverseDCT8X4(blk)
+				default:
+					return plainInverseDCT(blk, pw, ph)
+				}
 			}
-			pixY := idct2d(rmY, pw, ph)
-			pixX := idct2d(rmX, pw, ph)
-			pixB := idct2d(rmB, pw, ph)
+			pixY := inverse(blkY)
+			pixX := inverse(blkX)
+			pixB := inverse(blkB)
 
 			for yy := 0; yy < ph; yy++ {
 				py := by*acBlockDim + yy
