@@ -510,10 +510,12 @@ var kOrderEnc = [4]u32d{u32Val(0x5F), u32Val(0x13), u32Val(0), u32Bits(kNumOrder
 func decodeHfGlobal(b *bitReader, st *vardctState) error {
 	// AC DequantMatrices. all_default -> use the built-in default library.
 	allDefault := b.ReadBits(1) == 1
-	if !allDefault {
-		return errors.New("gojxl: non-default AC dequant matrices not yet supported")
-	}
 	st.quantLib = buildDefaultQuantLibrary()
+	if !allDefault {
+		if err := decodeDequantMatrices(b, st); err != nil {
+			return err
+		}
+	}
 
 	// Number of histogram sets.
 	numHistoBits := ceilLog2Nonzero(st.fd.numGroups)
