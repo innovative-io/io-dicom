@@ -55,8 +55,6 @@ var acLog2CoveredBlocks = [acNumValidStrategies]uint8{
 	6, 5, 5, 8, 7, 7, 10, 9, 9,
 }
 
-func (t acStrategyType) valid() bool { return uint32(t) < acNumValidStrategies }
-
 func (t acStrategyType) coveredBlocksX() int    { return int(acCoveredBlocksX[t]) }
 func (t acStrategyType) coveredBlocksY() int    { return int(acCoveredBlocksY[t]) }
 func (t acStrategyType) log2CoveredBlocks() int { return int(acLog2CoveredBlocks[t]) }
@@ -70,9 +68,6 @@ func (t acStrategyType) numCoeffs() int { return t.numBlocks() * acBlockDim * ac
 // pixelWidth / pixelHeight give the transform's pixel extent.
 func (t acStrategyType) pixelWidth() int  { return t.coveredBlocksX() * acBlockDim }
 func (t acStrategyType) pixelHeight() int { return t.coveredBlocksY() * acBlockDim }
-
-// isMultiblock reports whether the strategy covers more than one 8x8 block.
-func (t acStrategyType) isMultiblock() bool { return t.numBlocks() > 1 }
 
 // usesPlainDCT reports whether the inverse transform is a plain separable DCT of
 // the covered region (true for the DCT* strategies). The special transforms —
