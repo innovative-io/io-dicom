@@ -14,6 +14,10 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		{1, 1, 1, 8}, {8, 4, 1, 8}, {16, 16, 1, 8}, {17, 37, 1, 8},
 		{8, 8, 3, 8}, {10, 7, 1, 16}, {32, 32, 3, 8}, {64, 48, 3, 16},
 		{100, 100, 1, 8}, {300, 200, 3, 8}, {1024, 3, 1, 8},
+		// Multi-group (> one group): exercises the per-group section layout, the
+		// shared global histogram and group-local Gradient prediction.
+		{1025, 1, 1, 8}, {1100, 900, 1, 8}, {1400, 1100, 3, 8},
+		{2048, 1500, 3, 16}, {2050, 50, 1, 8},
 	}
 	for _, c := range cases {
 		rng := rand.New(rand.NewSource(int64(c.w*131 + c.h*17 + c.nc*7 + c.bd)))

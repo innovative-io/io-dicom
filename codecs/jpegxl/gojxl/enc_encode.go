@@ -2,19 +2,60 @@ package gojxl
 
 import "errors"
 
-// Pure-Go lossless Modular JPEG XL encoder. Scope: single frame, single group
-// (images up to 1024x1024), grayscale or RGB, 8- or 16-bit, no transforms, a
-// single Gradient-predictor MA tree, flat ANS histograms. It is the inverse of
-// decodeModularFrame and is validated by round-tripping through the decoder.
+// Pure-Go lossless Modular JPEG XL encoder. Scope: single frame, grayscale or
+// RGB, 8- or 16-bit, no transforms, a single Gradient-predictor MA tree, flat
+// ANS histograms. Images larger than one group are split into byte-aligned
+// group sections sharing one global histogram; each group is Gradient-predicted
+// independently (matching the decoder). It is the inverse of decodeModularFrame,
+// validated by round-tripping through the decoder and byte-exact against djxl.
 
 func packSigned(v int32) uint32 { return (uint32(v) << 1) ^ uint32(v>>31) }
 
+// maTreeTokens is the encoded MA tree: a single Gradient-predictor leaf.
+var maTreeTokens = []encToken{
+	{ctxProperty, 0}, // property+1 = 0 → leaf
+	{ctxPredictor, predGradient},
+	{ctxOffset, 0},
+	{ctxMultiplierLog, 0},
+	{ctxMultiplierBit, 0},
+}
+
+// gradientTokens Gradient-predicts the [x0,x0+rw) x [y0,y0+rh) rect of plane
+// (full-width w) as an independent sub-image — borders are at the rect edges,
+// matching how the decoder predicts each modular group — and emits one residual
+// token per pixel in raster order.
+func gradientTokens(plane []int32, w, x0, y0, rw, rh int, dst []encToken) []encToken {
+	get := func(lx, ly int) int64 { return int64(plane[(y0+ly)*w+(x0+lx)]) }
+	for ly := 0; ly < rh; ly++ {
+		for lx := 0; lx < rw; lx++ {
+			var left, top, topleft int64
+			if lx > 0 {
+				left = get(lx-1, ly)
+			} else if ly > 0 {
+				left = get(lx, ly-1)
+			}
+			top = left
+			if ly > 0 {
+				top = get(lx, ly-1)
+			}
+			topleft = left
+			if lx > 0 && ly > 0 {
+				topleft = get(lx-1, ly-1)
+			}
+			guess := clampedGradient(left, top, topleft)
+			residual := int32(get(lx, ly) - guess)
+			dst = append(dst, encToken{ctx: 0, value: packSigned(residual)})
+		}
+	}
+	return dst
+}
+
 // Encode compresses interleaved samples (matching Decode's output layout: row-
 // major, channel-interleaved, little-endian for >8-bit) into a lossless Modular
-// JPEG XL codestream.
+// JPEG XL codestream. Images larger than one group are split into groups.
 func Encode(pixels []byte, w, h, channels, bitdepth int) ([]byte, error) {
-	if w <= 0 || h <= 0 || w > 1024 || h > 1024 {
-		return nil, errors.New("gojxl: encode supports 1..1024 px per dimension")
+	if w <= 0 || h <= 0 || w > 1<<16 || h > 1<<16 {
+		return nil, errors.New("gojxl: encode supports 1..65536 px per dimension")
 	}
 	if channels != 1 && channels != 3 {
 		return nil, errors.New("gojxl: encode supports 1 or 3 channels")
@@ -46,77 +87,144 @@ func Encode(pixels []byte, w, h, channels, bitdepth int) ([]byte, error) {
 		}
 	}
 
-	// Tokenize all channels (decode order: channel 0 fully, then channel 1...),
-	// using the Gradient predictor with the decoder's border rules.
+	gss := groupSizeShiftFor(w, h)
+	fd := computeFrameDimensions(uint32(w), uint32(h), gss, 1)
+	if fd.numGroups == 1 {
+		return encodeSingleGroup(planes, w, h, channels, bitdepth, gss)
+	}
+	return encodeMultiGroup(planes, w, h, channels, bitdepth, gss, fd)
+}
+
+// encodeSingleGroup writes the whole frame as one section (LfGlobal contains the
+// tree, histograms and all channel data).
+func encodeSingleGroup(planes [][]int32, w, h, channels, bitdepth int, gss uint32) ([]byte, error) {
 	var chanTokens []encToken
 	for c := 0; c < channels; c++ {
-		p := planes[c]
-		get := func(x, y int) int64 { return int64(p[y*w+x]) }
-		for y := 0; y < h; y++ {
-			for x := 0; x < w; x++ {
-				var left, top, topleft int64
-				if x > 0 {
-					left = get(x-1, y)
-				} else if y > 0 {
-					left = get(x, y-1)
-				}
-				top = left
-				if y > 0 {
-					top = get(x, y-1)
-				}
-				topleft = left
-				if x > 0 && y > 0 {
-					topleft = get(x-1, y-1)
-				}
-				guess := clampedGradient(left, top, topleft)
-				residual := int32(get(x, y) - guess)
-				chanTokens = append(chanTokens, encToken{ctx: 0, value: packSigned(residual)})
-			}
+		chanTokens = gradientTokens(planes[c], w, 0, 0, w, h, chanTokens)
+	}
+
+	lf := newBitWriter()
+	lf.WriteBool(true) // DequantMatrices DC all_default
+	lf.WriteBits(1, 1) // has_tree
+	encodeANSStream(lf, maTreeTokens, numTreeContexts)
+	chState := encodeANSHeader(lf, chanTokens, 1)
+	lf.WriteBool(true) // use_global_tree
+	lf.WriteBool(true) // wp_header all_default
+	lf.WriteU32(0, u32Val(0), u32Val(1), u32Off(4, 2), u32Off(8, 18))
+	encodeANSData(lf, chState)
+	lfBytes := lf.Bytes()
+
+	m := newBitWriter()
+	writeContainerHeaders(m, w, h, channels, bitdepth, gss)
+	m.WriteBits(0, 1) // TOC: no permutation
+	m.ZeroPadToByte()
+	writeTocSize(m, len(lfBytes))
+	m.ZeroPadToByte()
+
+	return assemble(m.Bytes(), [][]byte{lfBytes}), nil
+}
+
+// encodeMultiGroup writes the LfGlobal section (tree + global histogram + group
+// header, no pixel data) followed by one byte-aligned section per group, each
+// Gradient-predicted independently and rANS-coded with the shared histogram.
+func encodeMultiGroup(planes [][]int32, w, h, channels, bitdepth int, gss uint32, fd frameDimensions) ([]byte, error) {
+	groupDim := int(fd.groupDim)
+	numGroups := int(fd.numGroups)
+	xg := int(fd.xsizeGroups)
+
+	// Per-group token lists, in decode order (channel 0..N within the group's
+	// rect), and the global maximum token for the shared flat histogram.
+	perGroup := make([][]encTokenized, numGroups)
+	maxToken := 0
+	for g := 0; g < numGroups; g++ {
+		x0 := (g % xg) * groupDim
+		y0 := (g / xg) * groupDim
+		rw := minInt(groupDim, w-x0)
+		rh := minInt(groupDim, h-y0)
+		var toks []encToken
+		for c := 0; c < channels; c++ {
+			toks = gradientTokens(planes[c], w, x0, y0, rw, rh, toks)
+		}
+		tks, mx := tokenizeAll(toks)
+		perGroup[g] = tks
+		if mx > maxToken {
+			maxToken = mx
 		}
 	}
 
-	// ----- frame data section (LfGlobal) -----
-	fd := newBitWriter()
-	fd.WriteBool(true) // DequantMatrices DC all_default
-	fd.WriteBits(1, 1) // has_tree
-	// MA tree: a single Gradient leaf.
-	treeTokens := []encToken{
-		{ctxProperty, 0}, // property+1 = 0 → leaf
-		{ctxPredictor, predGradient},
-		{ctxOffset, 0},
-		{ctxMultiplierLog, 0},
-		{ctxMultiplierBit, 0},
-	}
-	encodeANSStream(fd, treeTokens, numTreeContexts)
-	// Channel entropy header (before the group header), data (after it).
-	chState := encodeANSHeader(fd, chanTokens, 1)
-	// Group header: use global tree, default WP, no transforms.
-	fd.WriteBool(true) // use_global_tree
-	fd.WriteBool(true) // wp_header all_default
-	fd.WriteU32(0, u32Val(0), u32Val(1), u32Off(4, 2), u32Off(8, 18))
-	encodeANSData(fd, chState)
-	fdBytes := fd.Bytes()
+	// ----- LfGlobal section: tree + shared histogram header + group header -----
+	lf := newBitWriter()
+	lf.WriteBool(true) // DequantMatrices DC all_default
+	lf.WriteBits(1, 1) // has_tree
+	encodeANSStream(lf, maTreeTokens, numTreeContexts)
+	revMap, freqs := writeANSFlatHeader(lf, maxToken+1, 1)
+	lf.WriteBool(true) // use_global_tree
+	lf.WriteBool(true) // wp_header all_default
+	lf.WriteU32(0, u32Val(0), u32Val(1), u32Off(4, 2), u32Off(8, 18))
+	lfBytes := lf.Bytes()
 
-	// ----- main stream -----
+	// ----- per-group sections: group header + rANS data (shared histogram) -----
+	groupBytes := make([][]byte, numGroups)
+	for g := 0; g < numGroups; g++ {
+		gw := newBitWriter()
+		gw.WriteBool(true) // use_global_tree
+		gw.WriteBool(true) // wp_header all_default
+		gw.WriteU32(0, u32Val(0), u32Val(1), u32Off(4, 2), u32Off(8, 18))
+		encodeANSData(gw, ansEncState{tokens: perGroup[g], revMap: revMap, freqs: freqs})
+		groupBytes[g] = gw.Bytes()
+	}
+
+	// ----- main stream: container headers + multi-section TOC -----
 	m := newBitWriter()
+	writeContainerHeaders(m, w, h, channels, bitdepth, gss)
+	m.WriteBits(0, 1) // TOC: no permutation
+	m.ZeroPadToByte()
+	// TOC order: LfGlobal, then numDCGroups+1 empty DC/HfGlobal sections, then the
+	// modular groups (toc.cc / acGroupIndex = 2 + numDCGroups + g).
+	writeTocSize(m, len(lfBytes))
+	for i := 0; i < int(fd.numDCGroups)+1; i++ {
+		writeTocSize(m, 0)
+	}
+	sections := make([][]byte, 0, 1+numGroups)
+	sections = append(sections, lfBytes)
+	for g := 0; g < numGroups; g++ {
+		writeTocSize(m, len(groupBytes[g]))
+		sections = append(sections, groupBytes[g])
+	}
+	m.ZeroPadToByte()
+
+	return assemble(m.Bytes(), sections), nil
+}
+
+// writeContainerHeaders writes the size header, image metadata, transform data
+// and frame header (everything before the TOC).
+func writeContainerHeaders(m *bitWriter, w, h, channels, bitdepth int, gss uint32) {
 	writeSizeHeader(m, w, h)
 	writeImageMetadata(m, channels, bitdepth)
 	m.WriteBool(true) // transform_data all_default
 	m.ZeroPadToByte()
-	gss := groupSizeShiftFor(w, h)
 	writeFrameHeader(m, gss)
-	// TOC (single section).
-	m.WriteBits(0, 1) // no permutation
-	m.ZeroPadToByte()
-	m.WriteU32(uint32(len(fdBytes)), u32Bits(10), u32Off(14, 1024), u32Off(22, 17408), u32Off(30, 4211712))
-	m.ZeroPadToByte()
-	mainBytes := m.Bytes()
+}
 
-	out := make([]byte, 0, 2+len(mainBytes)+len(fdBytes))
+// writeTocSize writes one TOC entry size with the toc.cc U32 distribution.
+func writeTocSize(m *bitWriter, n int) {
+	m.WriteU32(uint32(n), u32Bits(10), u32Off(14, 1024), u32Off(22, 17408), u32Off(30, 4211712))
+}
+
+// assemble concatenates the codestream signature, main stream and the section
+// bytes (in section-index order).
+func assemble(mainBytes []byte, sections [][]byte) []byte {
+	total := 2 + len(mainBytes)
+	for _, s := range sections {
+		total += len(s)
+	}
+	out := make([]byte, 0, total)
 	out = append(out, 0xFF, 0x0A)
 	out = append(out, mainBytes...)
-	out = append(out, fdBytes...)
-	return out, nil
+	for _, s := range sections {
+		out = append(out, s...)
+	}
+	return out
 }
 
 func groupSizeShiftFor(w, h int) uint32 {
