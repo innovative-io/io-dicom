@@ -314,28 +314,51 @@ func numTocEntries(numGroups, numDCGroups, numPasses uint32) uint32 {
 	return acGroupIndex(0, 0, numGroups, numDCGroups) + numGroups*numPasses
 }
 
-// readTOC reads the table-of-contents section sizes (toc.cc ReadToc).
-func readTOC(b *bitReader, tocEntries uint32) ([]uint32, error) {
+// readTOC reads the table-of-contents section sizes (toc.cc ReadToc). When the
+// TOC is permuted (common for large multi-group frames) it also returns the
+// Lehmer-coded permutation that maps logical section index -> stored order; perm
+// is nil for the unpermuted case.
+func readTOC(b *bitReader, tocEntries uint32) (sizes []uint32, perm []uint32, err error) {
 	if tocEntries > 65536 {
-		return nil, errors.New("gojxl: too many toc entries")
+		return nil, nil, errors.New("gojxl: too many toc entries")
 	}
-	permuted := b.ReadBits(1) == 1
-	if permuted {
-		// Permutation (Lehmer-coded). Rare for small images; not yet supported.
-		return nil, errors.New("gojxl: TOC permutation not supported")
+	if b.ReadBits(1) == 1 {
+		perm, err = decodePermutation(b, 0, int(tocEntries))
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := b.JumpToByteBoundary(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	sizes := make([]uint32, tocEntries)
+	sizes = make([]uint32, tocEntries)
 	for i := range sizes {
 		sizes[i] = b.ReadU32(u32Bits(10), u32Off(14, 1024), u32Off(22, 17408), u32Off(30, 4211712))
 	}
 	if err := b.JumpToByteBoundary(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !b.ok() {
-		return nil, errTruncated
+		return nil, nil, errTruncated
 	}
-	return sizes, nil
+	return sizes, perm, nil
+}
+
+// decodePermutation decodes a Lehmer-coded permutation of `size` entries
+// (coeff_order.cc DecodePermutation): its own ANS-coded histogram set over
+// kPermutationContexts contexts.
+func decodePermutation(b *bitReader, skip, size int) ([]uint32, error) {
+	code, ctxMap, err := decodeHistograms(b, kPermutationContexts, false)
+	if err != nil {
+		return nil, err
+	}
+	reader := newANSSymbolReader(code, b, 0)
+	perm, err := readPermutation(skip, size, reader, b, ctxMap)
+	if err != nil {
+		return nil, err
+	}
+	if !reader.checkFinalState() {
+		return nil, errors.New("gojxl: TOC permutation ANS final state failed")
+	}
+	return perm, nil
 }

@@ -34,7 +34,7 @@ func parseToFrame(t *testing.T, data []byte) (Header, FrameHeader, []uint32, *bi
 		t.Fatalf("frame header: %v", err)
 	}
 	fd := computeFrameDimensions(sh.Xsize, sh.Ysize, fh.GroupSizeShift, fh.Upsampling)
-	toc, err := readTOC(b, numTocEntries(fd.numGroups, fd.numDCGroups, fh.NumPasses))
+	toc, _, err := readTOC(b, numTocEntries(fd.numGroups, fd.numDCGroups, fh.NumPasses))
 	if err != nil {
 		t.Fatalf("toc: %v", err)
 	}

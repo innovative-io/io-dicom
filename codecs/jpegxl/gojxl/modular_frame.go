@@ -38,9 +38,12 @@ func decodeModularFrame(data []byte) ([]modChannel, *ImageMetadata, error) {
 		return nil, nil, errors.New("gojxl: VarDCT frames not yet supported")
 	}
 	fd := computeFrameDimensions(sh.Xsize, sh.Ysize, fh.GroupSizeShift, fh.Upsampling)
-	tocSizes, err := readTOC(b, numTocEntries(fd.numGroups, fd.numDCGroups, fh.NumPasses))
+	tocSizes, tocPerm, err := readTOC(b, numTocEntries(fd.numGroups, fd.numDCGroups, fh.NumPasses))
 	if err != nil {
 		return nil, nil, err
+	}
+	if tocPerm != nil {
+		return nil, nil, errors.New("gojxl: permuted TOC for Modular frames not yet supported")
 	}
 	if fh.Flags != 0 {
 		return nil, nil, errors.New("gojxl: frame flags (patches/splines/noise/DC) not yet supported")

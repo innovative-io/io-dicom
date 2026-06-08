@@ -340,3 +340,29 @@ func TestVarDCTReconstructGrayscale(t *testing.T) {
 		t.Errorf("grayscale range too narrow (%d..%d)", lo, hi)
 	}
 }
+
+// TestVarDCTReconstructMultiDCGroup decodes a 2304x2304 fixture that exercises,
+// in one frame: a permuted TOC, four DC groups, per-group local modular trees
+// (no global tree), and four AC histogram sets — across 81 AC groups. Byte-exact
+// vs djxl (mean ~0.22) on the local fixture. Sanity-checks the gradient corners.
+func TestVarDCTReconstructMultiDCGroup(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_big2304.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := DecodeVarDCT(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT: %v", err)
+	}
+	if img.W != 2304 || img.H != 2304 || img.Channels != 3 {
+		t.Fatalf("got %dx%d ch=%d, want 2304x2304x3", img.W, img.H, img.Channels)
+	}
+	get := func(x, y, c int) int { return int(img.Pixels[(y*img.W+x)*3+c]) }
+	// Source gradient R=x, G=y: opposite corners differ widely in R and G.
+	if get(2290, 10, 0)-get(10, 10, 0) < 180 {
+		t.Errorf("red gradient too small: %d..%d", get(10, 10, 0), get(2290, 10, 0))
+	}
+	if get(10, 2290, 1)-get(10, 10, 1) < 180 {
+		t.Errorf("green gradient too small: %d..%d", get(10, 10, 1), get(10, 2290, 1))
+	}
+}
