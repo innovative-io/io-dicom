@@ -8,13 +8,15 @@ import (
 
 // gojpegxlBackend is the built-in pure-Go JPEG XL decoder. It handles the
 // lossless Modular subset (single frame, RCT/Palette/Squeeze, single- and
-// multi-group) and the lossy VarDCT subset (XYB, the full common transform set
-// — square/rectangular/large DCTs plus DCT2x2/4x4/4x8/8x4/IDENTITY — single
-// pass, single AC histogram set, single DC group, with CfL/Gaborish/EPF).
-// Inputs outside those subsets (VarDCT with AFV or DCT128-256, multi-pass,
-// JPEG recompression, animation, ICC, non-identity orientation) return an error
-// so a higher-priority native backend (libjxl, when built with -tags libjxl)
-// can take over. Encoding supports the lossless Modular subset via gojxl.Encode.
+// multi-group) and the lossy VarDCT subset for XYB-encoded RGB/grayscale: the
+// full common transform set (square/rectangular/large DCTs, DCT2x2/4x4/4x8/8x4,
+// IDENTITY, AFV0-3), multi-group, multi-DC-group, permuted TOC, local/global
+// modular trees, one or more AC histogram sets, multiple passes (progressive),
+// CfL, Gaborish and EPF — at any image size. Inputs outside those subsets
+// (VarDCT with the rarely-used DCT128/256, non-XYB color, extra channels, JPEG
+// recompression, animation, ICC, non-identity orientation) return an error so a
+// higher-priority native backend (libjxl, when built with -tags libjxl) can
+// take over. Encoding supports the lossless Modular subset via gojxl.Encode.
 type gojpegxlBackend struct{}
 
 func (gojpegxlBackend) Name() string { return "gojpegxl" }

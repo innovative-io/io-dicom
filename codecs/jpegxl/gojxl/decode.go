@@ -14,10 +14,12 @@ type Image struct {
 
 // Decode decodes a single-frame JPEG XL image. It supports the lossless Modular
 // subset (RCT/Palette/Squeeze, single- and multi-group) and the lossy VarDCT
-// subset (XYB, the full common transform set, single pass / one AC histogram
-// set, single DC group). It returns an error for inputs outside those subsets
-// (VarDCT with AFV/DCT128-256/multi-pass/multi-DC-group, animation, ICC,
-// non-identity orientation, ...), so a caller can fall back to another backend.
+// subset for XYB RGB/grayscale: the full common transform set, multi-group,
+// multi-DC-group, permuted TOC, local/global trees, one-or-more AC histogram
+// sets, multiple passes, CfL, Gaborish and EPF, at any size. It returns an error
+// for inputs outside those subsets (VarDCT with DCT128/256, non-XYB color, extra
+// channels, animation, ICC, non-identity orientation, ...), so a caller can fall
+// back to another backend.
 func Decode(data []byte) (*Image, error) {
 	// Dispatch on the frame encoding: VarDCT (lossy) vs Modular (lossless).
 	if enc, err := peekFrameEncoding(data); err == nil && enc == frameVarDCT {
