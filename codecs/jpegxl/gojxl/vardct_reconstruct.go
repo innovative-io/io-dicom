@@ -333,6 +333,18 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 		planeX, planeY, planeB = planes[0], planes[1], planes[2]
 	}
 
+	// Grayscale images carry their luminance in all three (equal) sRGB channels
+	// after XYB conversion; emit a single channel so the output matches the
+	// declared colour space (medical imagery is commonly grayscale).
+	if st.meta.Color.ColorSpace == csGray {
+		pix := make([]byte, W*H)
+		for i := 0; i < W*H; i++ {
+			r, _, _ := xybToLinearRGB(planeX[i], planeY[i], planeB[i])
+			pix[i] = clamp8(linearToSRGB(r))
+		}
+		return &Image{W: W, H: H, Channels: 1, BitDepth: 8, Pixels: pix}, nil
+	}
+
 	pix := make([]byte, W*H*3)
 	for i := 0; i < W*H; i++ {
 		r, g, b := xybToLinearRGB(planeX[i], planeY[i], planeB[i])

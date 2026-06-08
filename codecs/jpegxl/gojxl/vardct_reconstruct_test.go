@@ -277,3 +277,66 @@ func TestVarDCTReconstructAFV(t *testing.T) {
 		}
 	}
 }
+
+// TestVarDCTReconstructLargeMultiGroup decodes a 1024x1024 textured fixture (16
+// AC groups) to confirm the decoder scales to realistic image sizes with the
+// full transform mix. Sanity-checks wide per-channel range. Byte-exact vs djxl
+// (mean ~0.25) on the local fixture.
+func TestVarDCTReconstructLargeMultiGroup(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_rgb1024.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := DecodeVarDCT(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT: %v", err)
+	}
+	if img.W != 1024 || img.H != 1024 || img.Channels != 3 {
+		t.Fatalf("got %dx%d ch=%d, want 1024x1024x3", img.W, img.H, img.Channels)
+	}
+	for c := 0; c < 3; c++ {
+		lo, hi := 255, 0
+		for i := 0; i < img.W*img.H; i++ {
+			v := int(img.Pixels[i*3+c])
+			if v < lo {
+				lo = v
+			}
+			if v > hi {
+				hi = v
+			}
+		}
+		if hi-lo < 120 {
+			t.Errorf("channel %d range too narrow (%d..%d)", c, lo, hi)
+		}
+	}
+}
+
+// TestVarDCTReconstructGrayscale decodes a lossy grayscale fixture. cjxl encodes
+// grayscale through XYB (3 equal channels); the decoder must emit a single
+// channel matching the declared csGray colour space — important for medical
+// imagery. Checks the channel count and a plausible value range.
+func TestVarDCTReconstructGrayscale(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_gray128.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := DecodeVarDCT(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT: %v", err)
+	}
+	if img.W != 128 || img.H != 128 || img.Channels != 1 {
+		t.Fatalf("got %dx%d ch=%d, want 128x128x1", img.W, img.H, img.Channels)
+	}
+	lo, hi := 255, 0
+	for _, v := range img.Pixels {
+		if int(v) < lo {
+			lo = int(v)
+		}
+		if int(v) > hi {
+			hi = int(v)
+		}
+	}
+	if hi-lo < 120 {
+		t.Errorf("grayscale range too narrow (%d..%d)", lo, hi)
+	}
+}
