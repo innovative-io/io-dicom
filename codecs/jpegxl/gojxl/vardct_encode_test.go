@@ -63,3 +63,36 @@ func TestEncodeVarDCTRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestEncodeVarDCTMultiGroup checks the encoder splits images larger than one
+// group (256px) into the decoder's section layout and round-trips.
+func TestEncodeVarDCTMultiGroup(t *testing.T) {
+	for _, sz := range []struct{ w, h int }{{300, 200}, {512, 300}, {200, 600}} {
+		w, h := sz.w, sz.h
+		raw := make([]byte, w*h*3)
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				i := (y*w + x) * 3
+				raw[i] = byte(x * 255 / w)
+				raw[i+1] = byte(y * 255 / h)
+				raw[i+2] = 128
+			}
+		}
+		enc, err := EncodeVarDCT(raw, w, h, 3, 16384)
+		if err != nil {
+			t.Fatalf("%dx%d encode: %v", w, h, err)
+		}
+		img, err := DecodeVarDCT(enc)
+		if err != nil {
+			t.Fatalf("%dx%d decode: %v", w, h, err)
+		}
+		if img.W != w || img.H != h || img.Channels != 3 {
+			t.Fatalf("%dx%d geom %dx%d ch=%d", w, h, img.W, img.H, img.Channels)
+		}
+		// Recovered gradient: red ramps left-to-right.
+		get := func(x, y, c int) int { return int(img.Pixels[(y*w+x)*3+c]) }
+		if get(w-3, h/2, 0)-get(3, h/2, 0) < 180 {
+			t.Errorf("%dx%d red gradient not recovered", w, h)
+		}
+	}
+}

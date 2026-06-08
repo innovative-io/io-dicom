@@ -23,8 +23,8 @@ const (
 // a lossy VarDCT JPEG XL codestream. globalScale sets the quality: larger means
 // finer quantization (higher quality, larger output). A good default is ~4096.
 func EncodeVarDCT(pixels []byte, w, h, channels, globalScale int) ([]byte, error) {
-	if w <= 0 || h <= 0 || w > 256 || h > 256 {
-		return nil, errors.New("gojxl: VarDCT encode supports 1..256 px per dimension")
+	if w <= 0 || h <= 0 || w > 1<<14 || h > 1<<14 {
+		return nil, errors.New("gojxl: VarDCT encode supports 1..16384 px per dimension")
 	}
 	if channels != 1 && channels != 3 {
 		return nil, errors.New("gojxl: VarDCT encode supports 1 or 3 channels")
@@ -159,73 +159,91 @@ func EncodeVarDCT(pixels []byte, w, h, channels, globalScale int) ([]byte, error
 	return assembleVarDCT(w, h, bw, bh, gray, globalScale, dcMod, acCoeff, order)
 }
 
-// assembleVarDCT writes the full single-section VarDCT codestream.
+// assembleVarDCT writes the full VarDCT codestream. Images larger than one
+// group (256px) are split into the decoder's section layout (LfGlobal, one DC
+// group, HfGlobal, then one section per AC group).
 func assembleVarDCT(w, h, bw, bh int, gray bool, globalScale int,
 	dcMod [3][]int32, acCoeff [3][][]int32, order []int) ([]byte, error) {
 
-	// ----- tokenize the modular global sub-streams (DC image + AC metadata) -----
-	// DC image: 3 channels (Y, X, B) at bw*bh, Gradient-predicted.
+	fd := computeFrameDimensions(uint32(w), uint32(h), 1, 1) // group_size_shift = 1
+	numGroups := int(fd.numGroups)
+
+	// ----- modular global sub-streams: DC image + AC metadata -----
 	var dcTokens []encToken
 	for c := 0; c < 3; c++ {
 		dcTokens = gradientTokens(dcMod[c], bw, 0, 0, bw, bh, dcTokens)
 	}
-	// AC metadata: ytox, ytob (color-tile grids, all 0), ACS+QF (count rows), EPF.
 	ctW, ctH := (bw+7)>>3, (bh+7)>>3
 	count := bw * bh
-	ytox := make([]int32, ctW*ctH)
-	ytob := make([]int32, ctW*ctH)
-	acsqf := make([]int32, count*2) // row0 ACS=0, row1 QF=0
-	epf := make([]int32, bw*bh)
-	// Two-pass order: DC-pass channels (hshift>=3: ytox, ytob) first.
+	acsqf := make([]int32, count*2) // row0 ACS=0 (DCT8x8), row1 QF=0
 	var acmTokens []encToken
-	acmTokens = gradientTokens(ytox, ctW, 0, 0, ctW, ctH, acmTokens)
-	acmTokens = gradientTokens(ytob, ctW, 0, 0, ctW, ctH, acmTokens)
+	acmTokens = gradientTokens(make([]int32, ctW*ctH), ctW, 0, 0, ctW, ctH, acmTokens) // ytox = 0
+	acmTokens = gradientTokens(make([]int32, ctW*ctH), ctW, 0, 0, ctW, ctH, acmTokens) // ytob = 0
 	acmTokens = gradientTokens(acsqf, count, 0, 0, count, 2, acmTokens)
-	acmTokens = gradientTokens(epf, bw, 0, 0, bw, bh, acmTokens)
-
+	acmTokens = gradientTokens(make([]int32, bw*bh), bw, 0, 0, bw, bh, acmTokens) // EPF = 0
 	dcTk, dcMax := tokenizeAll(dcTokens)
 	acmTk, acmMax := tokenizeAll(acmTokens)
-	modAlphabet := dcMax + 1
-	if acmMax+1 > modAlphabet {
-		modAlphabet = acmMax + 1
-	}
+	modAlphabet := maxInt(dcMax, acmMax) + 1
 
-	// ----- tokenize the AC coefficients -----
-	acTokens, acCtxCount := encodeACTokens(bw, bh, acCoeff, order)
-	acTk, acMax := tokenizeAll(acTokens)
+	// ----- AC coefficients, tokenized per group -----
+	perGroupAC, acMax := acTokensByGroup(fd, bw, bh, acCoeff, order)
 	acAlphabet := acMax + 1
+	acCtxCount := defaultBlockCtxMap().numACContexts()
 
-	// ----- LfGlobal -----
-	s := newBitWriter()
-	s.WriteBool(true) // DequantMatrices DC all_default
-	s.WriteU32(uint32(globalScale), qGlobalScaleDist[0], qGlobalScaleDist[1], qGlobalScaleDist[2], qGlobalScaleDist[3])
-	s.WriteU32(uint32(kEncQuantDC), qQuantDCDist[0], qQuantDCDist[1], qQuantDCDist[2], qQuantDCDist[3])
-	s.WriteBits(1, 1) // block context map: all_default
-	s.WriteBits(1, 1) // CfL: all_default
-	s.WriteBits(1, 1) // has_tree
-	encodeANSStream(s, maTreeTokens, numTreeContexts)
-	modRev, modFreq := writeANSFlatHeader(s, modAlphabet, 1)
+	single := numGroups == 1
 
-	// ----- DC group: VarDCT DC image + AC metadata -----
-	s.WriteBits(0, 2) // extra_precision = 0
-	writeModularGroupHeader(s)
-	encodeANSData(s, ansEncState{tokens: dcTk, revMap: modRev, freqs: modFreq})
-	// AC metadata
-	s.WriteBits(uint64(count-1), ceilLog2Nonzero(uint32(bw*bh)))
-	writeModularGroupHeader(s)
-	encodeANSData(s, ansEncState{tokens: acmTk, revMap: modRev, freqs: modFreq})
+	// LfGlobal: global DC info + modular tree + shared modular histogram.
+	lf := newBitWriter()
+	lf.WriteBool(true) // DequantMatrices DC all_default
+	lf.WriteU32(uint32(globalScale), qGlobalScaleDist[0], qGlobalScaleDist[1], qGlobalScaleDist[2], qGlobalScaleDist[3])
+	lf.WriteU32(uint32(kEncQuantDC), qQuantDCDist[0], qQuantDCDist[1], qQuantDCDist[2], qQuantDCDist[3])
+	lf.WriteBits(1, 1) // block context map: all_default
+	lf.WriteBits(1, 1) // CfL: all_default
+	lf.WriteBits(1, 1) // has_tree
+	encodeANSStream(lf, maTreeTokens, numTreeContexts)
+	modRev, modFreq := writeANSFlatHeader(lf, modAlphabet, 1)
 
-	// ----- HfGlobal (ACGlobal) -----
-	s.WriteBits(1, 1) // AC dequant matrices all_default
-	// num_histograms: ceilLog2Nonzero(numGroups=1) = 0 bits -> 1 histogram.
-	s.WriteU32(0, kOrderEnc[0], kOrderEnc[1], kOrderEnc[2], kOrderEnc[3]) // used_orders = 0 (natural)
-	acRev, acFreq := writeANSFlatHeader(s, acAlphabet, acCtxCount)
+	// DC group: VarDCT DC image + AC metadata (separate ANS streams).
+	dcw := lf
+	if !single {
+		dcw = newBitWriter()
+	}
+	dcw.WriteBits(0, 2) // extra_precision = 0
+	writeModularGroupHeader(dcw)
+	encodeANSData(dcw, ansEncState{tokens: dcTk, revMap: modRev, freqs: modFreq})
+	dcw.WriteBits(uint64(count-1), ceilLog2Nonzero(uint32(bw*bh)))
+	writeModularGroupHeader(dcw)
+	encodeANSData(dcw, ansEncState{tokens: acmTk, revMap: modRev, freqs: modFreq})
 
-	// ----- AC group: coefficients -----
-	encodeANSData(s, ansEncState{tokens: acTk, revMap: acRev, freqs: acFreq})
-	sectionBytes := s.Bytes()
+	// HfGlobal: dequant matrices + coeff orders + shared AC histogram.
+	hf := lf
+	if !single {
+		hf = newBitWriter()
+	}
+	hf.WriteBits(1, 1)                                                     // AC dequant matrices all_default
+	hf.WriteBits(0, ceilLog2Nonzero(fd.numGroups))                         // num_histograms - 1 = 0
+	hf.WriteU32(0, kOrderEnc[0], kOrderEnc[1], kOrderEnc[2], kOrderEnc[3]) // used_orders = 0 (natural)
+	acRev, acFreq := writeANSFlatHeader(hf, acAlphabet, acCtxCount)
 
-	// ----- main stream: container headers + single-section TOC -----
+	// AC groups.
+	if single {
+		encodeANSData(lf, ansEncState{tokens: perGroupAC[0], revMap: acRev, freqs: acFreq})
+		return finishVarDCT(w, h, gray, [][]byte{lf.Bytes()}, fd)
+	}
+	sections := make([][]byte, 0, 3+numGroups)
+	sections = append(sections, lf.Bytes(), dcw.Bytes(), hf.Bytes())
+	for g := 0; g < numGroups; g++ {
+		gw := newBitWriter()
+		encodeANSData(gw, ansEncState{tokens: perGroupAC[g], revMap: acRev, freqs: acFreq})
+		sections = append(sections, gw.Bytes())
+	}
+	return finishVarDCT(w, h, gray, sections, fd)
+}
+
+// finishVarDCT writes the container headers + TOC and assembles the codestream.
+// For a single section the TOC has one entry; for multiple sections the order is
+// LfGlobal, numDCGroups (=1) DC group, HfGlobal, then the AC groups.
+func finishVarDCT(w, h int, gray bool, sections [][]byte, fd frameDimensions) ([]byte, error) {
 	m := newBitWriter()
 	writeSizeHeader(m, w, h)
 	writeVarDCTImageMetadata(m, gray)
@@ -234,10 +252,71 @@ func assembleVarDCT(w, h, bw, bh int, gray bool, globalScale int,
 	writeVarDCTFrameHeader(m)
 	m.WriteBits(0, 1) // TOC: no permutation
 	m.ZeroPadToByte()
-	writeTocSize(m, len(sectionBytes))
+	for _, sec := range sections {
+		writeTocSize(m, len(sec))
+	}
 	m.ZeroPadToByte()
+	return assemble(m.Bytes(), sections), nil
+}
 
-	return assemble(m.Bytes(), [][]byte{sectionBytes}), nil
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// acTokensByGroup tokenizes the AC coefficients per AC group (raster blocks
+// within each group's rect, channels Y,X,B, nzeros then coefficients), matching
+// decodeACGroup, and reports the maximum token over all groups.
+func acTokensByGroup(fd frameDimensions, bw, bh int, acCoeff [3][][]int32, order []int) ([][]encTokenized, int) {
+	gdb := int(fd.groupDim) / 8
+	xg := int(fd.xsizeGroups)
+	out := make([][]encTokenized, fd.numGroups)
+	maxTok := 0
+	for g := 0; g < int(fd.numGroups); g++ {
+		bx0 := (g % xg) * gdb
+		by0 := (g / xg) * gdb
+		bx1 := minInt(bx0+gdb, bw)
+		by1 := minInt(by0+gdb, bh)
+		var toks []encToken
+		for by := by0; by < by1; by++ {
+			for bx := bx0; bx < bx1; bx++ {
+				bi := by*bw + bx
+				for _, c := range [3]int{1, 0, 2} {
+					toks = appendACBlockTokens(toks, acCoeff[c][bi], order)
+				}
+			}
+		}
+		tks, mx := tokenizeAll(toks)
+		out[g] = tks
+		if mx > maxTok {
+			maxTok = mx
+		}
+	}
+	return out, maxTok
+}
+
+// appendACBlockTokens emits one block's AC tokens: the non-zero count, then the
+// coefficients in natural order up to and including the last non-zero.
+func appendACBlockTokens(toks []encToken, blk []int32, order []int) []encToken {
+	nz, lastK := 0, 0
+	for k := 1; k < 64; k++ {
+		if blk[order[k]] != 0 {
+			nz++
+			lastK = k
+		}
+	}
+	toks = append(toks, encToken{value: uint32(nz)})
+	rem := nz
+	for k := 1; k <= lastK && rem != 0; k++ {
+		v := blk[order[k]]
+		toks = append(toks, encToken{value: packSigned(v)})
+		if v != 0 {
+			rem--
+		}
+	}
+	return toks
 }
 
 // writeModularGroupHeader writes a use-global-tree, default-WP, no-transform
@@ -246,42 +325,6 @@ func writeModularGroupHeader(s *bitWriter) {
 	s.WriteBool(true) // use_global_tree
 	s.WriteBool(true) // wp_header all_default
 	s.WriteU32(0, u32Val(0), u32Val(1), u32Off(4, 2), u32Off(8, 18))
-}
-
-// encodeACTokens produces the AC-coefficient token stream in the exact order the
-// decoder reads it (per block, channels Y,X,B: nzeros, then coefficients in
-// natural order until the count is exhausted) and reports the number of AC
-// contexts (for the histogram context map).
-func encodeACTokens(bw, bh int, acCoeff [3][][]int32, order []int) ([]encToken, int) {
-	bctx := defaultBlockCtxMap()
-	var toks []encToken
-	for by := 0; by < bh; by++ {
-		for bx := 0; bx < bw; bx++ {
-			bi := by*bw + bx
-			for _, c := range [3]int{1, 0, 2} {
-				blk := acCoeff[c][bi]
-				// nz = number of non-zero AC coefficients (slots 1..63).
-				nz := 0
-				lastK := 0
-				for k := 1; k < 64; k++ {
-					if blk[order[k]] != 0 {
-						nz++
-						lastK = k
-					}
-				}
-				toks = append(toks, encToken{value: uint32(nz)})
-				rem := nz
-				for k := 1; k <= lastK && rem != 0; k++ {
-					v := blk[order[k]]
-					toks = append(toks, encToken{value: packSigned(v)})
-					if v != 0 {
-						rem--
-					}
-				}
-			}
-		}
-	}
-	return toks, bctx.numACContexts()
 }
 
 // writeVarDCTImageMetadata writes ImageMetadata for an XYB VarDCT image.
