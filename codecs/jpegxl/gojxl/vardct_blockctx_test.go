@@ -23,9 +23,9 @@ func TestNonZeroContext(t *testing.T) {
 	}{
 		{0, 0, 0},
 		{7, 1, 7},
-		{8, 0, 4 + 4},   // 8 -> 4+8/2=8
-		{20, 2, 4 + 10}, // 20 -> 4+10=14
-		{100, 0, 4 + 32},// clamped to 64 -> 4+32=36
+		{8, 0, 4 + 4},    // 8 -> 4+8/2=8
+		{20, 2, 4 + 10},  // 20 -> 4+10=14
+		{100, 0, 4 + 32}, // clamped to 64 -> 4+32=36
 	}
 	for _, c := range cases {
 		want := c.wantCtx*m.numCtxs + c.blockCtx

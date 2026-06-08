@@ -7,18 +7,18 @@ var errVarDCTIncomplete = errors.New("gojxl: VarDCT decode not yet complete")
 // vardctState carries the parsed VarDCT global decoder state between sections as
 // the integration is built out.
 type vardctState struct {
-	sh      SizeHeader
-	meta    *ImageMetadata
-	fh      FrameHeader
-	fd      frameDimensions
-	quant   *quantizer
+	sh       SizeHeader
+	meta     *ImageMetadata
+	fh       FrameHeader
+	fd       frameDimensions
+	quant    *quantizer
 	blockCtx *blockCtxMap
-	cmap    colorCorrelation
-	tree    []treeNode
-	code    *ansCode
-	ctxMap  []uint8
-	dc      *dcChannels
-	acm     *acMetadata
+	cmap     colorCorrelation
+	tree     []treeNode
+	code     *ansCode
+	ctxMap   []uint8
+	dc       *dcChannels
+	acm      *acMetadata
 
 	quantLib      [kNumQuantTables]*quantEncoding
 	numHistograms int
@@ -478,14 +478,14 @@ func decodeCoeffOrders(b *bitReader, usedACS uint32) (map[int][3][]int, error) {
 
 // acMetadata holds per-block transform/quant info for a DC group.
 type acMetadata struct {
-	bw, bh    int             // block grid dimensions
-	strategy  []acStrategyType // per-block AC strategy (top-left of each varblock)
-	valid     []bool          // whether a block position is the top-left of a varblock
-	quantF    []int32         // per-block raw quant field
-	epf       []uint8         // per-block EPF sharpness
-	ytoxMap   []int32         // per-color-tile CfL X factor
-	ytobMap   []int32         // per-color-tile CfL B factor
-	ctW, ctH  int             // color-tile grid dims
+	bw, bh   int              // block grid dimensions
+	strategy []acStrategyType // per-block AC strategy (top-left of each varblock)
+	valid    []bool           // whether a block position is the top-left of a varblock
+	quantF   []int32          // per-block raw quant field
+	epf      []uint8          // per-block EPF sharpness
+	ytoxMap  []int32          // per-color-tile CfL X factor
+	ytobMap  []int32          // per-color-tile CfL B factor
+	ctW, ctH int              // color-tile grid dims
 }
 
 // decodeAcMetadata decodes the AC metadata for one DC group

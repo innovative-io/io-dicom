@@ -65,10 +65,10 @@ func TestCoeffOrderContext(t *testing.T) {
 	// token = (val==0)?0 : 1+floor(log2(val)); clamped to 7.
 	cases := []struct{ val, want uint32 }{
 		{0, 0},
-		{1, 1},   // 1+0
-		{2, 2},   // 1+1
-		{3, 2},   // 1+1
-		{4, 3},   // 1+2
+		{1, 1},       // 1+0
+		{2, 2},       // 1+1
+		{3, 2},       // 1+1
+		{4, 3},       // 1+2
 		{255, 8 - 1}, // 1+7=8 -> clamp 7
 		{100000, 7},  // clamp
 	}

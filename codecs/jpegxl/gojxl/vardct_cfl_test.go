@@ -60,8 +60,8 @@ func TestDecodeCfLDCRoundTrip(t *testing.T) {
 	w.WriteBits(0, 1) // not all-default
 	// color_factor via kColorFactorDist: write Val(256) selector (index 1).
 	w.WriteU32(256, kColorFactorDist[0], kColorFactorDist[1], kColorFactorDist[2], kColorFactorDist[3])
-	w.WriteBits(0x3800, 16) // baseX = 0.5 (IEEE half)
-	w.WriteBits(0x3D00, 16) // baseB = 1.25 (IEEE half)
+	w.WriteBits(0x3800, 16)               // baseX = 0.5 (IEEE half)
+	w.WriteBits(0x3D00, 16)               // baseB = 1.25 (IEEE half)
 	w.WriteBits(uint64(int32(7)+128), 8)  // ytox_dc = 7
 	w.WriteBits(uint64(int32(-3)+128), 8) // ytob_dc = -3
 	w.ZeroPadToByte()

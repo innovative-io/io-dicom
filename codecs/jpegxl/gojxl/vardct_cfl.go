@@ -16,11 +16,11 @@ var errInvalidBlockCtx = errors.New("gojxl: invalid block context map")
 // the ratios are derived from the frame-global correlation parameters below.
 
 const (
-	kColorTileDim          = 64
-	kColorTileDimInBlocks  = kColorTileDim / acBlockDim // 8
-	kDefaultColorFactor    = 84
-	kCFLFixedPointPrec     = 11
-	kYToBRatio             = 1.0 // cms::kYToBRatio
+	kColorTileDim         = 64
+	kColorTileDimInBlocks = kColorTileDim / acBlockDim // 8
+	kDefaultColorFactor   = 84
+	kCFLFixedPointPrec    = 11
+	kYToBRatio            = 1.0 // cms::kYToBRatio
 )
 
 // colorCorrelation holds the frame-global CfL parameters (ColorCorrelationMap).

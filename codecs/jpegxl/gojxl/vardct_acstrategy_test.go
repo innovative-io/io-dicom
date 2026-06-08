@@ -27,15 +27,15 @@ func TestAcStrategyGeometry(t *testing.T) {
 	// Named-strategy checks: covered blocks are (width_blocks, height_blocks),
 	// names are HeightxWidth.
 	cases := []struct {
-		t          acStrategyType
-		wPx, hPx   int
-		plain      bool
+		t        acStrategyType
+		wPx, hPx int
+		plain    bool
 	}{
 		{acDCT, 8, 8, true},
 		{acDCT16X16, 16, 16, true},
 		{acDCT32X32, 32, 32, true},
-		{acDCT16X8, 8, 16, true},   // 16 tall, 8 wide
-		{acDCT8X16, 16, 8, true},   // 8 tall, 16 wide
+		{acDCT16X8, 8, 16, true}, // 16 tall, 8 wide
+		{acDCT8X16, 16, 8, true}, // 8 tall, 16 wide
 		{acDCT64X64, 64, 64, true},
 		{acDCT256X256, 256, 256, true},
 		{acDCT256X128, 128, 256, true}, // 256 tall, 128 wide

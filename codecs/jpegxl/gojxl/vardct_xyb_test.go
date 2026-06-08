@@ -67,4 +67,3 @@ func TestSRGBTransfer(t *testing.T) {
 		}
 	}
 }
-

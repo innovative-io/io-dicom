@@ -355,7 +355,6 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 	return &Image{W: W, H: H, Channels: 3, BitDepth: 8, Pixels: pix}, nil
 }
 
-
 func clamp8(v float32) byte {
 	x := v*255.0 + 0.5
 	if x < 0 {
@@ -366,4 +365,3 @@ func clamp8(v float32) byte {
 	}
 	return byte(x)
 }
-

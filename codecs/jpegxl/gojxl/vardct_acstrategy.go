@@ -8,34 +8,34 @@ package gojxl
 type acStrategyType uint32
 
 const (
-	acDCT        acStrategyType = 0
-	acIDENTITY   acStrategyType = 1
-	acDCT2X2     acStrategyType = 2
-	acDCT4X4     acStrategyType = 3
-	acDCT16X16   acStrategyType = 4
-	acDCT32X32   acStrategyType = 5
-	acDCT16X8    acStrategyType = 6
-	acDCT8X16    acStrategyType = 7
-	acDCT32X8    acStrategyType = 8
-	acDCT8X32    acStrategyType = 9
-	acDCT32X16   acStrategyType = 10
-	acDCT16X32   acStrategyType = 11
-	acDCT4X8     acStrategyType = 12
-	acDCT8X4     acStrategyType = 13
-	acAFV0       acStrategyType = 14
-	acAFV1       acStrategyType = 15
-	acAFV2       acStrategyType = 16
-	acAFV3       acStrategyType = 17
-	acDCT64X64   acStrategyType = 18
-	acDCT64X32   acStrategyType = 19
-	acDCT32X64   acStrategyType = 20
-	acDCT128X128 acStrategyType = 21
-	acDCT128X64  acStrategyType = 22
-	acDCT64X128  acStrategyType = 23
-	acDCT256X256 acStrategyType = 24
-	acDCT256X128 acStrategyType = 25
-	acDCT128X256 acStrategyType = 26
-	acNumValidStrategies = 27
+	acDCT                acStrategyType = 0
+	acIDENTITY           acStrategyType = 1
+	acDCT2X2             acStrategyType = 2
+	acDCT4X4             acStrategyType = 3
+	acDCT16X16           acStrategyType = 4
+	acDCT32X32           acStrategyType = 5
+	acDCT16X8            acStrategyType = 6
+	acDCT8X16            acStrategyType = 7
+	acDCT32X8            acStrategyType = 8
+	acDCT8X32            acStrategyType = 9
+	acDCT32X16           acStrategyType = 10
+	acDCT16X32           acStrategyType = 11
+	acDCT4X8             acStrategyType = 12
+	acDCT8X4             acStrategyType = 13
+	acAFV0               acStrategyType = 14
+	acAFV1               acStrategyType = 15
+	acAFV2               acStrategyType = 16
+	acAFV3               acStrategyType = 17
+	acDCT64X64           acStrategyType = 18
+	acDCT64X32           acStrategyType = 19
+	acDCT32X64           acStrategyType = 20
+	acDCT128X128         acStrategyType = 21
+	acDCT128X64          acStrategyType = 22
+	acDCT64X128          acStrategyType = 23
+	acDCT256X256         acStrategyType = 24
+	acDCT256X128         acStrategyType = 25
+	acDCT128X256         acStrategyType = 26
+	acNumValidStrategies                = 27
 )
 
 // covered_blocks_x / covered_blocks_y / log2_covered_blocks LUTs (ac_strategy.h).
@@ -57,8 +57,8 @@ var acLog2CoveredBlocks = [acNumValidStrategies]uint8{
 
 func (t acStrategyType) valid() bool { return uint32(t) < acNumValidStrategies }
 
-func (t acStrategyType) coveredBlocksX() int { return int(acCoveredBlocksX[t]) }
-func (t acStrategyType) coveredBlocksY() int { return int(acCoveredBlocksY[t]) }
+func (t acStrategyType) coveredBlocksX() int    { return int(acCoveredBlocksX[t]) }
+func (t acStrategyType) coveredBlocksY() int    { return int(acCoveredBlocksY[t]) }
 func (t acStrategyType) log2CoveredBlocks() int { return int(acLog2CoveredBlocks[t]) }
 
 // numBlocks is the total 8x8 blocks covered by the strategy.
