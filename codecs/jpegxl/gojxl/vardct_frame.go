@@ -75,7 +75,9 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 	if err != nil {
 		return nil, err
 	}
-	if st.fh.Flags != 0 {
+	// kSkipAdaptiveDCSmoothing is benign (it only disables a DC post-filter, and
+	// JPEG-mode frames always set it); any other flag is unsupported.
+	if st.fh.Flags&^flagSkipAdaptiveDCSmoothing != 0 {
 		return nil, errors.New("gojxl: frame flags (patches/splines/noise/DC) not yet supported")
 	}
 

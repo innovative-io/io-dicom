@@ -19,6 +19,7 @@ const (
 )
 
 const flagUseDCFrame = 32
+const flagSkipAdaptiveDCSmoothing = 128
 
 // FrameHeader holds the parsed fields we need for decoding.
 type FrameHeader struct {
@@ -37,7 +38,18 @@ type FrameHeader struct {
 	FrameW, FrameH uint32
 	OriginX        int32
 	OriginY        int32
+	// ColorTransform and, for kYCbCr, the per-channel chroma subsampling modes
+	// (0..3). Only meaningful for non-XYB (e.g. JPEG-reconstruction) frames.
+	ColorTransform    uint32
+	ChromaSubsampling [3]uint32
 }
+
+// Color transform (frame_header.h ColorTransform).
+const (
+	ctXYB   = 0
+	ctYCbCr = 1
+	ctNone  = 2
+)
 
 const kMaxNumPasses = 11
 
@@ -171,9 +183,21 @@ func readFrameHeader(b *bitReader, meta *ImageMetadata) (FrameHeader, error) {
 
 	// Color transform.
 	if meta.XYBEncoded {
-		// color_transform = kXYB (no bits)
+		h.ColorTransform = ctXYB
 	} else {
-		b.ReadBool() // alternate (kYCbCr vs kNone) — no chroma subsampling handling here
+		// alternate=true => kYCbCr, else kNone.
+		if b.ReadBool() {
+			h.ColorTransform = ctYCbCr
+		} else {
+			h.ColorTransform = ctNone
+		}
+	}
+
+	// Chroma subsampling for YCbCr (when no DC frame): 2 bits per channel.
+	if h.ColorTransform == ctYCbCr && h.Flags&flagUseDCFrame == 0 {
+		for c := 0; c < 3; c++ {
+			h.ChromaSubsampling[c] = b.ReadBits(2)
+		}
 	}
 
 	numExtra := len(meta.ExtraChannels)
