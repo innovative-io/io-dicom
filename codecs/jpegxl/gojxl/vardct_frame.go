@@ -51,10 +51,12 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		return nil, err
 	}
 	st.meta = &meta
-	if meta.Color.WantICC {
-		return nil, errors.New("gojxl: ICC profiles not yet supported")
-	}
 	readTransformData(b, meta.XYBEncoded)
+	if meta.Color.WantICC {
+		if err := consumeICC(b); err != nil {
+			return nil, err
+		}
+	}
 	if err := b.JumpToByteBoundary(); err != nil {
 		return nil, err
 	}
