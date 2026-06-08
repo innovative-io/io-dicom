@@ -69,12 +69,17 @@ type quantEncoding struct {
 	idWeights [3][3]float32
 	// DCT2X2 weights [c][0..5].
 	dct2Weights [3][6]float32
+	// AFV: nine per-channel weights, plus the 4x4 corner DCT bands (dctBands is
+	// the 4x8 DCT bands for AFV).
+	afvWeights  [3][9]float32
+	afv4x4Bands [3][]float32
+	afv4x4BandN int
 }
 
 // computeInvQuantTable returns the inverse-quant table (length 3*wrows*wcols)
 // for the given kind and encoding, with the low-frequency DC region zeroed.
-// Returns false on an invalid (out-of-range) weight. AFV and RAW modes are not
-// yet supported.
+// Returns false on an invalid (out-of-range) weight. The RAW mode (custom
+// per-image matrices) is not yet supported.
 func computeInvQuantTable(kind int, enc *quantEncoding) ([]float32, bool) {
 	wrows := 8 * requiredSizeX[kind]
 	wcols := 8 * requiredSizeY[kind]
@@ -134,8 +139,17 @@ func computeInvQuantTable(kind int, enc *quantEncoding) ([]float32, bool) {
 			return nil, false
 		}
 		weights = w
+	case quantModeAFV:
+		if num != 64 {
+			return nil, false
+		}
+		w, ok := getQuantWeightsAFV(enc)
+		if !ok {
+			return nil, false
+		}
+		weights = w
 	default:
-		return nil, false // AFV / RAW / Library not yet handled here
+		return nil, false // RAW / Library not yet handled here
 	}
 
 	// Validate and produce inv_table (= weights).

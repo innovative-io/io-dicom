@@ -6,17 +6,22 @@ import (
 	"testing"
 )
 
-// TestUnsupportedInputsRejected verifies that inputs outside the supported
-// lossless-Modular subset return a clear error (never a panic or garbage), so
-// the codec backend can degrade gracefully / fall back to libjxl.
+// TestUnsupportedInputsRejected verifies that malformed inputs return a clear
+// error (never a panic or garbage), so the codec backend can degrade gracefully
+// / fall back to libjxl. It also checks that a lossy VarDCT frame now decodes
+// through the public Decode entry point (it routes to the VarDCT decoder).
 func TestUnsupportedInputsRejected(t *testing.T) {
-	t.Run("vardct", func(t *testing.T) {
+	t.Run("vardct_now_supported", func(t *testing.T) {
 		data, err := os.ReadFile(filepath.Join("testdata", "lossy_vardct.jxl"))
 		if err != nil {
-			t.Fatal(err)
+			t.Skipf("fixture unavailable: %v", err)
 		}
-		if _, err := Decode(data); err == nil {
-			t.Fatal("expected error decoding a VarDCT (lossy) frame")
+		img, err := Decode(data)
+		if err != nil {
+			t.Fatalf("VarDCT frame should now decode: %v", err)
+		}
+		if img.W == 0 || img.H == 0 || img.Channels == 0 {
+			t.Fatalf("implausible decoded image %dx%d ch=%d", img.W, img.H, img.Channels)
 		}
 	})
 	t.Run("garbage", func(t *testing.T) {

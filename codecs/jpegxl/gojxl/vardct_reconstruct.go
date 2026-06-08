@@ -122,10 +122,6 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 			continue
 		}
 		t := st.acm.strategy[i]
-		switch t {
-		case acAFV0, acAFV1, acAFV2, acAFV3:
-			return nil, errors.New("gojxl: VarDCT reconstruction: AFV transforms not yet supported")
-		}
 		if resampleScale1D(t.coveredBlocksX()) == nil || resampleScale1D(t.coveredBlocksY()) == nil {
 			return nil, errors.New("gojxl: VarDCT reconstruction: DCT128/256 not yet supported")
 		}
@@ -279,6 +275,8 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 					return inverseDCT4X8(blk)
 				case acDCT8X4:
 					return inverseDCT8X4(blk)
+				case acAFV0, acAFV1, acAFV2, acAFV3:
+					return inverseAFV(blk, int(t)-int(acAFV0))
 				default:
 					return plainInverseDCT(blk, pw, ph)
 				}

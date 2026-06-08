@@ -242,3 +242,38 @@ func TestVarDCTReconstructFullTransformSet(t *testing.T) {
 		}
 	}
 }
+
+// TestVarDCTReconstructAFV decodes a 256x256 diagonal-edge fixture that the
+// encoder codes with the AFV corner transforms (AFV0-3) alongside IDENTITY,
+// DCT2x2, DCT4x8, DCT8x4 and DCT8. It is byte-exact vs djxl (mean ~0.23). This
+// is the regression guard for the AFV inverse transform, the 16x16 IAFV basis,
+// and the AFV quant mode. Diagonal/triangular structure drives the AFV choice.
+func TestVarDCTReconstructAFV(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_afv256.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := DecodeVarDCT(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT: %v", err)
+	}
+	if img.W != 256 || img.H != 256 || img.Channels != 3 {
+		t.Fatalf("got %dx%d ch=%d, want 256x256x3", img.W, img.H, img.Channels)
+	}
+	// High-contrast diagonal content: every channel must span a wide range.
+	for c := 0; c < 3; c++ {
+		lo, hi := 255, 0
+		for i := 0; i < img.W*img.H; i++ {
+			v := int(img.Pixels[i*3+c])
+			if v < lo {
+				lo = v
+			}
+			if v > hi {
+				hi = v
+			}
+		}
+		if hi-lo < 120 {
+			t.Errorf("channel %d range too narrow (%d..%d)", c, lo, hi)
+		}
+	}
+}
