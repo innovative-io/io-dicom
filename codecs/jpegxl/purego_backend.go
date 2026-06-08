@@ -47,9 +47,14 @@ func (gojpegxlBackend) Decode(encoded []byte, output []byte) (err error) {
 	return nil
 }
 
-// Encode losslessly compresses raw interleaved samples to a JPEG XL codestream
-// (pure-Go Modular encoder). Lossy (VarDCT) encoding is not implemented, so a
-// non-lossless request errors so a native backend can take over.
+// kLossyGlobalScale is the VarDCT quantizer scale used for lossy encoding — a
+// high-quality (visually near-lossless) default suitable for medical imagery.
+const kLossyGlobalScale = 32768
+
+// Encode compresses raw interleaved samples to a JPEG XL codestream. Lossless
+// uses the pure-Go Modular encoder (any size, 8/16-bit, 1/3 channels); lossy
+// uses the pure-Go VarDCT encoder (8-bit, 1/3 channels, up to 16384px). Requests
+// outside those subsets error so a native backend can take over.
 func (gojpegxlBackend) Encode(raw []byte, width uint16, height uint16, samples uint16, bitsa uint16, lossless bool) (out []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -57,7 +62,10 @@ func (gojpegxlBackend) Encode(raw []byte, width uint16, height uint16, samples u
 		}
 	}()
 	if !lossless {
-		return nil, errors.New("jpegxl: pure-Go encoder is lossless-only")
+		if bitsa != 8 {
+			return nil, errors.New("jpegxl: pure-Go lossy encode supports 8-bit only")
+		}
+		return gojxl.EncodeVarDCT(raw, int(width), int(height), int(samples), kLossyGlobalScale)
 	}
 	return gojxl.Encode(raw, int(width), int(height), int(samples), int(bitsa))
 }
