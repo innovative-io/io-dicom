@@ -12,12 +12,17 @@ type Image struct {
 	Pixels []byte
 }
 
-// Decode decodes a lossless Modular JPEG XL image (the subset gojxl supports:
-// single frame, Modular encoding, RCT/Palette/Squeeze transforms, single- and
-// multi-group). It returns an error for inputs outside that subset (VarDCT,
-// animation, ICC, non-identity orientation, ...), so a caller can fall back to
-// another backend.
+// Decode decodes a single-frame JPEG XL image. It supports the lossless Modular
+// subset (RCT/Palette/Squeeze, single- and multi-group) and the lossy VarDCT
+// subset (XYB, the full common transform set, single pass / one AC histogram
+// set, single DC group). It returns an error for inputs outside those subsets
+// (VarDCT with AFV/DCT128-256/multi-pass/multi-DC-group, animation, ICC,
+// non-identity orientation, ...), so a caller can fall back to another backend.
 func Decode(data []byte) (*Image, error) {
+	// Dispatch on the frame encoding: VarDCT (lossy) vs Modular (lossless).
+	if enc, err := peekFrameEncoding(data); err == nil && enc == frameVarDCT {
+		return DecodeVarDCT(data)
+	}
 	channels, meta, err := decodeModularFrame(data)
 	if err != nil {
 		return nil, err
@@ -52,4 +57,41 @@ func Decode(data []byte) (*Image, error) {
 		}
 	}
 	return &Image{W: w, H: h, Channels: nc, BitDepth: bd, Pixels: pix}, nil
+}
+
+// peekFrameEncoding parses the codestream headers up to the frame header and
+// reports the frame's encoding (frameVarDCT or frameModular) so Decode can
+// dispatch to the right decoder. It does not consume or validate the frame body.
+func peekFrameEncoding(data []byte) (encoding uint32, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.New("gojxl: malformed header")
+		}
+	}()
+	cs, err := codestream(data)
+	if err != nil {
+		return 0, err
+	}
+	if len(cs) < 2 || cs[0] != 0xFF || cs[1] != 0x0A {
+		return 0, errors.New("gojxl: bad codestream signature")
+	}
+	b := newBitReader(cs[2:])
+	sh, err := readSizeHeader(b)
+	if err != nil {
+		return 0, err
+	}
+	_ = sh
+	meta, err := readImageMetadata(b)
+	if err != nil {
+		return 0, err
+	}
+	readTransformData(b, meta.XYBEncoded)
+	if err := b.JumpToByteBoundary(); err != nil {
+		return 0, err
+	}
+	fh, err := readFrameHeader(b, &meta)
+	if err != nil {
+		return 0, err
+	}
+	return fh.Encoding, nil
 }
