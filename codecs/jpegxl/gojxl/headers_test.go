@@ -1,14 +1,18 @@
 package gojxl
 
 import (
-	_ "embed"
+	"os"
 	"testing"
 )
 
-//go:embed testdata/gray8_8x4_lossless.jxl
-var gray8x4 []byte
-
 func TestHeaderFixture(t *testing.T) {
+	// testdata is gitignored (fixtures are local-only); read at runtime and skip
+	// when absent rather than embedding at compile time, so the package builds on
+	// a fresh checkout without the fixture.
+	gray8x4, err := os.ReadFile("testdata/gray8_8x4_lossless.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
 	h, err := ReadHeader(gray8x4)
 	if err != nil {
 		t.Fatalf("ReadHeader: %v", err)
