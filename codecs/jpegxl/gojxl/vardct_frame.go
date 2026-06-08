@@ -29,6 +29,8 @@ type vardctState struct {
 	acCtxMap    [][]uint8
 	acCoeffs    [3]map[int][]int32 // per channel: top-left block idx -> coeff block
 	extra       [][]int32          // decoded extra-channel planes (full resolution)
+	extraImg    *modImage          // frame-wide extra-channel modular image
+	extraGroup  bool               // extra channels decoded per AC group (multi-group)
 }
 
 // decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
@@ -181,6 +183,22 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		if err := decodeACGroup(passReaders, st, int(g)); err != nil {
 			return st, err
 		}
+		// Full-resolution extra channels follow the AC coefficients in the same
+		// (pass-0) section, decoded per group (ModularAC). Multi-pass extra
+		// channels are not yet supported.
+		if st.extraGroup {
+			if numPasses != 1 {
+				return st, errors.New("gojxl: multi-pass VarDCT extra channels not yet supported")
+			}
+			if err := decodeVarDCTModularAC(passReaders[0], st, int(g)); err != nil {
+				return st, err
+			}
+		}
+	}
+	if st.extraGroup {
+		for c := st.extraImg.nbMeta; c < len(st.extraImg.channel); c++ {
+			st.extra = append(st.extra, st.extraImg.channel[c].pix)
+		}
 	}
 
 	return st, nil
@@ -200,22 +218,36 @@ func decodeVarDCTExtraChannels(b *bitReader, st *vardctState) error {
 	w, h := int(st.fd.xsize), int(st.fd.ysize)
 	groupDim := int(st.fd.groupDim)
 	img := &modImage{bitdepth: int(st.meta.BitDepth.BitsPerSample)}
+	big := false // any channel bigger than one group -> decoded per AC group
 	for ec := 0; ec < nbExtra; ec++ {
 		if st.meta.ExtraChannels[ec].DimShift != 0 {
 			return errors.New("gojxl: downsampled VarDCT extra channels not yet supported")
 		}
-		if w > groupDim || h > groupDim {
-			return errors.New("gojxl: multi-group VarDCT extra channels not yet supported")
-		}
 		img.channel = append(img.channel, modChannel{w: w, h: h, pix: make([]int32, w*h)})
+		if w > groupDim || h > groupDim {
+			big = true
+		}
 	}
+	st.extraImg = img
+	st.extraGroup = big
 
+	// The ModularGlobal sub-stream always carries a group header; it then decodes
+	// the channels that fit one group (none when they are all bigger).
 	gh, err := readGroupHeader(b)
 	if err != nil {
 		return err
 	}
 	if !gh.useGlobalTree {
 		return errors.New("gojxl: VarDCT extra-channel local trees not supported")
+	}
+	if big {
+		// Channels are decoded per AC group; the global header here must have no
+		// transforms (libjxl moves global transforms to the group level, which is
+		// not yet handled).
+		if len(gh.transforms) != 0 {
+			return errors.New("gojxl: VarDCT extra-channel global transforms not yet supported")
+		}
+		return nil
 	}
 	for i := range gh.transforms {
 		if err := metaApplyTransform(img, &gh.transforms[i]); err != nil {
@@ -236,6 +268,52 @@ func decodeVarDCTExtraChannels(b *bitReader, st *vardctState) error {
 	}
 	for c := img.nbMeta; c < len(img.channel); c++ {
 		st.extra = append(st.extra, img.channel[c].pix)
+	}
+	return nil
+}
+
+// decodeVarDCTModularAC decodes the full-resolution extra channels of one AC
+// group (ModularStreamId::ModularAC), placing them into the frame-wide extra
+// image. It runs from the AC group's pass-0 bit reader, right after the AC
+// coefficients of that group.
+func decodeVarDCTModularAC(b *bitReader, st *vardctState, groupIdx int) error {
+	groupDim := int(st.fd.groupDim)
+	gx := groupIdx % int(st.fd.xsizeGroups)
+	gy := groupIdx / int(st.fd.xsizeGroups)
+	x0, y0 := gx*groupDim, gy*groupDim
+	gw := minInt(groupDim, st.extraImg.channel[0].w-x0)
+	gh := minInt(groupDim, st.extraImg.channel[0].h-y0)
+
+	sub := &modImage{bitdepth: st.extraImg.bitdepth}
+	for range st.extraImg.channel {
+		sub.channel = append(sub.channel, modChannel{w: gw, h: gh, pix: make([]int32, gw*gh)})
+	}
+	ggh, err := readGroupHeader(b)
+	if err != nil {
+		return err
+	}
+	if !ggh.useGlobalTree {
+		return errors.New("gojxl: VarDCT extra-channel local trees not supported")
+	}
+	if len(ggh.transforms) != 0 {
+		return errors.New("gojxl: VarDCT extra-channel transforms not yet supported")
+	}
+	// ModularAC stream id = 1 + 3*num_dc_groups + kNumQuant + num_groups*pass + g.
+	streamID := 1 + 3*int(st.fd.numDCGroups) + kNumQuantTables + groupIdx
+	reader := newANSSymbolReader(st.code, b, maxChannelWidth(sub.channel))
+	for ci := range sub.channel {
+		decodeChannel(reader, b, st.tree, st.ctxMap, sub.channel, ci, streamID, ggh.wp)
+	}
+	if !reader.checkFinalState() {
+		return errors.New("gojxl: VarDCT extra-channel (group) ANS final state failed")
+	}
+	fw := st.extraImg.channel[0].w
+	for c := range sub.channel {
+		dst := st.extraImg.channel[c].pix
+		src := sub.channel[c].pix
+		for y := 0; y < gh; y++ {
+			copy(dst[(y0+y)*fw+x0:(y0+y)*fw+x0+gw], src[y*gw:(y+1)*gw])
+		}
 	}
 	return nil
 }

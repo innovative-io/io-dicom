@@ -31,3 +31,25 @@ func TestVarDCTExtraChannels(t *testing.T) {
 		t.Errorf("red gradient not recovered")
 	}
 }
+
+// TestVarDCTExtraChannelsMultiGroup decodes a 400x300 lossy RGBA fixture whose
+// full-resolution alpha is larger than one group, so it is decoded per AC group
+// (ModularAC) after the coefficients of each group. Byte-exact vs djxl (mean
+// ~0.19). Source: R=x, G=y, B=128, A=(x+y) gradient.
+func TestVarDCTExtraChannelsMultiGroup(t *testing.T) {
+	data, err := os.ReadFile("testdata/rgba_lossy_mg.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := Decode(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT (multi-group RGBA): %v", err)
+	}
+	if img.W != 400 || img.H != 300 || img.Channels != 4 {
+		t.Fatalf("got %dx%d ch=%d, want 400x300x4", img.W, img.H, img.Channels)
+	}
+	get := func(x, y, c int) int { return int(img.Pixels[(y*img.W+x)*4+c]) }
+	if get(5, 5, 3) > 30 || get(395, 295, 3) < 200 {
+		t.Errorf("alpha gradient not recovered: TL=%d BR=%d", get(5, 5, 3), get(395, 295, 3))
+	}
+}
