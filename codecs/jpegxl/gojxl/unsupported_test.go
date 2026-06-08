@@ -34,12 +34,13 @@ func TestUnsupportedInputsRejected(t *testing.T) {
 	})
 }
 
-// TestVarDCTUnsupportedDegradeGracefully verifies that VarDCT frames using
-// features the pure-Go decoder does not yet implement (multi-pass / progressive,
-// multi-DC-group) return a clear error rather than panicking or emitting
-// garbage, so the codec backend can fall back to a native decoder.
+// TestVarDCTUnsupportedDegradeGracefully verifies that a VarDCT frame using a
+// feature the pure-Go decoder does not yet implement returns a clear error
+// rather than panicking or emitting garbage, so the codec backend can fall back
+// to a native decoder. (vardct_big1280 uses a coded block-context map that is
+// not yet handled.)
 func TestVarDCTUnsupportedDegradeGracefully(t *testing.T) {
-	for _, f := range []string{"vardct_prog512.jxl", "vardct_big1280.jxl"} {
+	for _, f := range []string{"vardct_big1280.jxl"} {
 		data, err := os.ReadFile(filepath.Join("testdata", f))
 		if err != nil {
 			t.Skipf("fixture %s unavailable: %v", f, err)

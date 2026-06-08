@@ -23,10 +23,11 @@ type vardctState struct {
 	quantLib      [kNumQuantTables]*quantEncoding
 	numHistograms int
 	usedACS       uint32
-	coeffOrders   map[int][3][]int
-	acCode        *ansCode
-	acCtxMap      []uint8
-	acCoeffs      [3]map[int][]int32 // per channel: top-left block idx -> coeff block
+	// Per-pass coefficient orders and AC histograms (length NumPasses).
+	coeffOrders []map[int][3][]int
+	acCode      []*ansCode
+	acCtxMap    [][]uint8
+	acCoeffs    [3]map[int][]int32 // per channel: top-left block idx -> coeff block
 }
 
 // decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
@@ -156,16 +157,20 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		return st, err
 	}
 
-	// ----- AC groups: one section per (pass, group). Single pass only. -----
+	// ----- AC groups: one section per (pass, group). The passes of a group are
+	// decoded together, accumulating into the shared coefficient blocks. -----
 	st.acCoeffs = [3]map[int][]int32{{}, {}, {}}
+	numPasses := st.fh.NumPasses
 	for g := uint32(0); g < st.fd.numGroups; g++ {
-		gr := lfr
-		if !single {
-			if gr, err = sectionReader(acGroupIndex(0, g, st.fd.numGroups, st.fd.numDCGroups)); err != nil {
+		passReaders := make([]*bitReader, numPasses)
+		for p := uint32(0); p < numPasses; p++ {
+			if single {
+				passReaders[p] = lfr
+			} else if passReaders[p], err = sectionReader(acGroupIndex(p, g, st.fd.numGroups, st.fd.numDCGroups)); err != nil {
 				return st, err
 			}
 		}
-		if err := decodeACGroup(gr, st, int(g)); err != nil {
+		if err := decodeACGroup(passReaders, st, int(g)); err != nil {
 			return st, err
 		}
 	}
@@ -240,21 +245,9 @@ func DecodeVarDCT(data []byte) (*Image, error) {
 // index. The LLF/DC slots stay 0 here and are filled from the DC image during
 // reconstruction. The non-zero count prediction grid is group-local — it does
 // not cross group boundaries, matching libjxl's per-group num_nzeroes cache.
-func decodeACGroup(b *bitReader, st *vardctState, groupIdx int) error {
+func decodeACGroup(readers []*bitReader, st *vardctState, groupIdx int) error {
 	bw := st.acm.bw
-
-	// When more than one AC histogram set is present, each group selects one with
-	// histo_selector_bits read at the start of its section; the chosen histogram
-	// shifts every AC context by cur_histogram * NumACContexts (dec_group.cc).
-	ctxOffset := 0
-	if st.numHistograms > 1 {
-		b.Refill()
-		cur := int(b.ReadBits(ceilLog2Nonzero(uint32(st.numHistograms))))
-		if cur >= st.numHistograms {
-			return errors.New("gojxl: invalid AC histogram selector")
-		}
-		ctxOffset = cur * st.blockCtx.numACContexts()
-	}
+	numPasses := len(readers)
 
 	// Group block bounds within the frame block grid.
 	gdb := int(st.fd.groupDim) / 8 // group dimension in 8×8 blocks
@@ -266,15 +259,26 @@ func decodeACGroup(b *bitReader, st *vardctState, groupIdx int) error {
 	gw := bx1 - bx0
 	gh := by1 - by0
 
-	// Group-local non-zero count grids for prediction.
-	nzeros := [3][]int32{
-		make([]int32, gw*gh),
-		make([]int32, gw*gh),
-		make([]int32, gw*gh),
+	// Per-pass decode state. Each pass is an independent ANS-coded section: it
+	// selects a histogram set (histo_selector_bits) and keeps its own group-local
+	// non-zero prediction grids. Coefficients from all passes accumulate into the
+	// same block, shifted by the pass's PassShift (dec_group.cc DecodeACVarBlock).
+	ans := make([]*ansSymbolReader, numPasses)
+	ctxOffset := make([]int, numPasses)
+	nzeros := make([][3][]int32, numPasses)
+	for p := 0; p < numPasses; p++ {
+		rp := readers[p]
+		if st.numHistograms > 1 {
+			rp.Refill()
+			cur := int(rp.ReadBits(ceilLog2Nonzero(uint32(st.numHistograms))))
+			if cur >= st.numHistograms {
+				return errors.New("gojxl: invalid AC histogram selector")
+			}
+			ctxOffset[p] = cur * st.blockCtx.numACContexts()
+		}
+		ans[p] = newANSSymbolReader(st.acCode[p], rp, 0)
+		nzeros[p] = [3][]int32{make([]int32, gw*gh), make([]int32, gw*gh), make([]int32, gw*gh)}
 	}
-
-	// Single histogram set -> no histogram selector bits, ctx_offset 0.
-	reader := newANSSymbolReader(st.acCode, b, 0)
 
 	for by := by0; by < by1; by++ {
 		ly := by - by0
@@ -290,57 +294,68 @@ func decodeACGroup(b *bitReader, st *vardctState, groupIdx int) error {
 			log2cov := acs.log2CoveredBlocks()
 			size := coveredBlocks * 64
 			qf := st.acm.quantF[idx]
+			cbY, cbX := acs.coveredBlocksY(), acs.coveredBlocksX()
 
 			// Channel decode order is Y, X, B = {1, 0, 2}.
 			for _, c := range [3]int{1, 0, 2} {
-				var rowTop []int32
-				if ly > 0 {
-					rowTop = nzeros[c][(ly-1)*gw : ly*gw]
-				}
-				row := nzeros[c][ly*gw : (ly+1)*gw]
-				predicted := int(predictFromTopAndLeft(rowTop, row, lx, 32))
-
-				blockCtx := st.blockCtx.blockContext(0, uint32(qf), ord, c)
-				nzeroCtx := st.blockCtx.nonZeroContext(predicted, blockCtx) + ctxOffset
-				nz := int(reader.readHybridUint(nzeroCtx, b, st.acCtxMap))
-				if nz > size-coveredBlocks {
-					return errors.New("gojxl: AC nzeros too large")
-				}
-				// Record nzeros for the covered region (prediction of neighbors).
-				val := int32((nz + coveredBlocks - 1) >> uint(log2cov))
-				for yy := 0; yy < acs.coveredBlocksY(); yy++ {
-					for xx := 0; xx < acs.coveredBlocksX(); xx++ {
-						nzeros[c][(ly+yy)*gw+(lx+xx)] = val
-					}
-				}
-
-				histoOffset := ctxOffset + st.blockCtx.zeroDensityContextsOffset(blockCtx)
-				prev := 0
-				if nz <= size/16 {
-					prev = 1
-				}
-				order := st.coeffOrders[ord][c]
 				block := make([]int32, size)
 				st.acCoeffs[c][idx] = block
-				for k := coveredBlocks; k < size && nz != 0; k++ {
-					ctx := histoOffset + zeroDensityContext(nz, k, coveredBlocks, log2cov, prev)
-					u := reader.readHybridUint(ctx, b, st.acCtxMap)
-					block[order[k]] += unpackSigned32(u)
-					if u != 0 {
-						prev = 1
-					} else {
-						prev = 0
+				blockCtx := st.blockCtx.blockContext(0, uint32(qf), ord, c)
+				zdOffset := st.blockCtx.zeroDensityContextsOffset(blockCtx)
+				for p := 0; p < numPasses; p++ {
+					reader := ans[p]
+					rp := readers[p]
+					cm := st.acCtxMap[p]
+					ng := nzeros[p][c]
+					shift := uint(st.fh.PassShift[p])
+
+					var rowTop []int32
+					if ly > 0 {
+						rowTop = ng[(ly-1)*gw : ly*gw]
 					}
-					nz -= prev
-				}
-				if nz != 0 {
-					return errors.New("gojxl: AC nzeros not exhausted at block end")
+					row := ng[ly*gw : (ly+1)*gw]
+					predicted := int(predictFromTopAndLeft(rowTop, row, lx, 32))
+
+					nzeroCtx := st.blockCtx.nonZeroContext(predicted, blockCtx) + ctxOffset[p]
+					nz := int(reader.readHybridUint(nzeroCtx, rp, cm))
+					if nz > size-coveredBlocks {
+						return errors.New("gojxl: AC nzeros too large")
+					}
+					val := int32((nz + coveredBlocks - 1) >> uint(log2cov))
+					for yy := 0; yy < cbY; yy++ {
+						for xx := 0; xx < cbX; xx++ {
+							ng[(ly+yy)*gw+(lx+xx)] = val
+						}
+					}
+
+					histoOffset := ctxOffset[p] + zdOffset
+					prev := 0
+					if nz <= size/16 {
+						prev = 1
+					}
+					order := st.coeffOrders[p][ord][c]
+					for k := coveredBlocks; k < size && nz != 0; k++ {
+						ctx := histoOffset + zeroDensityContext(nz, k, coveredBlocks, log2cov, prev)
+						u := reader.readHybridUint(ctx, rp, cm)
+						block[order[k]] += unpackSigned32(u) << shift
+						if u != 0 {
+							prev = 1
+						} else {
+							prev = 0
+						}
+						nz -= prev
+					}
+					if nz != 0 {
+						return errors.New("gojxl: AC nzeros not exhausted at block end")
+					}
 				}
 			}
 		}
 	}
-	if !reader.checkFinalState() {
-		return errors.New("gojxl: AC group ANS final state failed")
+	for p := 0; p < numPasses; p++ {
+		if !ans[p].checkFinalState() {
+			return errors.New("gojxl: AC group ANS final state failed")
+		}
 	}
 	return nil
 }
@@ -371,21 +386,25 @@ func decodeHfGlobal(b *bitReader, st *vardctState) error {
 	}
 	st.usedACS = usedACS
 
-	// Single pass only for this subset.
-	if st.fh.NumPasses != 1 {
-		return errors.New("gojxl: multi-pass VarDCT not yet supported")
-	}
-	orders, err := decodeCoeffOrders(b, st.usedACS)
-	if err != nil {
-		return err
-	}
-	st.coeffOrders = orders
-
-	// AC histograms.
+	// Per-pass coefficient orders and AC histograms (one set per pass; the
+	// histogram count is shared across passes).
+	numPasses := int(st.fh.NumPasses)
+	st.coeffOrders = make([]map[int][3][]int, numPasses)
+	st.acCode = make([]*ansCode, numPasses)
+	st.acCtxMap = make([][]uint8, numPasses)
 	numContexts := st.numHistograms * st.blockCtx.numACContexts()
-	st.acCode, st.acCtxMap, err = decodeHistograms(b, numContexts, false)
-	if err != nil {
-		return err
+	for p := 0; p < numPasses; p++ {
+		orders, err := decodeCoeffOrders(b, st.usedACS)
+		if err != nil {
+			return err
+		}
+		st.coeffOrders[p] = orders
+		code, ctxMap, err := decodeHistograms(b, numContexts, false)
+		if err != nil {
+			return err
+		}
+		st.acCode[p] = code
+		st.acCtxMap[p] = ctxMap
 	}
 	return nil
 }

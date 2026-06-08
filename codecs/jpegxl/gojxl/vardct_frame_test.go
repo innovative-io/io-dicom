@@ -136,18 +136,18 @@ func TestVarDCTHfGlobal(t *testing.T) {
 	if st.usedACS != 1 {
 		t.Errorf("usedACS=%b, want 1 (DCT8x8 only)", st.usedACS)
 	}
-	order, ok := st.coeffOrders[0]
+	order, ok := st.coeffOrders[0][0]
 	if !ok {
 		t.Fatal("no coefficient order for the DCT8x8 order class")
 	}
 	if len(order[0]) != 64 || order[0][0] != 0 {
 		t.Errorf("order[0] len=%d order[0][0]=%d, want 64 / DC-first", len(order[0]), order[0][0])
 	}
-	if st.acCode == nil {
+	if st.acCode[0] == nil {
 		t.Fatal("AC histograms not decoded")
 	}
-	if want := st.numHistograms * st.blockCtx.numACContexts(); len(st.acCtxMap) != want {
-		t.Errorf("AC context map len=%d, want %d", len(st.acCtxMap), want)
+	if want := st.numHistograms * st.blockCtx.numACContexts(); len(st.acCtxMap[0]) != want {
+		t.Errorf("AC context map len=%d, want %d", len(st.acCtxMap[0]), want)
 	}
 }
 

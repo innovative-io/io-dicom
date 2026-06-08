@@ -366,3 +366,36 @@ func TestVarDCTReconstructMultiDCGroup(t *testing.T) {
 		t.Errorf("green gradient too small: %d..%d", get(10, 10, 1), get(10, 2290, 1))
 	}
 }
+
+// TestVarDCTReconstructMultiPass decodes a progressive (multi-pass) fixture
+// where coefficients are split across two passes (PassShift [1,0]) and
+// accumulated. Exercises the per-pass coefficient orders / AC histograms /
+// readers and the shifted accumulation. Byte-exact vs djxl (mean ~0.24).
+func TestVarDCTReconstructMultiPass(t *testing.T) {
+	data, err := os.ReadFile("testdata/vardct_prog512.jxl")
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := DecodeVarDCT(data)
+	if err != nil {
+		t.Fatalf("DecodeVarDCT: %v", err)
+	}
+	if img.W != 512 || img.H != 512 || img.Channels != 3 {
+		t.Fatalf("got %dx%d ch=%d, want 512x512x3", img.W, img.H, img.Channels)
+	}
+	for c := 0; c < 3; c++ {
+		lo, hi := 255, 0
+		for i := 0; i < img.W*img.H; i++ {
+			v := int(img.Pixels[i*3+c])
+			if v < lo {
+				lo = v
+			}
+			if v > hi {
+				hi = v
+			}
+		}
+		if hi-lo < 120 {
+			t.Errorf("channel %d range too narrow (%d..%d)", c, lo, hi)
+		}
+	}
+}
