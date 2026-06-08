@@ -161,7 +161,9 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			name:     "Should change transfer syntax to JPEG2000",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEG2000},
-			wantErr:  false, // pure-Go JPEG 2000 encoder
+			// .91 accepts a reversible codestream; the pure-Go 5/3 encoder is
+			// conformant (a native backend would produce a lossy codestream).
+			wantErr: false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000MCLossless",
@@ -173,25 +175,25 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			name:     "Should change transfer syntax to JPEG2000MC",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEG2000MC},
-			wantErr:  false, // pure-Go JPEG 2000 encoder
+			wantErr:  false, // .91 MC accepts a reversible codestream (see JPEG2000)
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2KLossless",
 			fileName: "../testdata/jpeg8.dcm",
 			args:     args{transfersyntax.HTJ2KLossless},
-			wantErr:  false, // pure-Go HTJ2K lossless encoder
+			wantErr:  false, // pure-Go HTJ2K encoder (real HT code-blocks)
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2KLosslessRPCL",
 			fileName: "../testdata/jpeg8.dcm",
 			args:     args{transfersyntax.HTJ2KLosslessRPCL},
-			wantErr:  false, // pure-Go HTJ2K lossless encoder
+			wantErr:  false, // pure-Go HTJ2K encoder (real HT code-blocks)
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2K",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.HTJ2K},
-			wantErr:  false, // pure-Go HTJ2K encoder
+			wantErr:  false, // pure-Go HTJ2K encoder (real HT code-blocks)
 		},
 		{
 			name:     "Should change transfer syntax to JPEGXLLossless",

@@ -47,7 +47,11 @@ func TestChangeTransferSyntaxContextPropagatesCodecContext(t *testing.T) {
 	// mock above registers at the default priority 0, outranking gojpeg2000 (-1).
 	// That would leak the mock into later tests in this binary, so name the real
 	// backend explicitly instead.
-	t.Cleanup(func() { _ = jpeg2000codec.UseBackend("gojpeg2000") })
+	t.Cleanup(func() {
+		if err := jpeg2000codec.UseBackend("gojpeg2000"); err != nil {
+			t.Errorf("cleanup: restoring gojpeg2000 backend failed: %v", err)
+		}
+	})
 	if err := jpeg2000codec.UseBackend("media-context-jpeg2000"); err != nil {
 		t.Fatalf("UseBackend failed: %v", err)
 	}

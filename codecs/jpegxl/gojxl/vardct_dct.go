@@ -17,12 +17,19 @@ type dctTable struct {
 	basis []float32 // [k*n + x] = alpha(k) * cos(pi*(2x+1)*k/(2n))
 }
 
-var dctTableCache = map[int]*dctTable{}
-
-func getDCTTable(n int) *dctTable {
-	if t, ok := dctTableCache[n]; ok {
-		return t
+// dctTableCache is precomputed once at package initialization for the 1D sizes
+// VarDCT uses (covered-block axis lengths 1,2,4,8 and pixel axis lengths
+// 8,16,32,64). It is never mutated afterwards, so concurrent reads (e.g.
+// multi-frame transcoding) are race-free without locking.
+var dctTableCache = func() map[int]*dctTable {
+	m := make(map[int]*dctTable)
+	for _, n := range []int{1, 2, 4, 8, 16, 32, 64} {
+		m[n] = computeDCTTable(n)
 	}
+	return m
+}()
+
+func computeDCTTable(n int) *dctTable {
 	t := &dctTable{n: n, basis: make([]float32, n*n)}
 	for k := 0; k < n; k++ {
 		alpha := math.Sqrt(2.0 / float64(n))
@@ -33,8 +40,17 @@ func getDCTTable(n int) *dctTable {
 			t.basis[k*n+x] = float32(alpha * math.Cos(math.Pi*(2*float64(x)+1)*float64(k)/(2*float64(n))))
 		}
 	}
-	dctTableCache[n] = t
 	return t
+}
+
+func getDCTTable(n int) *dctTable {
+	if t, ok := dctTableCache[n]; ok {
+		return t
+	}
+	// Unexpected size (the reconstruction guard restricts transforms to the
+	// precomputed set): compute a fresh table without mutating the shared cache,
+	// keeping reads lock-free and race-free.
+	return computeDCTTable(n)
 }
 
 // idct1d computes the inverse (DCT-III): out[x] = sum_k coeff[k]*basis[k][x].

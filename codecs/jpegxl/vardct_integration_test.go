@@ -13,7 +13,8 @@ import (
 // shared with the gojxl package tests.
 func TestVarDCTThroughBackend(t *testing.T) {
 	// Select the pure-Go backend explicitly (other tests may leave a custom
-	// backend registered/selected), and restore the default afterwards.
+	// backend registered/selected). The cleanup resets to the passthrough
+	// backend (SetBackend(nil) -> Reset), matching the other backend tests.
 	if err := UseBackend("gojpegxl"); err != nil {
 		t.Skipf("gojpegxl backend unavailable: %v", err)
 	}
