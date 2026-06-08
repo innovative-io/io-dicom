@@ -351,26 +351,35 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 		planeX, planeY, planeB = planes[0], planes[1], planes[2]
 	}
 
-	// Grayscale images carry their luminance in all three (equal) sRGB channels
-	// after XYB conversion; emit a single channel so the output matches the
-	// declared colour space (medical imagery is commonly grayscale).
-	if st.meta.Color.ColorSpace == csGray {
-		pix := make([]byte, W*H)
-		for i := 0; i < W*H; i++ {
-			r, _, _ := xybToLinearRGB(planeX[i], planeY[i], planeB[i])
-			pix[i] = clamp8(linearToSRGB(r))
-		}
-		return &Image{W: W, H: H, Channels: 1, BitDepth: 8, Pixels: pix}, nil
+	// Interleave the colour channels (1 for grayscale — luminance is carried in
+	// the three equal sRGB channels; 3 for RGB) with any decoded extra channels
+	// (alpha, ...). Extra channels are full-resolution 8-bit samples.
+	gray := st.meta.Color.ColorSpace == csGray
+	colorCh := 3
+	if gray {
+		colorCh = 1
 	}
-
-	pix := make([]byte, W*H*3)
+	nc := colorCh + len(st.extra)
+	pix := make([]byte, W*H*nc)
 	for i := 0; i < W*H; i++ {
 		r, g, b := xybToLinearRGB(planeX[i], planeY[i], planeB[i])
-		pix[i*3+0] = clamp8(linearToSRGB(r))
-		pix[i*3+1] = clamp8(linearToSRGB(g))
-		pix[i*3+2] = clamp8(linearToSRGB(b))
+		base := i * nc
+		pix[base] = clamp8(linearToSRGB(r))
+		if !gray {
+			pix[base+1] = clamp8(linearToSRGB(g))
+			pix[base+2] = clamp8(linearToSRGB(b))
+		}
+		for ec := range st.extra {
+			v := st.extra[ec][i]
+			if v < 0 {
+				v = 0
+			} else if v > 255 {
+				v = 255
+			}
+			pix[base+colorCh+ec] = byte(v)
+		}
 	}
-	return &Image{W: W, H: H, Channels: 3, BitDepth: 8, Pixels: pix}, nil
+	return &Image{W: W, H: H, Channels: nc, BitDepth: 8, Pixels: pix}, nil
 }
 
 func clamp8(v float32) byte {

@@ -28,6 +28,7 @@ type vardctState struct {
 	acCode      []*ansCode
 	acCtxMap    [][]uint8
 	acCoeffs    [3]map[int][]int32 // per channel: top-left block idx -> coeff block
+	extra       [][]int32          // decoded extra-channel planes (full resolution)
 }
 
 // decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
@@ -75,9 +76,6 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 	if st.fh.Flags != 0 {
 		return nil, errors.New("gojxl: frame flags (patches/splines/noise/DC) not yet supported")
 	}
-	if len(st.meta.ExtraChannels) != 0 {
-		return st, errors.New("gojxl: VarDCT with extra channels not yet supported")
-	}
 
 	// Sections are byte-aligned and laid out contiguously after the TOC in
 	// section-index order. Build a per-section bit reader over each byte range.
@@ -117,6 +115,14 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		return nil, err
 	}
 	if err := decodeLfGlobal(lfr, st); err != nil {
+		return st, err
+	}
+
+	// ----- Global modular extra channels (alpha, ...) in LfGlobal -----
+	// For VarDCT the modular image is just the extra channels; those that fit a
+	// group are decoded here (ModularGlobal). Channels too big for one group
+	// would be decoded per AC group, which is not yet supported.
+	if err := decodeVarDCTExtraChannels(lfr, st); err != nil {
 		return st, err
 	}
 
@@ -178,6 +184,60 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 	}
 
 	return st, nil
+}
+
+// decodeVarDCTExtraChannels decodes the modular extra channels (alpha, ...) of a
+// VarDCT frame from the global modular sub-stream (ModularGlobal). For VarDCT
+// the modular image consists solely of the extra channels; channels that fit a
+// group are decoded here at full resolution. Channels too large for one group
+// (multi-group full-res extra channels) and down/upsampled extra channels are
+// not yet supported.
+func decodeVarDCTExtraChannels(b *bitReader, st *vardctState) error {
+	nbExtra := len(st.meta.ExtraChannels)
+	if nbExtra == 0 {
+		return nil
+	}
+	w, h := int(st.fd.xsize), int(st.fd.ysize)
+	groupDim := int(st.fd.groupDim)
+	img := &modImage{bitdepth: int(st.meta.BitDepth.BitsPerSample)}
+	for ec := 0; ec < nbExtra; ec++ {
+		if st.meta.ExtraChannels[ec].DimShift != 0 {
+			return errors.New("gojxl: downsampled VarDCT extra channels not yet supported")
+		}
+		if w > groupDim || h > groupDim {
+			return errors.New("gojxl: multi-group VarDCT extra channels not yet supported")
+		}
+		img.channel = append(img.channel, modChannel{w: w, h: h, pix: make([]int32, w*h)})
+	}
+
+	gh, err := readGroupHeader(b)
+	if err != nil {
+		return err
+	}
+	if !gh.useGlobalTree {
+		return errors.New("gojxl: VarDCT extra-channel local trees not supported")
+	}
+	for i := range gh.transforms {
+		if err := metaApplyTransform(img, &gh.transforms[i]); err != nil {
+			return err
+		}
+	}
+	reader := newANSSymbolReader(st.code, b, maxChannelWidth(img.channel))
+	for ci := range img.channel {
+		decodeChannel(reader, b, st.tree, st.ctxMap, img.channel, ci, 0, gh.wp) // ModularGlobal stream id = 0
+	}
+	if !reader.checkFinalState() {
+		return errors.New("gojxl: VarDCT extra-channel ANS final state failed")
+	}
+	for i := len(gh.transforms) - 1; i >= 0; i-- {
+		if err := inverseTransform(img, gh.transforms[i], gh.wp); err != nil {
+			return err
+		}
+	}
+	for c := img.nbMeta; c < len(img.channel); c++ {
+		st.extra = append(st.extra, img.channel[c].pix)
+	}
+	return nil
 }
 
 // decodeLfGlobal parses the LfGlobal section: the DC dequant matrices, the
