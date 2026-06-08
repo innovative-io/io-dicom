@@ -149,6 +149,10 @@ func readFrameHeader(b *bitReader, meta *ImageMetadata) (FrameHeader, error) {
 	h.Upsampling = 1
 	h.NumPasses = 1
 	h.IsLast = true
+	// group_size_shift default is 1 (group dim 256); only modular frames code it.
+	// Must be set before the all_default early return so default VarDCT frames
+	// (which never code it) get the right group geometry.
+	h.GroupSizeShift = 1
 	if b.ReadBool() { // all_default
 		h.Type = frameRegular
 		return h, nil

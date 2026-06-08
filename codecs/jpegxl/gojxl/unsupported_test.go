@@ -34,19 +34,26 @@ func TestUnsupportedInputsRejected(t *testing.T) {
 	})
 }
 
-// TestVarDCTUnsupportedDegradeGracefully verifies that a VarDCT frame using a
-// feature the pure-Go decoder does not yet implement returns a clear error
-// rather than panicking or emitting garbage, so the codec backend can fall back
-// to a native decoder. (vardct_big1280 uses a coded block-context map that is
-// not yet handled.)
-func TestVarDCTUnsupportedDegradeGracefully(t *testing.T) {
-	for _, f := range []string{"vardct_big1280.jxl"} {
-		data, err := os.ReadFile(filepath.Join("testdata", f))
-		if err != nil {
-			t.Skipf("fixture %s unavailable: %v", f, err)
-		}
-		if _, err := Decode(data); err == nil {
-			t.Errorf("%s: expected an error for an unsupported VarDCT feature", f)
-		}
+// TestVarDCTCodedBlockCtxMap decodes a 1280x1280 -e8 fixture whose frame header
+// is all-default (so group_size_shift takes its default of 1) and whose AC
+// block-context map is coded (non-default, 6 contexts). It is the regression
+// guard for the group_size_shift default in the all-default frame-header path —
+// getting it wrong miscounts the TOC entries and desyncs the whole frame.
+func TestVarDCTCodedBlockCtxMap(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "vardct_big1280.jxl"))
+	if err != nil {
+		t.Skipf("fixture unavailable: %v", err)
+	}
+	img, err := Decode(data)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if img.W != 1280 || img.H != 1280 || img.Channels != 3 {
+		t.Fatalf("got %dx%d ch=%d, want 1280x1280x3", img.W, img.H, img.Channels)
+	}
+	// Source is an R=x, G=y gradient: corners must differ widely.
+	get := func(x, y, c int) int { return int(img.Pixels[(y*img.W+x)*3+c]) }
+	if get(1270, 10, 0)-get(10, 10, 0) < 180 {
+		t.Errorf("red gradient too small: %d..%d", get(10, 10, 0), get(1270, 10, 0))
 	}
 }
