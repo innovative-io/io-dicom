@@ -66,14 +66,48 @@ func TestDefaultLibraryDCTMatchesHardcoded(t *testing.T) {
 	}
 }
 
-// TestDefaultLibraryUnsupportedNil documents that the 128/256 DCTs are not yet
-// in the default library (decoder must reject those strategies). The DCT64X64,
-// DCT32X64 and AFV0 kinds are now populated.
-func TestDefaultLibraryUnsupportedNil(t *testing.T) {
+// TestDefaultLibraryAllKindsPopulated checks that every quant-table kind has a
+// default encoding — the decoder now supports the full transform set (including
+// the 128/256 DCTs and AFV).
+func TestDefaultLibraryAllKindsPopulated(t *testing.T) {
+	lib := buildDefaultQuantLibrary()
+	for kind := 0; kind < kNumQuantTables; kind++ {
+		if lib[kind] == nil {
+			t.Errorf("quant kind %d has no default encoding", kind)
+		}
+	}
+}
+
+// TestLargeDCTMachinery exercises the DCT128/256 quant tables and the inverse
+// DCT at those sizes. cjxl never emits DCT128/256 for normal content, so these
+// transforms cannot be validated against a reference fixture; this guards that
+// the spec-derived constants build a valid dequant table and that the inverse
+// transform round-trips (the reconstruction path itself is shared with the
+// fixture-validated DCT8..64 sizes).
+func TestLargeDCTMachinery(t *testing.T) {
 	lib := buildDefaultQuantLibrary()
 	for _, kind := range []int{qtDCT128X128, qtDCT64X128, qtDCT256X256, qtDCT128X256} {
-		if lib[kind] != nil {
-			t.Errorf("kind %d unexpectedly populated", kind)
+		if _, ok := computeInvQuantTable(kind, lib[kind]); !ok {
+			t.Errorf("computeInvQuantTable kind %d failed", kind)
+		}
+	}
+	for _, n := range []int{128, 256} {
+		in := make([]float32, n*n)
+		for i := range in {
+			in[i] = float32((i*37)%101) - 50
+		}
+		back := idct2d(dct2d(in, n, n), n, n)
+		var maxd float32
+		for i := range in {
+			if d := back[i] - in[i]; d > maxd || -d > maxd {
+				if d < 0 {
+					d = -d
+				}
+				maxd = d
+			}
+		}
+		if maxd > 1e-2 {
+			t.Errorf("n=%d DCT round-trip max error = %g", n, maxd)
 		}
 	}
 }

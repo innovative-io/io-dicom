@@ -23,7 +23,7 @@ type dctTable struct {
 // multi-frame transcoding) are race-free without locking.
 var dctTableCache = func() map[int]*dctTable {
 	m := make(map[int]*dctTable)
-	for _, n := range []int{1, 2, 4, 8, 16, 32, 64} {
+	for _, n := range []int{1, 2, 4, 8, 16, 32, 64, 128, 256} {
 		m[n] = computeDCTTable(n)
 	}
 	return m
