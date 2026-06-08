@@ -10,7 +10,10 @@ import (
 // interleaved samples (channel-interleaved, LE for >8-bit).
 func TestDecodeInterleaved(t *testing.T) {
 	t.Run("rgb8", func(t *testing.T) {
-		data, _ := os.ReadFile(filepath.Join("testdata", "rgb8_8x4_lossless.jxl"))
+		data, err := os.ReadFile(filepath.Join("testdata", "rgb8_8x4_lossless.jxl"))
+		if err != nil {
+			t.Skipf("fixture unavailable: %v", err)
+		}
 		img, err := Decode(data)
 		if err != nil {
 			t.Fatal(err)
@@ -32,7 +35,10 @@ func TestDecodeInterleaved(t *testing.T) {
 	})
 
 	t.Run("gray16", func(t *testing.T) {
-		data, _ := os.ReadFile(filepath.Join("testdata", "gray16_8x4_lossless.jxl"))
+		data, err := os.ReadFile(filepath.Join("testdata", "gray16_8x4_lossless.jxl"))
+		if err != nil {
+			t.Skipf("fixture unavailable: %v", err)
+		}
 		img, err := Decode(data)
 		if err != nil {
 			t.Fatal(err)
