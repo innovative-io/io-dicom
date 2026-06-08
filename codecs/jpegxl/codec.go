@@ -90,10 +90,11 @@ func (passthroughBackend) Encode(_ []byte, _ uint16, _ uint16, _ uint16, _ uint1
 var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 
 func init() {
+	registerPureGoBackend() // pure-Go gojpegxl (lossless Modular decode)
 	registerNativeBackends()
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
-		slog.Warn("jpegxl: no native backend available; decode and encode will fail (build with -tags libjxl)")
+		slog.Warn("jpegxl: no decode backend available")
 	}
 }
 

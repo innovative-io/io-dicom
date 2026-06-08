@@ -1,0 +1,696 @@
+package gojxl
+
+import "errors"
+
+var errVarDCTIncomplete = errors.New("gojxl: VarDCT decode not yet complete")
+
+// vardctState carries the parsed VarDCT global decoder state between sections as
+// the integration is built out.
+type vardctState struct {
+	sh       SizeHeader
+	meta     *ImageMetadata
+	fh       FrameHeader
+	fd       frameDimensions
+	quant    *quantizer
+	blockCtx *blockCtxMap
+	cmap     colorCorrelation
+	tree     []treeNode
+	code     *ansCode
+	ctxMap   []uint8
+	dc       *dcChannels
+	acm      *acMetadata
+
+	quantLib      [kNumQuantTables]*quantEncoding
+	numHistograms int
+	usedACS       uint32
+	// Per-pass coefficient orders and AC histograms (length NumPasses).
+	coeffOrders []map[int][3][]int
+	acCode      []*ansCode
+	acCtxMap    [][]uint8
+	acCoeffs    [3]map[int][]int32 // per channel: top-left block idx -> coeff block
+}
+
+// decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
+// incrementally; until the full pipeline is wired it parses the global sections
+// and returns errVarDCTIncomplete.
+func decodeVarDCTFrame(data []byte) (*vardctState, error) {
+	cs, err := codestream(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(cs) < 2 || cs[0] != 0xFF || cs[1] != 0x0A {
+		return nil, errors.New("gojxl: bad codestream signature")
+	}
+	b := newBitReader(cs[2:])
+	st := &vardctState{}
+	if st.sh, err = readSizeHeader(b); err != nil {
+		return nil, err
+	}
+	meta, err := readImageMetadata(b)
+	if err != nil {
+		return nil, err
+	}
+	st.meta = &meta
+	if meta.Color.WantICC {
+		return nil, errors.New("gojxl: ICC profiles not yet supported")
+	}
+	readTransformData(b, meta.XYBEncoded)
+	if err := b.JumpToByteBoundary(); err != nil {
+		return nil, err
+	}
+	if st.fh, err = readFrameHeader(b, &meta); err != nil {
+		return nil, err
+	}
+	if st.fh.Encoding != frameVarDCT {
+		return nil, errors.New("gojxl: not a VarDCT frame")
+	}
+	st.fd = computeFrameDimensions(st.sh.Xsize, st.sh.Ysize, st.fh.GroupSizeShift, st.fh.Upsampling)
+	tocEntries := numTocEntries(st.fd.numGroups, st.fd.numDCGroups, st.fh.NumPasses)
+	sizes, perm, err := readTOC(b, tocEntries)
+	if err != nil {
+		return nil, err
+	}
+	if st.fh.Flags != 0 {
+		return nil, errors.New("gojxl: frame flags (patches/splines/noise/DC) not yet supported")
+	}
+	if len(st.meta.ExtraChannels) != 0 {
+		return st, errors.New("gojxl: VarDCT with extra channels not yet supported")
+	}
+
+	// Sections are byte-aligned and laid out contiguously after the TOC in
+	// section-index order. Build a per-section bit reader over each byte range.
+	// For the single-section case (numGroups==1 && numPasses==1) the whole frame
+	// is one section read sequentially.
+	sectionData := cs[2:][b.bitsConsumed()/8:]
+	// Raw prefix-sum offsets in stored order; when the TOC is permuted, logical
+	// section i lives at the stored slot perm[i] (toc.cc ReadGroupOffsets).
+	rawOffs := make([]int, len(sizes)+1)
+	for i, s := range sizes {
+		rawOffs[i+1] = rawOffs[i] + int(s)
+	}
+	sectionReader := func(i uint32) (*bitReader, error) {
+		slot := int(i)
+		if perm != nil {
+			if int(i) >= len(perm) {
+				return nil, errTruncated
+			}
+			slot = int(perm[i])
+		}
+		if slot >= len(sizes) || rawOffs[slot+1] > len(sectionData) {
+			return nil, errTruncated
+		}
+		return newBitReader(sectionData[rawOffs[slot]:rawOffs[slot+1]]), nil
+	}
+	single := tocEntries == 1
+	reader := func(i uint32) (*bitReader, error) {
+		if single {
+			return newBitReader(sectionData), nil // one continuous section
+		}
+		return sectionReader(i)
+	}
+
+	// ----- LfGlobal (section 0): global DC info + modular tree/histograms -----
+	lfr, err := reader(0)
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeLfGlobal(lfr, st); err != nil {
+		return st, err
+	}
+
+	// ----- DC groups (sections 1..numDCGroups): VarDCT DC (LF) image + AC
+	// metadata. Each DC group is an independent modular sub-stream covering a
+	// groupDim-blocks region of the frame; results are placed into the frame-wide
+	// DC image and AC metadata grids. -----
+	dcW := int(divCeil(st.fd.xsize, acBlockDim))
+	dcH := int(divCeil(st.fd.ysize, acBlockDim))
+	allocFrameDCAndACM(st, dcW, dcH)
+	dcGroupDim := int(st.fd.groupDim) // DC group dimension in 8x8 blocks
+	ndgx := (dcW + dcGroupDim - 1) / dcGroupDim
+	for g := 0; g < int(st.fd.numDCGroups); g++ {
+		gx, gy := g%ndgx, g/ndgx
+		bx0, by0 := gx*dcGroupDim, gy*dcGroupDim
+		gbw := min(dcGroupDim, dcW-bx0)
+		gbh := min(dcGroupDim, dcH-by0)
+		dcr := lfr
+		if !single {
+			if dcr, err = sectionReader(1 + uint32(g)); err != nil {
+				return st, err
+			}
+		}
+		if err := decodeVarDCTDCImage(dcr, st, g, bx0, by0, gbw, gbh); err != nil {
+			return st, err
+		}
+		if err := decodeAcMetadata(dcr, st, g, bx0, by0, gbw, gbh); err != nil {
+			return st, err
+		}
+	}
+
+	// ----- ACGlobal / HfGlobal (section 1+numDCGroups) -----
+	hfr := lfr
+	if !single {
+		if hfr, err = sectionReader(1 + st.fd.numDCGroups); err != nil {
+			return st, err
+		}
+	}
+	if err := decodeHfGlobal(hfr, st); err != nil {
+		return st, err
+	}
+
+	// ----- AC groups: one section per (pass, group). The passes of a group are
+	// decoded together, accumulating into the shared coefficient blocks. -----
+	st.acCoeffs = [3]map[int][]int32{{}, {}, {}}
+	numPasses := st.fh.NumPasses
+	for g := uint32(0); g < st.fd.numGroups; g++ {
+		passReaders := make([]*bitReader, numPasses)
+		for p := uint32(0); p < numPasses; p++ {
+			if single {
+				passReaders[p] = lfr
+			} else if passReaders[p], err = sectionReader(acGroupIndex(p, g, st.fd.numGroups, st.fd.numDCGroups)); err != nil {
+				return st, err
+			}
+		}
+		if err := decodeACGroup(passReaders, st, int(g)); err != nil {
+			return st, err
+		}
+	}
+
+	return st, nil
+}
+
+// decodeLfGlobal parses the LfGlobal section: the DC dequant matrices, the
+// VarDCT global DC info (quantizer, block context map, CfL), and the modular
+// global tree and histograms.
+func decodeLfGlobal(b *bitReader, st *vardctState) error {
+	readDequantMatricesDC(b)
+	st.quant = decodeQuantizer(b)
+	var err error
+	if st.blockCtx, err = decodeBlockCtxMap(b); err != nil {
+		return err
+	}
+	if st.cmap, err = decodeCfLDC(b); err != nil {
+		return err
+	}
+	// A global modular tree is optional: when absent, each DC group / AC metadata
+	// sub-stream carries its own local tree (handled per group via groupTree).
+	if b.ReadBits(1) == 1 {
+		if st.tree, err = decodeTree(b, 1<<20); err != nil {
+			return err
+		}
+		if st.code, st.ctxMap, err = decodeHistograms(b, (len(st.tree)+1)/2, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// groupTree returns the tree/histograms a modular sub-stream should decode with:
+// the global ones when the group header requests them, or a freshly-decoded
+// local tree + histograms otherwise (encoding.cc ModularDecode).
+func groupTree(b *bitReader, st *vardctState, useGlobal bool) ([]treeNode, *ansCode, []uint8, error) {
+	if useGlobal {
+		if st.tree == nil {
+			return nil, nil, nil, errors.New("gojxl: group requests a global tree but none is present")
+		}
+		return st.tree, st.code, st.ctxMap, nil
+	}
+	tree, err := decodeTree(b, 1<<20)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	code, ctxMap, err := decodeHistograms(b, (len(tree)+1)/2, false)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return tree, code, ctxMap, nil
+}
+
+// DecodeVarDCT decodes a lossy VarDCT JPEG XL frame to an 8-bit sRGB image.
+// Restricted to the currently-supported subset (XYB, single group/pass, all
+// DCT8x8 blocks). Loop filters (Gaborish/EPF) are not yet applied, so block
+// edges differ slightly from a conforming decoder; interiors match.
+func DecodeVarDCT(data []byte) (*Image, error) {
+	st, err := decodeVarDCTFrame(data)
+	if err != nil {
+		return nil, err
+	}
+	return reconstructVarDCT(st)
+}
+
+// decodeACGroup decodes the quantized AC coefficients of one AC group
+// (dec_group.cc DecodeGroupImpl / DecodeACVarBlock). Each group covers a
+// groupDim×groupDim pixel region (32×32 blocks at groupDim 256); the AC stream
+// is an independent ANS section. Coefficients are accumulated into the
+// frame-wide st.acCoeffs, keyed per channel by the varblock's top-left block
+// index. The LLF/DC slots stay 0 here and are filled from the DC image during
+// reconstruction. The non-zero count prediction grid is group-local — it does
+// not cross group boundaries, matching libjxl's per-group num_nzeroes cache.
+func decodeACGroup(readers []*bitReader, st *vardctState, groupIdx int) error {
+	bw := st.acm.bw
+	numPasses := len(readers)
+
+	// Group block bounds within the frame block grid.
+	gdb := int(st.fd.groupDim) / 8 // group dimension in 8×8 blocks
+	gx := groupIdx % int(st.fd.xsizeGroups)
+	gy := groupIdx / int(st.fd.xsizeGroups)
+	bx0, by0 := gx*gdb, gy*gdb
+	bx1 := min(bx0+gdb, bw)
+	by1 := min(by0+gdb, st.acm.bh)
+	gw := bx1 - bx0
+	gh := by1 - by0
+
+	// Per-pass decode state. Each pass is an independent ANS-coded section: it
+	// selects a histogram set (histo_selector_bits) and keeps its own group-local
+	// non-zero prediction grids. Coefficients from all passes accumulate into the
+	// same block, shifted by the pass's PassShift (dec_group.cc DecodeACVarBlock).
+	ans := make([]*ansSymbolReader, numPasses)
+	ctxOffset := make([]int, numPasses)
+	nzeros := make([][3][]int32, numPasses)
+	for p := 0; p < numPasses; p++ {
+		rp := readers[p]
+		if st.numHistograms > 1 {
+			rp.Refill()
+			cur := int(rp.ReadBits(ceilLog2Nonzero(uint32(st.numHistograms))))
+			if cur >= st.numHistograms {
+				return errors.New("gojxl: invalid AC histogram selector")
+			}
+			ctxOffset[p] = cur * st.blockCtx.numACContexts()
+		}
+		ans[p] = newANSSymbolReader(st.acCode[p], rp, 0)
+		nzeros[p] = [3][]int32{make([]int32, gw*gh), make([]int32, gw*gh), make([]int32, gw*gh)}
+	}
+
+	for by := by0; by < by1; by++ {
+		ly := by - by0
+		for bx := bx0; bx < bx1; bx++ {
+			lx := bx - bx0
+			idx := by*bw + bx
+			if !st.acm.valid[idx] {
+				continue
+			}
+			acs := st.acm.strategy[idx]
+			ord := int(kStrategyOrder[acs])
+			coveredBlocks := acs.numBlocks()
+			log2cov := acs.log2CoveredBlocks()
+			size := coveredBlocks * 64
+			qf := st.acm.quantF[idx]
+			cbY, cbX := acs.coveredBlocksY(), acs.coveredBlocksX()
+
+			// Channel decode order is Y, X, B = {1, 0, 2}.
+			for _, c := range [3]int{1, 0, 2} {
+				block := make([]int32, size)
+				st.acCoeffs[c][idx] = block
+				blockCtx := st.blockCtx.blockContext(0, uint32(qf), ord, c)
+				zdOffset := st.blockCtx.zeroDensityContextsOffset(blockCtx)
+				for p := 0; p < numPasses; p++ {
+					reader := ans[p]
+					rp := readers[p]
+					cm := st.acCtxMap[p]
+					ng := nzeros[p][c]
+					shift := uint(st.fh.PassShift[p])
+
+					var rowTop []int32
+					if ly > 0 {
+						rowTop = ng[(ly-1)*gw : ly*gw]
+					}
+					row := ng[ly*gw : (ly+1)*gw]
+					predicted := int(predictFromTopAndLeft(rowTop, row, lx, 32))
+
+					nzeroCtx := st.blockCtx.nonZeroContext(predicted, blockCtx) + ctxOffset[p]
+					nz := int(reader.readHybridUint(nzeroCtx, rp, cm))
+					if nz > size-coveredBlocks {
+						return errors.New("gojxl: AC nzeros too large")
+					}
+					val := int32((nz + coveredBlocks - 1) >> uint(log2cov))
+					for yy := 0; yy < cbY; yy++ {
+						for xx := 0; xx < cbX; xx++ {
+							ng[(ly+yy)*gw+(lx+xx)] = val
+						}
+					}
+
+					histoOffset := ctxOffset[p] + zdOffset
+					prev := 0
+					if nz <= size/16 {
+						prev = 1
+					}
+					order := st.coeffOrders[p][ord][c]
+					for k := coveredBlocks; k < size && nz != 0; k++ {
+						ctx := histoOffset + zeroDensityContext(nz, k, coveredBlocks, log2cov, prev)
+						u := reader.readHybridUint(ctx, rp, cm)
+						block[order[k]] += unpackSigned32(u) << shift
+						if u != 0 {
+							prev = 1
+						} else {
+							prev = 0
+						}
+						nz -= prev
+					}
+					if nz != 0 {
+						return errors.New("gojxl: AC nzeros not exhausted at block end")
+					}
+				}
+			}
+		}
+	}
+	for p := 0; p < numPasses; p++ {
+		if !ans[p].checkFinalState() {
+			return errors.New("gojxl: AC group ANS final state failed")
+		}
+	}
+	return nil
+}
+
+// kOrderEnc = U32Enc(Val(0x5F), Val(0x13), Val(0), Bits(13)) (frame_header.h).
+var kOrderEnc = [4]u32d{u32Val(0x5F), u32Val(0x13), u32Val(0), u32Bits(kNumOrders)}
+
+// decodeHfGlobal parses the AC global section: the AC dequant matrices, the
+// histogram count, the coefficient orders, and the AC entropy histograms.
+func decodeHfGlobal(b *bitReader, st *vardctState) error {
+	// AC DequantMatrices. all_default -> use the built-in default library.
+	allDefault := b.ReadBits(1) == 1
+	if !allDefault {
+		return errors.New("gojxl: non-default AC dequant matrices not yet supported")
+	}
+	st.quantLib = buildDefaultQuantLibrary()
+
+	// Number of histogram sets.
+	numHistoBits := ceilLog2Nonzero(st.fd.numGroups)
+	st.numHistograms = 1 + int(b.ReadBits(numHistoBits))
+
+	// used_acs: the set of AC strategies actually present in the frame.
+	var usedACS uint32
+	for i, s := range st.acm.strategy {
+		if st.acm.valid[i] { // only varblock top-lefts carry a real strategy
+			usedACS |= 1 << uint(s)
+		}
+	}
+	st.usedACS = usedACS
+
+	// Per-pass coefficient orders and AC histograms (one set per pass; the
+	// histogram count is shared across passes).
+	numPasses := int(st.fh.NumPasses)
+	st.coeffOrders = make([]map[int][3][]int, numPasses)
+	st.acCode = make([]*ansCode, numPasses)
+	st.acCtxMap = make([][]uint8, numPasses)
+	numContexts := st.numHistograms * st.blockCtx.numACContexts()
+	for p := 0; p < numPasses; p++ {
+		orders, err := decodeCoeffOrders(b, st.usedACS)
+		if err != nil {
+			return err
+		}
+		st.coeffOrders[p] = orders
+		code, ctxMap, err := decodeHistograms(b, numContexts, false)
+		if err != nil {
+			return err
+		}
+		st.acCode[p] = code
+		st.acCtxMap[p] = ctxMap
+	}
+	return nil
+}
+
+// decodeCoeffOrders reads the coefficient orders for all used AC strategies
+// (DecodeCoeffOrders). Returns a map keyed by [orderClass][channel] -> order.
+func decodeCoeffOrders(b *bitReader, usedACS uint32) (map[int][3][]int, error) {
+	usedOrders := b.ReadU32(kOrderEnc[0], kOrderEnc[1], kOrderEnc[2], kOrderEnc[3])
+
+	var reader *ansSymbolReader
+	var ctxMap []uint8
+	if usedOrders != 0 {
+		code, cm, err := decodeHistograms(b, kPermutationContexts, false)
+		if err != nil {
+			return nil, err
+		}
+		ctxMap = cm
+		reader = newANSSymbolReader(code, b, 0)
+	}
+
+	acsMask := uint32(0)
+	for o := 0; o < acNumValidStrategies; o++ {
+		if usedACS&(1<<uint(o)) == 0 {
+			continue
+		}
+		acsMask |= 1 << kStrategyOrder[o]
+	}
+
+	orders := map[int][3][]int{}
+	computed := uint32(0)
+	for o := 0; o < acNumValidStrategies; o++ {
+		ord := int(kStrategyOrder[o])
+		if computed&(1<<uint(ord)) != 0 {
+			continue
+		}
+		computed |= 1 << uint(ord)
+		t := acStrategyType(o)
+		used := acsMask&(1<<uint(ord)) != 0
+
+		if usedOrders&(1<<uint(ord)) == 0 {
+			// Natural order (only needed if actually used).
+			if used {
+				natural := naturalCoeffOrder(t.coveredBlocksX(), t.coveredBlocksY())
+				var triplet [3][]int
+				for c := 0; c < 3; c++ {
+					triplet[c] = natural
+				}
+				orders[ord] = triplet
+			}
+		} else {
+			var triplet [3][]int
+			for c := 0; c < 3; c++ {
+				order, err := decodeCoeffOrder(t, reader, b, ctxMap)
+				if err != nil {
+					return nil, err
+				}
+				if used {
+					triplet[c] = order
+				}
+			}
+			if used {
+				orders[ord] = triplet
+			}
+		}
+	}
+	if usedOrders != 0 && !reader.checkFinalState() {
+		return nil, errors.New("gojxl: coeff-order ANS final state failed")
+	}
+	return orders, nil
+}
+
+// acMetadata holds per-block transform/quant info for a DC group.
+type acMetadata struct {
+	bw, bh   int              // block grid dimensions
+	strategy []acStrategyType // per-block AC strategy (top-left of each varblock)
+	valid    []bool           // whether a block position is the top-left of a varblock
+	quantF   []int32          // per-block raw quant field
+	epf      []uint8          // per-block EPF sharpness
+	ytoxMap  []int32          // per-color-tile CfL X factor
+	ytobMap  []int32          // per-color-tile CfL B factor
+	ctW, ctH int              // color-tile grid dims
+}
+
+// decodeAcMetadata decodes the AC metadata for one DC group
+// (ModularFrameDecoder::DecodeAcMetadata): a 4-channel modular stream giving the
+// per-color-tile CfL maps, the per-block AC strategy + raw quant field, and the
+// EPF sharpness field. The group covers gbw x gbh blocks at frame block offset
+// (bx0,by0); results are placed into the pre-allocated frame-wide st.acm.
+func decodeAcMetadata(b *bitReader, st *vardctState, groupID, bx0, by0, gbw, gbh int) error {
+	upperBound := gbw * gbh
+	b.Refill()
+	count := int(b.ReadBits(ceilLog2Nonzero(uint32(upperBound)))) + 1
+
+	gctW := (gbw + 7) >> 3
+	gctH := (gbh + 7) >> 3
+
+	img := &modImage{bitdepth: int(st.meta.BitDepth.BitsPerSample)}
+	img.channel = []modChannel{
+		{w: gctW, h: gctH, hshift: 3, vshift: 3, pix: make([]int32, gctW*gctH)}, // ytox
+		{w: gctW, h: gctH, hshift: 3, vshift: 3, pix: make([]int32, gctW*gctH)}, // ytob
+		{w: count, h: 2, pix: make([]int32, count*2)},                           // ACS + QF
+		{w: gbw, h: gbh, pix: make([]int32, gbw*gbh)},                           // EPF sharpness
+	}
+
+	gh, err := readGroupHeader(b)
+	if err != nil {
+		return err
+	}
+	for i := range gh.transforms {
+		if err := metaApplyTransform(img, &gh.transforms[i]); err != nil {
+			return err
+		}
+	}
+	tree, code, ctxMap, err := groupTree(b, st, gh.useGlobalTree)
+	if err != nil {
+		return err
+	}
+	streamID := 1 + 2*int(st.fd.numDCGroups) + groupID // ACMetadata stream id
+	reader := newANSSymbolReader(code, b, maxChannelWidth(img.channel))
+	// Two-pass decode order: channels with min(hshift,vshift) >= 3 first.
+	for _, dcPass := range []bool{true, false} {
+		for ci := range img.channel {
+			ch := &img.channel[ci]
+			isDC := ch.hshift >= 3 && ch.vshift >= 3
+			if isDC != dcPass {
+				continue
+			}
+			decodeChannel(reader, b, tree, ctxMap, img.channel, ci, streamID, gh.wp)
+		}
+	}
+	if !reader.checkFinalState() {
+		return errors.New("gojxl: AC metadata ANS final state failed")
+	}
+	for i := len(gh.transforms) - 1; i >= 0; i-- {
+		if err := inverseTransform(img, gh.transforms[i], gh.wp); err != nil {
+			return err
+		}
+	}
+
+	base := img.nbMeta
+	acsRow := img.channel[base+2].pix[0:count]        // row 0
+	qfRow := img.channel[base+2].pix[count : 2*count] // row 1
+	epfCh := img.channel[base+3].pix
+	ytox := img.channel[base+0].pix
+	ytob := img.channel[base+1].pix
+
+	md := st.acm
+	bw := md.bw
+	ctx0, cty0 := bx0>>3, by0>>3
+	// Place the per-color-tile CfL maps into the frame-wide grids.
+	for gty := 0; gty < gctH; gty++ {
+		for gtx := 0; gtx < gctW; gtx++ {
+			fi := (cty0+gty)*md.ctW + (ctx0 + gtx)
+			md.ytoxMap[fi] = ytox[gty*gctW+gtx]
+			md.ytobMap[fi] = ytob[gty*gctW+gtx]
+		}
+	}
+	// covered tracks blocks already claimed by a multiblock varblock (group-local;
+	// varblocks never cross a DC group boundary). valid marks only each varblock's
+	// top-left (libjxl IsFirstBlock). quantF is per 8x8 block so EPF sigma is
+	// correct on covered cells.
+	covered := make([]bool, gbw*gbh)
+	num := 0
+	for ly := 0; ly < gbh; ly++ {
+		for lx := 0; lx < gbw; lx++ {
+			fidx := (by0+ly)*bw + (bx0 + lx)
+			md.epf[fidx] = uint8(epfCh[ly*gbw+lx])
+			if covered[ly*gbw+lx] {
+				continue // part of an earlier multiblock strategy
+			}
+			if num >= count {
+				return errors.New("gojxl: AC metadata corrupted (count)")
+			}
+			rawACS := acsRow[num]
+			if rawACS < 0 || rawACS >= acNumValidStrategies {
+				return errors.New("gojxl: invalid AC strategy")
+			}
+			t := acStrategyType(rawACS)
+			cbx, cby := t.coveredBlocksX(), t.coveredBlocksY()
+			if lx+cbx > gbw || ly+cby > gbh {
+				return errors.New("gojxl: AC strategy overflows block grid")
+			}
+			qf := qfRow[num]
+			if qf < 0 {
+				qf = 0
+			} else if qf > kQuantMax-1 {
+				qf = kQuantMax - 1
+			}
+			for iy := 0; iy < cby; iy++ {
+				for ix := 0; ix < cbx; ix++ {
+					covered[(ly+iy)*gbw+(lx+ix)] = true
+					md.quantF[(by0+ly+iy)*bw+(bx0+lx+ix)] = 1 + qf
+				}
+			}
+			md.valid[fidx] = true // top-left of this varblock only
+			md.strategy[fidx] = t
+			num++
+		}
+	}
+	return nil
+}
+
+const kQuantMax = 256
+
+// dcChannels holds the decoded (still-quantized) LF/DC planes in [Y, X, B] order.
+type dcChannels struct {
+	w, h           int
+	extraPrecision int
+	y, x, bch      []int32
+}
+
+// allocFrameDCAndACM allocates the frame-wide DC image and AC metadata grids
+// that the per-DC-group decoders fill. The DC group block geometry equals the DC
+// image geometry (one DC value per 8x8 block), so bw/bh = dcW/dcH.
+func allocFrameDCAndACM(st *vardctState, dcW, dcH int) {
+	st.dc = &dcChannels{w: dcW, h: dcH, y: make([]int32, dcW*dcH), x: make([]int32, dcW*dcH), bch: make([]int32, dcW*dcH)}
+	ctW := (dcW + 7) >> 3
+	ctH := (dcH + 7) >> 3
+	st.acm = &acMetadata{
+		bw: dcW, bh: dcH, ctW: ctW, ctH: ctH,
+		strategy: make([]acStrategyType, dcW*dcH),
+		valid:    make([]bool, dcW*dcH),
+		quantF:   make([]int32, dcW*dcH),
+		epf:      make([]uint8, dcW*dcH),
+		ytoxMap:  make([]int32, ctW*ctH),
+		ytobMap:  make([]int32, ctW*ctH),
+	}
+}
+
+// decodeVarDCTDCImage decodes the LF/DC image for one DC group: a 3-channel
+// modular sub-stream at 1/8 resolution (ModularFrameDecoder::DecodeVarDCTDC),
+// using the global tree/histograms. The group's gbw x gbh region is placed into
+// the frame-wide DC image at (bx0,by0). The result is left quantized; dequant
+// happens during reconstruction.
+func decodeVarDCTDCImage(b *bitReader, st *vardctState, groupID, bx0, by0, gbw, gbh int) error {
+	b.Refill()
+	extraPrecision := int(b.ReadBits(2))
+	if groupID == 0 {
+		st.dc.extraPrecision = extraPrecision
+	} else if extraPrecision != st.dc.extraPrecision {
+		return errors.New("gojxl: per-DC-group extra precision not yet supported")
+	}
+
+	// 3 channels at DC resolution, decoded as a modular image. Channel storage
+	// order matches libjxl: index 0 = Y (c=1), 1 = X (c=0), 2 = B (c=2).
+	img := &modImage{bitdepth: int(st.meta.BitDepth.BitsPerSample)}
+	for i := 0; i < 3; i++ {
+		img.channel = append(img.channel, modChannel{w: gbw, h: gbh, pix: make([]int32, gbw*gbh)})
+	}
+
+	gh, err := readGroupHeader(b)
+	if err != nil {
+		return err
+	}
+	for i := range gh.transforms {
+		if err := metaApplyTransform(img, &gh.transforms[i]); err != nil {
+			return err
+		}
+	}
+	tree, code, ctxMap, err := groupTree(b, st, gh.useGlobalTree)
+	if err != nil {
+		return err
+	}
+	// VarDCTDC stream id = 1 + group_id.
+	streamID := 1 + groupID
+	reader := newANSSymbolReader(code, b, maxChannelWidth(img.channel))
+	for ci := range img.channel {
+		decodeChannel(reader, b, tree, ctxMap, img.channel, ci, streamID, gh.wp)
+	}
+	if !reader.checkFinalState() {
+		return errors.New("gojxl: VarDCT DC ANS final state failed")
+	}
+	for i := len(gh.transforms) - 1; i >= 0; i-- {
+		if err := inverseTransform(img, gh.transforms[i], gh.wp); err != nil {
+			return err
+		}
+	}
+
+	base := img.nbMeta
+	planes := [3][]int32{st.dc.y, st.dc.x, st.dc.bch}
+	dcW := st.dc.w
+	for p := 0; p < 3; p++ {
+		src := img.channel[base+p].pix
+		for y := 0; y < gbh; y++ {
+			copy(planes[p][(by0+y)*dcW+bx0:(by0+y)*dcW+bx0+gbw], src[y*gbw:(y+1)*gbw])
+		}
+	}
+	return nil
+}

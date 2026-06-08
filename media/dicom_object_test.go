@@ -155,61 +155,63 @@ func Test_dcmObj_ChangeTransferSyntax(t *testing.T) {
 			name:     "Should change transfer syntax to JPEG2000Lossless",
 			fileName: "../testdata/jpeg8.dcm",
 			args:     args{transfersyntax.JPEG2000Lossless},
-			wantErr:  true,
+			wantErr:  false, // pure-Go JPEG 2000 lossless encoder
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEG2000},
-			wantErr:  true, // no pure-Go JPEG 2000 encoder
+			// .91 accepts a reversible codestream; the pure-Go 5/3 encoder is
+			// conformant (a native backend would produce a lossy codestream).
+			wantErr: false,
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000MCLossless",
 			fileName: "../testdata/jpeg8.dcm",
 			args:     args{transfersyntax.JPEG2000MCLossless},
-			wantErr:  true,
+			wantErr:  false, // pure-Go JPEG 2000 lossless encoder
 		},
 		{
 			name:     "Should change transfer syntax to JPEG2000MC",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEG2000MC},
-			wantErr:  true, // no pure-Go JPEG 2000 encoder
+			wantErr:  false, // .91 MC accepts a reversible codestream (see JPEG2000)
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2KLossless",
 			fileName: "../testdata/jpeg8.dcm",
 			args:     args{transfersyntax.HTJ2KLossless},
-			wantErr:  true,
+			wantErr:  false, // pure-Go HTJ2K encoder (real HT code-blocks)
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2KLosslessRPCL",
 			fileName: "../testdata/jpeg8.dcm",
 			args:     args{transfersyntax.HTJ2KLosslessRPCL},
-			wantErr:  true,
+			wantErr:  false, // pure-Go HTJ2K encoder (real HT code-blocks)
 		},
 		{
 			name:     "Should change transfer syntax to HTJ2K",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.HTJ2K},
-			wantErr:  true, // no pure-Go HTJ2K encoder
+			wantErr:  false, // pure-Go HTJ2K encoder (real HT code-blocks)
 		},
 		{
 			name:     "Should change transfer syntax to JPEGXLLossless",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGXLLossless},
-			wantErr:  true, // no pure-Go JPEG XL encoder
+			wantErr:  false, // pure-Go lossless Modular JPEG XL encoder
 		},
 		{
 			name:     "Should change transfer syntax to JPEGXLJPEGRecompression",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGXLJPEGRecompression},
-			wantErr:  true, // no pure-Go JPEG XL encoder
+			wantErr:  true, // pure-Go encoder is lossless-Modular only (no JPEG recompression)
 		},
 		{
 			name:     "Should change transfer syntax to JPEGXL",
 			fileName: "../testdata/test2.dcm",
 			args:     args{transfersyntax.JPEGXL},
-			wantErr:  true, // no pure-Go JPEG XL encoder
+			wantErr:  true, // pure-Go encoder is lossless-Modular only (no lossy VarDCT)
 		},
 		{
 			name:     "Should change transfer syntax to MPEG2MPML",

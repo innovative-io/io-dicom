@@ -359,6 +359,18 @@ func encodeJ2KFrame(ctx context.Context, img []byte, j uint32, cols uint16, rows
 	return data, nil
 }
 
+// encodeHTJ2KFrame encodes frame j of img as a High-Throughput JPEG 2000
+// (HTJ2K) codestream (reversible 5/3, HT code-blocks), as required by the HTJ2K
+// transfer syntaxes — the plain JPEG 2000 encoder would emit non-HT code-blocks
+// under an HTJ2K UID. The pure-Go HTJ2K encoder is lossless only.
+func encodeHTJ2KFrame(ctx context.Context, img []byte, j uint32, cols uint16, rows uint16, bitsa uint16, RGB bool) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
+	return jpeg2000.HTJ2Kencode(img[start:end], int(cols), int(rows), int(samples), int(bitsa))
+}
+
 // encodeJXLFrame encodes frame j of img as JPEG XL.
 func encodeJXLFrame(ctx context.Context, img []byte, j uint32, cols uint16, rows uint16, bitsa uint16, RGB bool, lossless bool) ([]byte, error) {
 	samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
@@ -519,10 +531,6 @@ func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RG
 	case transfersyntax.JPEG2000Lossless.UID:
 		fallthrough
 	case transfersyntax.JPEG2000MCLossless.UID:
-		fallthrough
-	case transfersyntax.HTJ2KLossless.UID:
-		fallthrough
-	case transfersyntax.HTJ2KLosslessRPCL.UID:
 		frameData, err := encodeFramesConcurrent(ctx, frames, func(fctx context.Context, j uint32) ([]byte, error) {
 			return encodeJ2KFrame(fctx, img, j, cols, rows, bitsa, RGB, 0)
 		})
@@ -534,10 +542,26 @@ func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RG
 	case transfersyntax.JPEG2000.UID:
 		fallthrough
 	case transfersyntax.JPEG2000MC.UID:
-		fallthrough
-	case transfersyntax.HTJ2K.UID:
+		// The .91 syntaxes accept a lossy or reversible codestream. ratio 10 lets a
+		// native backend produce a lossy codestream; the pure-Go encoder ignores
+		// the ratio and emits a reversible 5/3 codestream, which is also conformant.
 		frameData, err := encodeFramesConcurrent(ctx, frames, func(fctx context.Context, j uint32) ([]byte, error) {
 			return encodeJ2KFrame(fctx, img, j, cols, rows, bitsa, RGB, 10)
+		})
+		if err != nil {
+			return err
+		}
+		index = appendEncapsulatedFrames(obj, index, frameData)
+		*i = index
+	case transfersyntax.HTJ2KLossless.UID:
+		fallthrough
+	case transfersyntax.HTJ2KLosslessRPCL.UID:
+		fallthrough
+	case transfersyntax.HTJ2K.UID:
+		// HTJ2K syntaxes require HT code-blocks; use the dedicated HTJ2K encoder
+		// (reversible 5/3) rather than the plain JPEG 2000 codestream.
+		frameData, err := encodeFramesConcurrent(ctx, frames, func(fctx context.Context, j uint32) ([]byte, error) {
+			return encodeHTJ2KFrame(fctx, img, j, cols, rows, bitsa, RGB)
 		})
 		if err != nil {
 			return err
