@@ -37,6 +37,25 @@ func subsamplingShifts(cs [3]uint32) (hshift, vshift, rawH, rawV [3]int) {
 	return
 }
 
+// ReconstructJPEG reconstructs the original JPEG file bytes from a JPEG XL file
+// that losslessly transcoded a JPEG (a container with a jbrd box). It is the
+// inverse of cjxl's lossless JPEG transcoding. Returns an error for inputs that
+// are not JPEG transcodes or that use an unsupported feature (e.g. progressive
+// scans).
+func ReconstructJPEG(data []byte) ([]byte, error) {
+	jd, err := DecodeJPEGFromJXL(data)
+	if err != nil {
+		return nil, err
+	}
+	return EncodeJPEG(jd)
+}
+
+// IsJPEGRecompression reports whether data is a JPEG XL container carrying a
+// JPEG reconstruction (jbrd) box.
+func IsJPEGRecompression(data []byte) bool {
+	return extractJBRDBox(data) != nil
+}
+
 // DecodeJPEGFromJXL reconstructs the JPEGData (metadata + quantized DCT
 // coefficients + quant tables) from a JPEG XL file that losslessly transcoded a
 // JPEG (i.e. a container with a `jbrd` box and a JPEG-mode VarDCT frame). The

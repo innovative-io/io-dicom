@@ -147,8 +147,29 @@ func DecompressFrame(ctx context.Context, tsUID string, compressed []byte, bitsa
 		transfersyntax.HTJ2K.UID:
 		return jpeg2000codec.J2KdecodeContext(ctx, compressed, compLen, out)
 
+	case transfersyntax.JPEGXLJPEGRecompression.UID:
+		// A JPEG XL JPEG-recompression frame is a losslessly transcoded JPEG.
+		// Reconstruct the original JPEG (pure-Go, byte-exact) and decode it with
+		// the JPEG codec, which already handles photometric/precision. Fall back
+		// to the JXL backend (e.g. native libjxl) for unsupported features such
+		// as progressive scans.
+		if jpegxlcodec.IsJPEGRecompression(compressed) {
+			if jpegBytes, rerr := jpegxlcodec.ReconstructJPEG(compressed); rerr == nil {
+				jb := uint32(len(jpegBytes))
+				prec := jpegcodec.SOFPrecision(jpegBytes)
+				switch {
+				case prec == 8 || (prec == 0 && bitsa == 8):
+					return jpegcodec.DIJG8decodeContext(ctx, jpegBytes, jb, out, outLen)
+				case prec <= 12 || (prec == 0 && bitsa <= 12):
+					return jpegcodec.DIJG12decodeContext(ctx, jpegBytes, jb, out, outLen)
+				default:
+					return jpegcodec.DIJG16decodeContext(ctx, jpegBytes, jb, out, outLen)
+				}
+			}
+		}
+		return jpegxlcodec.JXLdecodeContext(ctx, compressed, compLen, out)
+
 	case transfersyntax.JPEGXLLossless.UID,
-		transfersyntax.JPEGXLJPEGRecompression.UID,
 		transfersyntax.JPEGXL.UID:
 		return jpegxlcodec.JXLdecodeContext(ctx, compressed, compLen, out)
 
