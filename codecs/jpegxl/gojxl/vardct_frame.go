@@ -31,6 +31,11 @@ type vardctState struct {
 	extra       [][]int32          // decoded extra-channel planes (full resolution)
 	extraImg    *modImage          // frame-wide extra-channel modular image
 	extraGroup  bool               // extra channels decoded per AC group (multi-group)
+
+	// Per-JXL-channel chroma subsampling shifts (0=Cb/X, 1=Y, 2=Cr/B). All zero
+	// except for non-XYB YCbCr frames with 4:2:0/4:2:2 subsampling.
+	csHShift [3]int
+	csVShift [3]int
 }
 
 // decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
@@ -134,8 +139,25 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 	// metadata. Each DC group is an independent modular sub-stream covering a
 	// groupDim-blocks region of the frame; results are placed into the frame-wide
 	// DC image and AC metadata grids. -----
-	dcW := int(divCeil(st.fd.xsize, acBlockDim))
-	dcH := int(divCeil(st.fd.ysize, acBlockDim))
+	// Chroma subsampling shifts (JXL channel order 0=Cb,1=Y,2=Cr). Only non-XYB
+	// YCbCr frames subsample; everything else stays full-resolution.
+	maxHS, maxVS := 0, 0
+	if st.fh.ColorTransform == ctYCbCr {
+		hs, vs, _, _ := subsamplingShifts(st.fh.ChromaSubsampling)
+		st.csHShift, st.csVShift = hs, vs
+		for c := 0; c < 3; c++ {
+			if hs[c] > maxHS {
+				maxHS = hs[c]
+			}
+			if vs[c] > maxVS {
+				maxVS = vs[c]
+			}
+		}
+	}
+	// The luma DC block grid is padded up to a multiple of the subsampling
+	// factor so the chroma grid is an exact right-shift (frame_dimensions.h).
+	dcW := divCeilInt(int(st.fd.xsize), acBlockDim<<uint(maxHS)) << uint(maxHS)
+	dcH := divCeilInt(int(st.fd.ysize), acBlockDim<<uint(maxVS)) << uint(maxVS)
 	allocFrameDCAndACM(st, dcW, dcH)
 	dcGroupDim := int(st.fd.groupDim) // DC group dimension in 8x8 blocks
 	ndgx := (dcW + dcGroupDim - 1) / dcGroupDim
@@ -419,7 +441,13 @@ func decodeACGroup(readers []*bitReader, st *vardctState, groupIdx int) error {
 			ctxOffset[p] = cur * st.blockCtx.numACContexts()
 		}
 		ans[p] = newANSSymbolReader(st.acCode[p], rp, 0)
-		nzeros[p] = [3][]int32{make([]int32, gw*gh), make([]int32, gw*gh), make([]int32, gw*gh)}
+		// The non-zero prediction grid is per channel at that channel's
+		// (possibly subsampled) resolution within the group.
+		for c := 0; c < 3; c++ {
+			ngw := divCeilInt(gw, 1<<uint(st.csHShift[c]))
+			ngh := divCeilInt(gh, 1<<uint(st.csVShift[c]))
+			nzeros[p][c] = make([]int32, ngw*ngh)
+		}
 	}
 
 	for by := by0; by < by1; by++ {
@@ -438,10 +466,19 @@ func decodeACGroup(readers []*bitReader, st *vardctState, groupIdx int) error {
 			qf := st.acm.quantF[idx]
 			cbY, cbX := acs.coveredBlocksY(), acs.coveredBlocksX()
 
-			// Channel decode order is Y, X, B = {1, 0, 2}.
+			// Channel decode order is Y, X, B = {1, 0, 2}. Chroma channels are
+			// decoded only at the top-left luma block of each chroma block.
 			for _, c := range [3]int{1, 0, 2} {
+				hs, vs := st.csHShift[c], st.csVShift[c]
+				sbx, sby := bx>>uint(hs), by>>uint(vs)
+				if (sbx<<uint(hs) != bx) || (sby<<uint(vs) != by) {
+					continue
+				}
+				slx, sly := lx>>uint(hs), ly>>uint(vs)
+				ngw := divCeilInt(gw, 1<<uint(hs))
+				cbw := bw >> uint(hs) // frame chroma block width for this channel
 				block := make([]int32, size)
-				st.acCoeffs[c][idx] = block
+				st.acCoeffs[c][sby*cbw+sbx] = block
 				blockCtx := st.blockCtx.blockContext(0, uint32(qf), ord, c)
 				zdOffset := st.blockCtx.zeroDensityContextsOffset(blockCtx)
 				for p := 0; p < numPasses; p++ {
@@ -452,11 +489,11 @@ func decodeACGroup(readers []*bitReader, st *vardctState, groupIdx int) error {
 					shift := uint(st.fh.PassShift[p])
 
 					var rowTop []int32
-					if ly > 0 {
-						rowTop = ng[(ly-1)*gw : ly*gw]
+					if sly > 0 {
+						rowTop = ng[(sly-1)*ngw : sly*ngw]
 					}
-					row := ng[ly*gw : (ly+1)*gw]
-					predicted := int(predictFromTopAndLeft(rowTop, row, lx, 32))
+					row := ng[sly*ngw : (sly+1)*ngw]
+					predicted := int(predictFromTopAndLeft(rowTop, row, slx, 32))
 
 					nzeroCtx := st.blockCtx.nonZeroContext(predicted, blockCtx) + ctxOffset[p]
 					nz := int(reader.readHybridUint(nzeroCtx, rp, cm))
@@ -466,7 +503,7 @@ func decodeACGroup(readers []*bitReader, st *vardctState, groupIdx int) error {
 					val := int32((nz + coveredBlocks - 1) >> uint(log2cov))
 					for yy := 0; yy < cbY; yy++ {
 						for xx := 0; xx < cbX; xx++ {
-							ng[(ly+yy)*gw+(lx+xx)] = val
+							ng[(sly+yy)*ngw+(slx+xx)] = val
 						}
 					}
 
@@ -755,7 +792,8 @@ const kQuantMax = 256
 
 // dcChannels holds the decoded (still-quantized) LF/DC planes in [Y, X, B] order.
 type dcChannels struct {
-	w, h           int
+	w, h           int // luma (Y) DC dimensions in blocks
+	cw, ch         int // chroma (X=Cb, B=Cr) DC dimensions (== w,h when not subsampled)
 	extraPrecision int
 	y, x, bch      []int32
 }
@@ -764,7 +802,12 @@ type dcChannels struct {
 // that the per-DC-group decoders fill. The DC group block geometry equals the DC
 // image geometry (one DC value per 8x8 block), so bw/bh = dcW/dcH.
 func allocFrameDCAndACM(st *vardctState, dcW, dcH int) {
-	st.dc = &dcChannels{w: dcW, h: dcH, y: make([]int32, dcW*dcH), x: make([]int32, dcW*dcH), bch: make([]int32, dcW*dcH)}
+	// Chroma DC dimensions: X uses HShift/VShift(0), B uses (2); for non-XYB the
+	// two chroma channels always share the same subsampling, so use channel 0.
+	cw := divCeilInt(dcW, 1<<uint(st.csHShift[0]))
+	ch := divCeilInt(dcH, 1<<uint(st.csVShift[0]))
+	st.dc = &dcChannels{w: dcW, h: dcH, cw: cw, ch: ch,
+		y: make([]int32, dcW*dcH), x: make([]int32, cw*ch), bch: make([]int32, cw*ch)}
 	ctW := (dcW + 7) >> 3
 	ctH := (dcH + 7) >> 3
 	st.acm = &acMetadata{
@@ -793,10 +836,16 @@ func decodeVarDCTDCImage(b *bitReader, st *vardctState, groupID, bx0, by0, gbw, 
 	}
 
 	// 3 channels at DC resolution, decoded as a modular image. Channel storage
-	// order matches libjxl: index 0 = Y (c=1), 1 = X (c=0), 2 = B (c=2).
+	// order matches libjxl: index 0 = Y (c=1), 1 = X (c=0), 2 = B (c=2). Chroma
+	// channels are reduced by the subsampling shifts.
+	dcOrder := [3]int{1, 0, 2}
 	img := &modImage{bitdepth: int(st.meta.BitDepth.BitsPerSample)}
-	for i := 0; i < 3; i++ {
-		img.channel = append(img.channel, modChannel{w: gbw, h: gbh, pix: make([]int32, gbw*gbh)})
+	for p := 0; p < 3; p++ {
+		jc := dcOrder[p]
+		hs, vs := st.csHShift[jc], st.csVShift[jc]
+		cgbw := divCeilInt(gbw, 1<<uint(hs))
+		cgbh := divCeilInt(gbh, 1<<uint(vs))
+		img.channel = append(img.channel, modChannel{w: cgbw, h: cgbh, hshift: hs, vshift: vs, pix: make([]int32, cgbw*cgbh)})
 	}
 
 	gh, err := readGroupHeader(b)
@@ -829,11 +878,16 @@ func decodeVarDCTDCImage(b *bitReader, st *vardctState, groupID, bx0, by0, gbw, 
 
 	base := img.nbMeta
 	planes := [3][]int32{st.dc.y, st.dc.x, st.dc.bch}
-	dcW := st.dc.w
+	planeW := [3]int{st.dc.w, st.dc.cw, st.dc.cw}
 	for p := 0; p < 3; p++ {
-		src := img.channel[base+p].pix
-		for y := 0; y < gbh; y++ {
-			copy(planes[p][(by0+y)*dcW+bx0:(by0+y)*dcW+bx0+gbw], src[y*gbw:(y+1)*gbw])
+		jc := dcOrder[p]
+		hs, vs := st.csHShift[jc], st.csVShift[jc]
+		pbx0, pby0 := bx0>>uint(hs), by0>>uint(vs)
+		pw := planeW[p]
+		c := &img.channel[base+p]
+		src := c.pix
+		for y := 0; y < c.h; y++ {
+			copy(planes[p][(pby0+y)*pw+pbx0:(pby0+y)*pw+pbx0+c.w], src[y*c.w:(y+1)*c.w])
 		}
 	}
 	return nil

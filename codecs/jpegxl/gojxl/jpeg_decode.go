@@ -147,65 +147,99 @@ func populateJPEGCoefficients(st *vardctState, jd *jpegData) error {
 		return populateGrayCoefficients(st, jd, qt)
 	}
 
+	// Chroma-from-luma is only applied when the image is 4:4:4; subsampled chroma
+	// is stored directly (dec_group.cc, the !Is444() branch).
+	is444 := st.csHShift[0] == 0 && st.csVShift[0] == 0
+
 	// Per-(channel, JPEG sub-block) scaled quant table for CfL, at the transposed
 	// coefficient position (dec_group.cc scaled_qtable).
 	transpose := func(j int) int { return (j%8)*8 + (j / 8) }
 	var scaledQ [3][64]int64
-	for c := 0; c < 3; c++ {
-		for j := 0; j < 64; j++ {
-			ti := transpose(j)
-			n := int64(qt[64+ti]) // Y (component 1) table
-			d := int64(qt[c*64+ti])
-			scaledQ[c][j] = (int64(1) << kJpegCFLPrecision) * n / d
+	if is444 {
+		for c := 0; c < 3; c++ {
+			for j := 0; j < 64; j++ {
+				ti := transpose(j)
+				scaledQ[c][j] = (int64(1) << kJpegCFLPrecision) * int64(qt[64+ti]) / int64(qt[c*64+ti])
+			}
 		}
 	}
-
 	const round = int64(1) << (kJpegCFLPrecision - 1)
-	dcPlanes := [3][]int32{st.dc.x, st.dc.y, st.dc.bch} // JXL channel 0,1,2
 
+	transposeBlock := func(src []int32) [64]int32 {
+		var t [64]int32
+		for r := 0; r < 8; r++ {
+			for cc := 0; cc < 8; cc++ {
+				t[r*8+cc] = src[cc*8+r]
+			}
+		}
+		return t
+	}
+	clampDC := func(d int32) int32 {
+		if d < -2047 {
+			return -2047
+		}
+		if d > 2047 {
+			return 2047
+		}
+		return d
+	}
+	store := func(comp *jpegComponent, bx, by int, blk *[64]int32) error {
+		base := (by*int(comp.widthInBlocks) + bx) * 64
+		for j := 0; j < 64; j++ {
+			v := blk[j]
+			if v < -4095 || v > 4095 {
+				return fmt.Errorf("gojxl: JPEG coefficient %d out of range", v)
+			}
+			comp.coeffs[base+j] = int16(v)
+		}
+		return nil
+	}
+
+	cw := st.dc.cw
 	for by := 0; by < bh; by++ {
 		for bx := 0; bx < bw; bx++ {
-			idx := by*bw + bx
-			tile := (by/kColorTileDimInBlocks)*st.acm.ctW + bx/kColorTileDimInBlocks
-			scaleX := int64(st.acm.ytoxMap[tile]) * (1 << kJpegCFLPrecision) / kJpegColorFactor
-			scaleB := int64(st.acm.ytobMap[tile]) * (1 << kJpegCFLPrecision) / kJpegColorFactor
+			lumaIdx := by*bw + bx
 
-			// Transpose each channel's quantized block (JPEG layout = JXL^T).
-			var tblk [3][64]int32
-			for c := 0; c < 3; c++ {
-				src := st.acCoeffs[c][idx]
-				for r := 0; r < 8; r++ {
-					for cc := 0; cc < 8; cc++ {
-						tblk[c][r*8+cc] = src[cc*8+r]
-					}
-				}
-			}
-			tY := tblk[1]
-			for j := 0; j < 64; j++ {
-				csX := (scaledQ[0][j]*scaleX + round) >> kJpegCFLPrecision
-				tblk[0][j] += int32((int64(tY[j])*csX + round) >> kJpegCFLPrecision)
-				csB := (scaledQ[2][j]*scaleB + round) >> kJpegCFLPrecision
-				tblk[2][j] += int32((int64(tY[j])*csB + round) >> kJpegCFLPrecision)
-			}
-			for c := 0; c < 3; c++ {
-				d := dcPlanes[c][idx]
-				if d < -2047 {
-					d = -2047
-				} else if d > 2047 {
-					d = 2047
-				}
-				tblk[c][0] = d
+			// Luma (Y): channel 1 -> JPEG component jpegCMap[1].
+			tY := transposeBlock(st.acCoeffs[1][lumaIdx])
+			yBlk := tY
+			yBlk[0] = clampDC(st.dc.y[lumaIdx])
+			if err := store(&jd.components[jpegCMap[1]], bx, by, &yBlk); err != nil {
+				return err
 			}
 
-			for c := 0; c < 3; c++ {
-				comp := &jd.components[jpegCMap[c]]
-				base := (by*int(comp.widthInBlocks) + bx) * 64
-				for j := 0; j < 64; j++ {
-					v := tblk[c][j]
-					if v < -4095 || v > 4095 {
-						return fmt.Errorf("gojxl: JPEG coefficient %d out of range", v)
+			// Chroma (Cb=channel 0, Cr=channel 2): only at the top-left luma
+			// block of each chroma block.
+			for _, c := range [2]int{0, 2} {
+				hs, vs := st.csHShift[c], st.csVShift[c]
+				sbx, sby := bx>>uint(hs), by>>uint(vs)
+				if (sbx<<uint(hs) != bx) || (sby<<uint(vs) != by) {
+					continue
+				}
+				blk := transposeBlock(st.acCoeffs[c][sby*(bw>>uint(hs))+sbx])
+				if is444 {
+					tile := (by/kColorTileDimInBlocks)*st.acm.ctW + bx/kColorTileDimInBlocks
+					var factor int64
+					if c == 0 {
+						factor = int64(st.acm.ytoxMap[tile])
+					} else {
+						factor = int64(st.acm.ytobMap[tile])
 					}
-					comp.coeffs[base+j] = int16(v)
+					scale := factor * (1 << kJpegCFLPrecision) / kJpegColorFactor
+					for j := 0; j < 64; j++ {
+						cs := (scaledQ[c][j]*scale + round) >> kJpegCFLPrecision
+						blk[j] += int32((int64(tY[j])*cs + round) >> kJpegCFLPrecision)
+					}
+				}
+				var dc int32
+				if c == 0 {
+					dc = st.dc.x[sby*cw+sbx]
+				} else {
+					dc = st.dc.bch[sby*cw+sbx]
+				}
+				blk[0] = clampDC(dc)
+				if err := store(&jd.components[jpegCMap[c]], sbx, sby, &blk); err != nil {
+					return err
 				}
 			}
 		}
