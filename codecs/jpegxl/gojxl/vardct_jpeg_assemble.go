@@ -67,7 +67,7 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32, csHShift, csV
 	modAlphabet = maxInt(modAlphabet, qtMax) + 1
 	modTkGroups = append(modTkGroups, qtTk)
 
-	perGroupAC, acMax := acTokensByGroupJPEG(fd, bw, bh, acCoeff, order, csHShift, csVShift)
+	perGroupAC, acMax, _ := acTokensByGroupJPEGCtx(fd, bw, bh, acCoeff, order, csHShift, csVShift)
 	acAlphabet := acMax + 1
 	acCtxCount := defaultBlockCtxMap().numACContexts()
 
@@ -102,8 +102,8 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32, csHShift, csV
 		encodeANSData(dcw, ansEncState{tokens: dcGroups[g].acmTk, revMap: modRev, freqs: modFreq})
 	}
 
-	// HfGlobal: RAW dequant matrices + coeff orders + AC histogram.
-	writeHfGlobal := func(hf *bitWriter) (acRev [][]uint16, acFreq []uint16) {
+	// HfGlobal: RAW dequant matrices + coeff orders + clustered AC histograms.
+	writeHfGlobal := func(hf *bitWriter) (ctxToCluster []uint8, clRev [][][]uint16, clFreq [][]uint16) {
 		hf.WriteBits(0, 1)                          // AC dequant matrices all_default = false
 		hf.WriteBits(quantModeRAW, 3)               // table 0 mode = RAW
 		hf.WriteBits(uint64(floatToF16(denom)), 16) // qtable_den (F16)
@@ -114,13 +114,13 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32, csHShift, csV
 		}
 		hf.WriteBits(0, ceilLog2Nonzero(fd.numGroups))                         // num_histograms - 1 = 0
 		hf.WriteU32(0, kOrderEnc[0], kOrderEnc[1], kOrderEnc[2], kOrderEnc[3]) // used_orders = 0
-		return writeANSRealHeader(hf, acAlphabet, acCtxCount, perGroupAC...)
+		return writeACEntropyHeader(hf, perGroupAC, acAlphabet, acCtxCount)
 	}
 
 	if single {
 		writeDCGroup(lf, 0)
-		acRev, acFreq := writeHfGlobal(lf)
-		encodeANSData(lf, ansEncState{tokens: perGroupAC[0], revMap: acRev, freqs: acFreq})
+		ctxToCluster, clRev, clFreq := writeHfGlobal(lf)
+		encodeACDataMulti(lf, perGroupAC[0], ctxToCluster, clRev, clFreq)
 		return finishJPEGVarDCT(w, h, gray, cs, [][]byte{lf.Bytes()}, fd)
 	}
 
@@ -133,11 +133,11 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32, csHShift, csV
 		sections = append(sections, dcw.Bytes())
 	}
 	hf := newBitWriter()
-	acRev, acFreq := writeHfGlobal(hf)
+	ctxToCluster, clRev, clFreq := writeHfGlobal(hf)
 	sections = append(sections, hf.Bytes())
 	for g := 0; g < numGroups; g++ {
 		gw := newBitWriter()
-		encodeANSData(gw, ansEncState{tokens: perGroupAC[g], revMap: acRev, freqs: acFreq})
+		encodeACDataMulti(gw, perGroupAC[g], ctxToCluster, clRev, clFreq)
 		sections = append(sections, gw.Bytes())
 	}
 	return finishJPEGVarDCT(w, h, gray, cs, sections, fd)
@@ -170,42 +170,6 @@ func wrapJXLContainer(jbrd, codestream []byte) []byte {
 	out = appendJXLBox(out, "jbrd", jbrd)
 	out = appendJXLBox(out, "jxlc", codestream)
 	return out
-}
-
-// acTokensByGroupJPEG tokenizes the AC coefficients per group, mirroring
-// decodeACGroup: luma block raster, channels {1,0,2}, chroma channels only at
-// the top-left luma block of each chroma block, keyed by chroma block index.
-func acTokensByGroupJPEG(fd frameDimensions, bw, bh int, acCoeff [3][][]int32, order []int, csHShift, csVShift [3]int) ([][]encTokenized, int) {
-	gdb := int(fd.groupDim) / 8
-	xg := int(fd.xsizeGroups)
-	out := make([][]encTokenized, fd.numGroups)
-	maxTok := 0
-	for g := 0; g < int(fd.numGroups); g++ {
-		bx0 := (g % xg) * gdb
-		by0 := (g / xg) * gdb
-		bx1 := minInt(bx0+gdb, bw)
-		by1 := minInt(by0+gdb, bh)
-		var toks []encToken
-		for by := by0; by < by1; by++ {
-			for bx := bx0; bx < bx1; bx++ {
-				for _, c := range [3]int{1, 0, 2} {
-					hs, vs := csHShift[c], csVShift[c]
-					sbx, sby := bx>>uint(hs), by>>uint(vs)
-					if (sbx<<uint(hs) != bx) || (sby<<uint(vs) != by) {
-						continue
-					}
-					cbw := bw >> uint(hs)
-					toks = appendACBlockTokens(toks, acCoeff[c][sby*cbw+sbx], order)
-				}
-			}
-		}
-		tks, mx := tokenizeAll(toks)
-		out[g] = tks
-		if mx > maxTok {
-			maxTok = mx
-		}
-	}
-	return out, maxTok
 }
 
 func appendJXLBox(out []byte, typ string, body []byte) []byte {

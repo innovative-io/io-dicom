@@ -94,15 +94,17 @@ type encTokenized struct {
 	token uint32
 	nbits int
 	extra uint32
+	ctx   int // raw entropy context (for multi-histogram AC coding)
 }
 
-// tokenizeAll hybrid-uint-encodes the values and reports the maximum token.
+// tokenizeAll hybrid-uint-encodes the values and reports the maximum token. The
+// raw context of each token is carried through for context-clustered coding.
 func tokenizeAll(tokens []encToken) (tks []encTokenized, maxToken int) {
 	cfg := encUintConfig
 	tks = make([]encTokenized, len(tokens))
 	for i, t := range tokens {
 		tok, nb, ex := encodeHybridUint(cfg, t.value)
-		tks[i] = encTokenized{tok, nb, ex}
+		tks[i] = encTokenized{tok, nb, ex, t.ctx}
 		if int(tok) > maxToken {
 			maxToken = int(tok)
 		}
