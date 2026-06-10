@@ -137,3 +137,26 @@ func TestDecompressCLIFuzz(t *testing.T) {
 		}
 	}
 }
+
+// TestCompressRoundTrip checks the stored-block encoder produces streams the
+// decoder reads back exactly.
+func TestCompressRoundTrip(t *testing.T) {
+	cases := [][]byte{
+		nil,
+		[]byte("x"),
+		[]byte("JFIF\x00 marker data"),
+		bytes.Repeat([]byte{0xFF, 0x00, 0xAB}, 1000),
+		seq256(),
+		make([]byte, 70000), // multi-nibble length
+	}
+	for i, src := range cases {
+		got, err := Decompress(Compress(src), len(src))
+		if err != nil {
+			t.Errorf("case %d: decompress: %v", i, err)
+			continue
+		}
+		if !bytes.Equal(got, src) {
+			t.Errorf("case %d: round-trip mismatch (%d vs %d bytes)", i, len(got), len(src))
+		}
+	}
+}
