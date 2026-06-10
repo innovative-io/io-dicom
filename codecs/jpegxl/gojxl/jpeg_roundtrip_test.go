@@ -34,6 +34,52 @@ func TestJPEGParseRoundTrip(t *testing.T) {
 	}
 }
 
+// TestJBRDRoundTrip checks the jbrd box writer is the inverse of the reader:
+// parse a JPEG, serialize its metadata to a jbrd box, decode that box, and
+// confirm re-encoding (with the codestream-only fields — quant values, coeffs
+// and dimensions — carried over) reproduces the original JPEG.
+func TestJBRDRoundTrip(t *testing.T) {
+	for _, name := range []struct{ label, hexStr string }{
+		{"444", jpegRoundtripJPGHex},
+		{"420", jpegRoundtrip420JPGHex},
+	} {
+		t.Run(name.label, func(t *testing.T) {
+			src, err := hex.DecodeString(name.hexStr)
+			if err != nil {
+				t.Fatalf("bad jpg vector: %v", err)
+			}
+			jd, err := ParseJPEG(src)
+			if err != nil {
+				t.Fatalf("ParseJPEG: %v", err)
+			}
+			box, err := encodeJPEGData(jd)
+			if err != nil {
+				t.Fatalf("encodeJPEGData: %v", err)
+			}
+			jd2, err := decodeJPEGData(box)
+			if err != nil {
+				t.Fatalf("decodeJPEGData: %v", err)
+			}
+			// jbrd does not carry quant values, coefficients or dimensions.
+			if len(jd2.quant) != len(jd.quant) {
+				t.Fatalf("quant table count: %d != %d", len(jd2.quant), len(jd.quant))
+			}
+			for i := range jd2.quant {
+				jd2.quant[i].values = jd.quant[i].values
+			}
+			jd2.components = jd.components
+			jd2.width, jd2.height = jd.width, jd.height
+			out, err := EncodeJPEG(jd2)
+			if err != nil {
+				t.Fatalf("EncodeJPEG: %v", err)
+			}
+			if !bytes.Equal(out, src) {
+				t.Fatalf("jbrd round-trip not byte-exact (got %d, want %d)", len(out), len(src))
+			}
+		})
+	}
+}
+
 // TestJPEGReconstruction decodes JPEG XL JPEG-transcodes back to the original
 // JPEG bytes and checks the reconstruction is byte-exact — the end-to-end test
 // of the container/jbrd/brotli/non-XYB-VarDCT/RAW-quant/coefficient/bitstream

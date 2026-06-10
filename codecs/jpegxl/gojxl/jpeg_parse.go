@@ -94,6 +94,9 @@ func ParseJPEG(data []byte) (*jpegData, error) {
 	if len(jd.huffmanCode) == 0 {
 		return nil, errors.New("gojxl: no Huffman tables")
 	}
+	// All APP markers are stored verbatim (type "unknown"); ICC/Exif/XMP are not
+	// extracted into the JXL color profile by this encoder.
+	jd.appMarkerType = make([]uint32, len(jd.appData))
 	return jd, nil
 }
 
