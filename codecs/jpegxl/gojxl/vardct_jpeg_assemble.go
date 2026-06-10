@@ -4,7 +4,7 @@ package gojxl
 // (JPEG) dequant table, chroma-from-luma disabled (cmap=0), all DCT-8 blocks.
 // It is the encode counterpart of decodeVarDCTFrame + populateJPEGCoefficients
 // for the 4:4:4 case.
-func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32,
+func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32, csHShift, csVShift [3]int,
 	dcMod [3][]int32, acCoeff [3][][]int32, qt []int32, denom float32) ([]byte, error) {
 
 	fd := computeFrameDimensions(uint32(w), uint32(h), 1, 1)
@@ -15,10 +15,14 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32,
 	order := naturalCoeffOrder(1, 1)
 
 	// Modular sub-streams (DC image, AC metadata, quant table) share one flat
-	// histogram, so tokenize them together to size the alphabet.
+	// histogram, so tokenize them together to size the alphabet. Chroma DC
+	// planes are at their (subsampled) resolution.
+	dcStore := [3]int{1, 0, 2}
 	var dcTokens []encToken
-	for c := 0; c < 3; c++ {
-		dcTokens = gradientTokens(dcMod[c], bw, 0, 0, bw, bh, dcTokens)
+	for p := 0; p < 3; p++ {
+		jc := dcStore[p]
+		cbw, cbh := bw>>uint(csHShift[jc]), bh>>uint(csVShift[jc])
+		dcTokens = gradientTokens(dcMod[p], cbw, 0, 0, cbw, cbh, dcTokens)
 	}
 	ctW, ctH := (bw+7)>>3, (bh+7)>>3
 	count := bw * bh
@@ -37,7 +41,7 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32,
 	qtTk, qtMax := tokenizeAll(qtTokens)
 	modAlphabet := maxInt(maxInt(dcMax, acmMax), qtMax) + 1
 
-	perGroupAC, acMax := acTokensByGroup(fd, bw, bh, acCoeff, order)
+	perGroupAC, acMax := acTokensByGroupJPEG(fd, bw, bh, acCoeff, order, csHShift, csVShift)
 	acAlphabet := acMax + 1
 	acCtxCount := defaultBlockCtxMap().numACContexts()
 
@@ -132,6 +136,42 @@ func wrapJXLContainer(jbrd, codestream []byte) []byte {
 	out = appendJXLBox(out, "jbrd", jbrd)
 	out = appendJXLBox(out, "jxlc", codestream)
 	return out
+}
+
+// acTokensByGroupJPEG tokenizes the AC coefficients per group, mirroring
+// decodeACGroup: luma block raster, channels {1,0,2}, chroma channels only at
+// the top-left luma block of each chroma block, keyed by chroma block index.
+func acTokensByGroupJPEG(fd frameDimensions, bw, bh int, acCoeff [3][][]int32, order []int, csHShift, csVShift [3]int) ([][]encTokenized, int) {
+	gdb := int(fd.groupDim) / 8
+	xg := int(fd.xsizeGroups)
+	out := make([][]encTokenized, fd.numGroups)
+	maxTok := 0
+	for g := 0; g < int(fd.numGroups); g++ {
+		bx0 := (g % xg) * gdb
+		by0 := (g / xg) * gdb
+		bx1 := minInt(bx0+gdb, bw)
+		by1 := minInt(by0+gdb, bh)
+		var toks []encToken
+		for by := by0; by < by1; by++ {
+			for bx := bx0; bx < bx1; bx++ {
+				for _, c := range [3]int{1, 0, 2} {
+					hs, vs := csHShift[c], csVShift[c]
+					sbx, sby := bx>>uint(hs), by>>uint(vs)
+					if (sbx<<uint(hs) != bx) || (sby<<uint(vs) != by) {
+						continue
+					}
+					cbw := bw >> uint(hs)
+					toks = appendACBlockTokens(toks, acCoeff[c][sby*cbw+sbx], order)
+				}
+			}
+		}
+		tks, mx := tokenizeAll(toks)
+		out[g] = tks
+		if mx > maxTok {
+			maxTok = mx
+		}
+	}
+	return out, maxTok
 }
 
 func appendJXLBox(out []byte, typ string, body []byte) []byte {

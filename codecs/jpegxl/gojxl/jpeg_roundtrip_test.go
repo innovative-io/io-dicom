@@ -39,23 +39,30 @@ func TestJPEGParseRoundTrip(t *testing.T) {
 // transcode). Exercises the full encode pipeline: parser, jbrd writer, brotli
 // encoder, and JPEG-mode VarDCT frame writer.
 func TestJPEGToJXLRoundTrip(t *testing.T) {
-	src, err := hex.DecodeString(jpegRoundtripJPGHex) // 4:4:4 baseline JPEG
-	if err != nil {
-		t.Fatalf("bad jpg vector: %v", err)
-	}
-	jxl, err := EncodeJXLFromJPEG(src)
-	if err != nil {
-		t.Fatalf("EncodeJXLFromJPEG: %v", err)
-	}
-	if !IsJPEGRecompression(jxl) {
-		t.Fatalf("encoded file is not recognized as a JPEG recompression")
-	}
-	got, err := ReconstructJPEG(jxl)
-	if err != nil {
-		t.Fatalf("ReconstructJPEG: %v", err)
-	}
-	if !bytes.Equal(got, src) {
-		t.Fatalf("JPEG->JXL->JPEG not byte-exact (got %d, want %d)", len(got), len(src))
+	for _, tc := range []struct{ label, hexStr string }{
+		{"444", jpegRoundtripJPGHex},
+		{"420", jpegRoundtrip420JPGHex},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			src, err := hex.DecodeString(tc.hexStr)
+			if err != nil {
+				t.Fatalf("bad jpg vector: %v", err)
+			}
+			jxl, err := EncodeJXLFromJPEG(src)
+			if err != nil {
+				t.Fatalf("EncodeJXLFromJPEG: %v", err)
+			}
+			if !IsJPEGRecompression(jxl) {
+				t.Fatalf("encoded file is not recognized as a JPEG recompression")
+			}
+			got, err := ReconstructJPEG(jxl)
+			if err != nil {
+				t.Fatalf("ReconstructJPEG: %v", err)
+			}
+			if !bytes.Equal(got, src) {
+				t.Fatalf("JPEG->JXL->JPEG not byte-exact (got %d, want %d)", len(got), len(src))
+			}
+		})
 	}
 }
 

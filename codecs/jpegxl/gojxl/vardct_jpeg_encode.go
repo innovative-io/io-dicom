@@ -71,67 +71,121 @@ const kJpegEncGlobalScale = 65536
 // jpegCFLTranspose maps a JXL coefficient index to the transposed (JPEG) index.
 func jpegTranspose(i int) int { return (i%8)*8 + (i / 8) }
 
+// log2i returns log2(v) for a power of two in {1,2,4,8}, or -1 otherwise.
+func log2i(v int) int {
+	switch v {
+	case 1:
+		return 0
+	case 2:
+		return 1
+	case 4:
+		return 2
+	case 8:
+		return 3
+	}
+	return -1
+}
+
+// subsamplingMode finds the YCbCrChromaSubsampling channel mode (0..3) for the
+// given raw H/V shifts (log2 of the sampling factor).
+func subsamplingMode(rawH, rawV int) (uint32, bool) {
+	for m := 0; m < 4; m++ {
+		if jpegKHShift[m] == rawH && jpegKVShift[m] == rawV {
+			return uint32(m), true
+		}
+	}
+	return 0, false
+}
+
 // EncodeJXLFromJPEGData encodes a parsed baseline JPEG (jpegData with quantized
 // coefficients) into a JPEG XL JPEG-recompression file (.111 container with a
-// jbrd box and a JPEG-mode VarDCT codestream). Current scope: 4:4:4 (no chroma
-// subsampling).
+// jbrd box and a JPEG-mode VarDCT codestream). Supports 4:4:4, 4:2:2 and 4:2:0.
 func EncodeJXLFromJPEGData(jd *jpegData) ([]byte, error) {
 	if len(jd.components) != 1 && len(jd.components) != 3 {
 		return nil, errors.New("gojxl: JPEG->JXL needs 1 or 3 components")
 	}
 	gray := len(jd.components) == 1
-	// Subsampling check (4:4:4 only for now).
-	for i := range jd.components {
-		if jd.components[i].hSampFactor != 1 || jd.components[i].vSampFactor != 1 {
-			return nil, errors.New("gojxl: JPEG->JXL chroma subsampling not yet supported")
-		}
-	}
-
-	w, h := jd.width, jd.height
-	bw, bh := divCeilInt(w, 8), divCeilInt(h, 8)
 
 	jpegCMap := [3]int{1, 0, 2}
 	if gray {
 		jpegCMap = [3]int{0, 0, 0}
 	}
 
-	// DC image (JXL storage order [Y, X, B]) and AC coefficients (JXL channel
-	// order 0=X,1=Y,2=B), both transposed from the JPEG layout.
-	dcMod := [3][]int32{make([]int32, bw*bh), make([]int32, bw*bh), make([]int32, bw*bh)}
-	acCoeff := [3][][]int32{make([][]int32, bw*bh), make([][]int32, bw*bh), make([][]int32, bw*bh)}
-	dcStore := [3]int{1, 0, 2} // dcMod[p] holds JXL channel dcStore[p]
-	for by := 0; by < bh; by++ {
-		for bx := 0; bx < bw; bx++ {
-			idx := by*bw + bx
-			for c := 0; c < 3; c++ {
-				jc := c
-				if gray && c != 1 {
-					// gray: only Y is real; X/B are zero.
-					acCoeff[c][idx] = make([]int32, 64)
-					continue
-				}
-				comp := &jd.components[jpegCMap[jc]]
-				src := comp.coeffs[idx*64 : idx*64+64]
-				blk := make([]int32, 64)
-				for i := 1; i < 64; i++ {
-					blk[i] = int32(src[jpegTranspose(i)])
-				}
-				acCoeff[c][idx] = blk
-			}
-			// DC into the DC image planes.
-			for p := 0; p < 3; p++ {
-				jc := dcStore[p]
-				if gray && jc != 1 {
-					continue
-				}
-				dcMod[p][idx] = int32(jd.components[jpegCMap[jc]].coeffs[idx*64])
-			}
+	maxHs, maxVs := 0, 0
+	for i := range jd.components {
+		rh, rv := log2i(jd.components[i].hSampFactor), log2i(jd.components[i].vSampFactor)
+		if rh < 0 || rv < 0 {
+			return nil, errors.New("gojxl: unsupported JPEG sampling factor")
+		}
+		if rh > maxHs {
+			maxHs = rh
+		}
+		if rv > maxVs {
+			maxVs = rv
 		}
 	}
 
-	// Quantization table (3*64) in the codestream layout.
-	qt := make([]int32, 3*64)
+	w, h := jd.width, jd.height
+	// Luma block grid, padded up to the subsampling factor.
+	bw := divCeilInt(w, 8<<uint(maxHs)) << uint(maxHs)
+	bh := divCeilInt(h, 8<<uint(maxVs)) << uint(maxVs)
+
+	// Per-JXL-channel (0=Cb,1=Y,2=Cr) shifts, subsampling mode, and block grid.
+	var csHShift, csVShift [3]int
+	var cs [3]uint32
+	for c := 0; c < 3; c++ {
+		comp := &jd.components[jpegCMap[c]]
+		rawH, rawV := 0, 0
+		if !gray {
+			rawH, rawV = log2i(comp.hSampFactor), log2i(comp.vSampFactor)
+		}
+		csHShift[c] = maxHs - rawH
+		csVShift[c] = maxVs - rawV
+		mode, ok := subsamplingMode(rawH, rawV)
+		if !ok {
+			return nil, errors.New("gojxl: unsupported subsampling mode")
+		}
+		cs[c] = mode
+	}
+
 	denom := float32(1.0 / (8.0 * 255.0))
+
+	// DC image (storage order [Y, X, B]) and AC coefficients (JXL channel order
+	// 0=Cb,1=Y,2=Cr), per-channel block grids, transposed from the JPEG layout.
+	var dcMod [3][]int32
+	var acCoeff [3][][]int32
+	dcStore := [3]int{1, 0, 2}
+	for c := 0; c < 3; c++ {
+		cbw, cbh := bw>>uint(csHShift[c]), bh>>uint(csVShift[c])
+		ac := make([][]int32, cbw*cbh)
+		comp := &jd.components[jpegCMap[c]]
+		for i := range ac {
+			blk := make([]int32, 64)
+			if !(gray && c != 1) {
+				src := comp.coeffs[i*64 : i*64+64]
+				for j := 1; j < 64; j++ {
+					blk[j] = int32(src[jpegTranspose(j)])
+				}
+			}
+			ac[i] = blk
+		}
+		acCoeff[c] = ac
+	}
+	for p := 0; p < 3; p++ {
+		jc := dcStore[p]
+		cbw, cbh := bw>>uint(csHShift[jc]), bh>>uint(csVShift[jc])
+		dc := make([]int32, cbw*cbh)
+		comp := &jd.components[jpegCMap[jc]]
+		if !(gray && jc != 1) {
+			for i := range dc {
+				dc[i] = int32(comp.coeffs[i*64])
+			}
+		}
+		dcMod[p] = dc
+	}
+
+	// Quantization table (3*64), transposed to the codestream layout.
+	qt := make([]int32, 3*64)
 	for c := 0; c < 3; c++ {
 		jc := c
 		if gray {
@@ -143,8 +197,7 @@ func EncodeJXLFromJPEGData(jd *jpegData) ([]byte, error) {
 		}
 	}
 
-	cs := [3]uint32{0, 0, 0} // 4:4:4
-	codestream, err := assembleJPEGVarDCT(w, h, bw, bh, gray, cs, dcMod, acCoeff, qt, denom)
+	codestream, err := assembleJPEGVarDCT(w, h, bw, bh, gray, cs, csHShift, csVShift, dcMod, acCoeff, qt, denom)
 	if err != nil {
 		return nil, err
 	}
