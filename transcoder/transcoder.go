@@ -109,6 +109,21 @@ func ChangeTransferSyntaxContext(ctx context.Context, obj media.DICOMObject, out
 				icon = true
 			}
 			if (tag.Group == 0x7FE0) && (tag.Element == 0x0010) && (!icon) {
+				// Lossless JPEG Baseline -> JPEG XL JPEG-Recompression transcodes
+				// the original encapsulated JPEG bytes directly (no pixel decode),
+				// so the result reconstructs each source JPEG byte-for-byte.
+				if obj.GetTransferSyntax().UID == transfersyntax.JPEGBaseline8Bit.UID &&
+					outTS.UID == transfersyntax.JPEGXLJPEGRecompression.UID &&
+					tag.Length == 0xFFFFFFFF {
+					if frames == 0 {
+						frames = 1
+					}
+					if err := recompressJPEGToJXL(obj, &i, frames); err != nil {
+						return err
+					}
+					flag = true
+					continue
+				}
 				sizePx := uint64(cols) * uint64(rows) * uint64(bitsa) / 8
 				if RGB {
 					sizePx = 3 * sizePx
@@ -717,6 +732,46 @@ func uncompress(ctx context.Context, obj media.DICOMObject, i int, img []byte, s
 		offset := j * single
 		return codecs.DecompressFrame(fctx, tsUID, frameData[j], bitsa, PhotoInt, img[offset:offset+single])
 	})
+}
+
+// recompressJPEGToJXL losslessly transcodes the encapsulated baseline-JPEG
+// frames at the pixel-data tag (*i) into JPEG XL JPEG-Recompression frames, in
+// place. It transcodes the original JPEG bytes directly — no pixel decode — so
+// each reconstructed JPEG is byte-identical to the source. All frames are
+// transcoded before the object is mutated, so a failure (e.g. a progressive or
+// 12-bit JPEG the encoder does not support) leaves the object untouched.
+func recompressJPEGToJXL(obj media.DICOMObject, i *int, frames uint32) error {
+	index := *i
+
+	// Read each frame's JPEG payload (offset table at index+1, one fragment per
+	// frame after it) without mutating the object yet.
+	src := make([][]byte, frames)
+	for j := uint32(0); j < frames; j++ {
+		tag := obj.GetTagAt(index + 2 + int(j))
+		if tag == nil || tag.Group != 0xFFFE || tag.Element != 0xE000 {
+			return fmt.Errorf("transcoder: missing JPEG frame %d for JPEG XL recompression", j)
+		}
+		src[j] = tag.Data
+	}
+
+	out := make([][]byte, frames)
+	for j := uint32(0); j < frames; j++ {
+		jxl, err := jpegxl.EncodeJPEGRecompression(src[j])
+		if err != nil {
+			return fmt.Errorf("transcoder: JPEG->JPEG XL recompression of frame %d: %w", j, err)
+		}
+		out[j] = jxl
+	}
+
+	// Replace the encapsulated data: drop the offset table, the source frames and
+	// the sequence delimiter, then write the new frames.
+	obj.DelTag(index + 1) // offset table
+	for j := uint32(0); j < frames; j++ {
+		obj.DelTag(index + 1)
+	}
+	obj.DelTag(index + 1) // sequence delimiter
+	*i = appendEncapsulatedFrames(obj, index, out)
+	return nil
 }
 
 // deplanarizeRGBFrames converts RGB pixel data from planar format (all R
