@@ -6,6 +6,34 @@ import (
 	"testing"
 )
 
+// TestJPEGParseRoundTrip parses a baseline JPEG into the jpegData structure and
+// re-encodes it, checking the result is byte-identical — the parser is the exact
+// inverse of the writer.
+func TestJPEGParseRoundTrip(t *testing.T) {
+	for _, name := range []struct{ label, hexStr string }{
+		{"444", jpegRoundtripJPGHex},
+		{"420", jpegRoundtrip420JPGHex},
+	} {
+		t.Run(name.label, func(t *testing.T) {
+			src, err := hex.DecodeString(name.hexStr)
+			if err != nil {
+				t.Fatalf("bad jpg vector: %v", err)
+			}
+			jd, err := ParseJPEG(src)
+			if err != nil {
+				t.Fatalf("ParseJPEG: %v", err)
+			}
+			got, err := EncodeJPEG(jd)
+			if err != nil {
+				t.Fatalf("EncodeJPEG: %v", err)
+			}
+			if !bytes.Equal(got, src) {
+				t.Fatalf("parse/encode round-trip not byte-exact: got %d, want %d bytes", len(got), len(src))
+			}
+		})
+	}
+}
+
 // TestJPEGReconstruction decodes JPEG XL JPEG-transcodes back to the original
 // JPEG bytes and checks the reconstruction is byte-exact — the end-to-end test
 // of the container/jbrd/brotli/non-XYB-VarDCT/RAW-quant/coefficient/bitstream
