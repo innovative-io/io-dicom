@@ -64,7 +64,7 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32, csHShift, csV
 	lf.WriteBits(128, 8)                    // ytob_dc = 0
 	lf.WriteBits(1, 1)                      // has_tree
 	encodeANSStream(lf, maTreeTokens, numTreeContexts)
-	modRev, modFreq := writeANSFlatHeader(lf, modAlphabet, 1)
+	modRev, modFreq := writeANSRealHeader(lf, modAlphabet, 1, dcTk, acmTk, qtTk)
 
 	// DC group: DC image + AC metadata.
 	dcw := lf
@@ -93,7 +93,7 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32, csHShift, csV
 	}
 	hf.WriteBits(0, ceilLog2Nonzero(fd.numGroups))                         // num_histograms - 1 = 0
 	hf.WriteU32(0, kOrderEnc[0], kOrderEnc[1], kOrderEnc[2], kOrderEnc[3]) // used_orders = 0
-	acRev, acFreq := writeANSFlatHeader(hf, acAlphabet, acCtxCount)
+	acRev, acFreq := writeANSRealHeader(hf, acAlphabet, acCtxCount, perGroupAC...)
 
 	if single {
 		encodeANSData(lf, ansEncState{tokens: perGroupAC[0], revMap: acRev, freqs: acFreq})
