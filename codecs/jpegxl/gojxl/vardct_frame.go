@@ -143,14 +143,19 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 	// YCbCr frames subsample; everything else stays full-resolution.
 	maxHS, maxVS := 0, 0
 	if st.fh.ColorTransform == ctYCbCr {
-		hs, vs, _, _ := subsamplingShifts(st.fh.ChromaSubsampling)
+		hs, vs, rawH, rawV := subsamplingShifts(st.fh.ChromaSubsampling)
 		st.csHShift, st.csVShift = hs, vs
+		// The luma grid is padded to the MCU, i.e. the maximum absolute sampling
+		// factor — not the maximum inter-channel shift. These coincide for normal
+		// subsampling, but when every channel shares a non-minimal factor (e.g.
+		// 1x2 on all three) the shifts are all zero while the grid must still be
+		// padded by the shared factor.
 		for c := 0; c < 3; c++ {
-			if hs[c] > maxHS {
-				maxHS = hs[c]
+			if rawH[c] > maxHS {
+				maxHS = rawH[c]
 			}
-			if vs[c] > maxVS {
-				maxVS = vs[c]
+			if rawV[c] > maxVS {
+				maxVS = rawV[c]
 			}
 		}
 	}
