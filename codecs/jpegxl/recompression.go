@@ -16,3 +16,15 @@ func IsJPEGRecompression(encoded []byte) bool {
 func ReconstructJPEG(encoded []byte) ([]byte, error) {
 	return gojxl.ReconstructJPEG(encoded)
 }
+
+// EncodeJPEGRecompression losslessly transcodes a baseline JPEG into a JPEG XL
+// JPEG-recompression (.111) container, in pure Go. Decoding the result (with
+// ReconstructJPEG or a conforming JPEG XL decoder) reproduces the input JPEG
+// byte-for-byte. Supports baseline-sequential JPEGs (4:4:4 / 4:2:2 / 4:2:0 and
+// grayscale); progressive inputs return an error.
+//
+// NOTE: the current encoder uses flat entropy histograms, so the output is not
+// yet smaller than the source JPEG; it is format-correct and decoder-conformant.
+func EncodeJPEGRecompression(jpegBytes []byte) ([]byte, error) {
+	return gojxl.EncodeJXLFromJPEG(jpegBytes)
+}
