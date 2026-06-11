@@ -743,8 +743,23 @@ func uncompress(ctx context.Context, obj media.DICOMObject, i int, img []byte, s
 func recompressJPEGToJXL(obj media.DICOMObject, i *int, frames uint32) error {
 	index := *i
 
-	// Read each frame's JPEG payload (offset table at index+1, one fragment per
-	// frame after it) without mutating the object yet.
+	// Validate the full encapsulation layout — basic offset table item at
+	// index+1, one fragment per frame, then the sequence delimiter — before
+	// mutating anything, so a malformed object errors out untouched rather than
+	// having the wrong tags deleted.
+	isItem := func(at int, group, element uint16) bool {
+		tag := obj.GetTagAt(at)
+		return tag != nil && tag.Group == group && tag.Element == element
+	}
+	if !isItem(index+1, 0xFFFE, 0xE000) {
+		return fmt.Errorf("transcoder: missing basic offset table for JPEG XL recompression")
+	}
+	if !isItem(index+2+int(frames), 0xFFFE, 0xE0DD) {
+		return fmt.Errorf("transcoder: missing sequence delimiter for JPEG XL recompression")
+	}
+
+	// Read each frame's JPEG payload (one fragment per frame after the offset
+	// table) without mutating the object yet.
 	src := make([][]byte, frames)
 	for j := uint32(0); j < frames; j++ {
 		tag := obj.GetTagAt(index + 2 + int(j))

@@ -61,7 +61,8 @@ func IsJPEGRecompression(data []byte) bool {
 // JPEG (i.e. a container with a `jbrd` box and a JPEG-mode VarDCT frame). The
 // returned structure is sufficient to write the original JPEG bitstream.
 //
-// Current scope: baseline (DCT-8 only) JPEGs without chroma subsampling.
+// Current scope: baseline (DCT-8 only) JPEGs, with or without chroma subsampling
+// (4:4:4 / 4:4:0 / 4:2:2 / 4:2:0 and grayscale).
 func DecodeJPEGFromJXL(data []byte) (*jpegData, error) {
 	box := extractJBRDBox(data)
 	if box == nil {
