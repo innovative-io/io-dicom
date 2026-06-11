@@ -143,22 +143,10 @@ before running it.
 |------|---------|
 | `curl` | Download source archives |
 | `tar` | Extract source archives |
-| `cmake` ≥ 3.15 | Configure C/C++ builds (CharLS, OpenJPEG, libjxl, libjpeg-turbo) |
+| `cmake` ≥ 3.15 | Configure C/C++ builds (FFmpeg drive) |
 | `make` | Compile FFmpeg and drive CMake builds |
 | `gcc` + `g++` | C and C++ compiler (or clang equivalents) |
 | `pkg-config` | Locate installed libraries for cgo |
-| `perl` | Patch vendored libjxl CMake metadata |
-| `bash` | Run libjxl's `deps.sh` bootstrap script |
-
-#### Required for libjxl (`-tags libjxl`)
-
-libjxl forces its Brotli and Highway dependencies to come from the system.
-Install the development packages before building:
-
-| Library | macOS (Homebrew) | Ubuntu / Debian | Fedora / RHEL |
-|---------|-----------------|-----------------|---------------|
-| Brotli  | `brew install brotli` | `apt install libbrotli-dev` | `dnf install brotli-devel` |
-| Highway (libhwy) | `brew install highway` | `apt install libhwy-dev` | `dnf install highway-devel` |
 
 #### Recommended for FFmpeg (`-tags ffmpeg`, `-tags st2110`)
 
@@ -176,7 +164,7 @@ macOS app bundles do not inherit those GUI-side dylib dependencies.
 #### macOS — install all prerequisites at once
 
 ```bash
-brew install cmake make pkg-config curl brotli highway nasm
+brew install cmake make pkg-config curl nasm
 # Xcode command-line tools provide gcc/g++/clang/perl/bash:
 xcode-select --install
 ```
@@ -186,16 +174,14 @@ xcode-select --install
 ```bash
 sudo apt update
 sudo apt install -y \
-  build-essential cmake pkg-config curl perl \
-  libbrotli-dev libhwy-dev nasm
+  build-essential cmake pkg-config curl nasm
 ```
 
 #### Fedora / RHEL — install all prerequisites at once
 
 ```bash
 sudo dnf install -y \
-  gcc gcc-c++ cmake make pkg-config curl perl \
-  brotli-devel highway-devel nasm
+  gcc gcc-c++ cmake make pkg-config curl nasm
 ```
 
 #### Windows
@@ -214,7 +200,7 @@ The built binaries run natively on Linux inside WSL. To produce a native Windows
 ```bash
 # Inside WSL — cross-compile for Windows amd64
 GOOS=windows GOARCH=amd64 \
-  go build -tags 'libjxl ffmpeg st2110' \
+  go build -tags 'ffmpeg st2110' \
   -o io-dicom.exe ./cmd/io-dicom
 ```
 
@@ -236,8 +222,6 @@ pacman -S --needed \
   mingw-w64-ucrt-x86_64-gcc \
   mingw-w64-ucrt-x86_64-cmake \
   mingw-w64-ucrt-x86_64-pkg-config \
-  mingw-w64-ucrt-x86_64-brotli \
-  mingw-w64-ucrt-x86_64-highway \
   mingw-w64-ucrt-x86_64-nasm \
   curl perl make
 ```
@@ -254,7 +238,6 @@ MSYS2 UCRT64 shell exactly as documented in the Linux steps above.
 
 | Tag | Codec | Required tools |
 |-----|-------|----------------|
-| `libjxl` | JPEG XL via libjxl | `pkg-config`, libjxl dev package (`libjxl.pc`) |
 | `ffmpeg` | MPEG-2/4/HEVC via FFmpeg | `pkg-config`, FFmpeg dev packages (`libavcodec.pc`, `libavformat.pc`, `libavutil.pc`, `libswscale.pc`) |
 | `st2110` | SMPTE ST 2110 via FFmpeg | `pkg-config`, FFmpeg dev packages (`libavcodec.pc`, `libavformat.pc`, `libavutil.pc`, `libswscale.pc`) |
 
@@ -294,20 +277,20 @@ source "$PWD/.local/codec-deps/env.sh"
 Build with all native codec tags (matches `make build-native`):
 
 ```bash
-go build -tags 'libjxl ffmpeg st2110' \
+go build -tags 'ffmpeg st2110' \
   -o io-dicom ./cmd/io-dicom
 ```
 
-Build with a subset of tags (e.g. JPEG XL only):
+Build with a subset of tags (e.g. MPEG/HEVC only):
 
 ```bash
-go build -tags 'libjxl' -o io-dicom ./cmd/io-dicom
+go build -tags 'ffmpeg' -o io-dicom ./cmd/io-dicom
 ```
 
 ### Install with native codec tags
 
 ```bash
-go install -tags 'libjxl ffmpeg st2110' \
+go install -tags 'ffmpeg st2110' \
   ./cmd/io-dicom
 ```
 
