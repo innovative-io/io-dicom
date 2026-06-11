@@ -25,6 +25,7 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32, csHShift, csV
 	type dcGroupTok struct {
 		dcTk, acmTk []encTokenized
 		count       int
+		acmAlphabet int
 	}
 	dcGroups := make([]dcGroupTok, numDCGroups)
 	modAlphabet := 0
@@ -55,9 +56,13 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32, csHShift, csV
 
 		dcTk, dcMax := tokenizeAll(dcTokens)
 		acmTk, acmMax := tokenizeAll(acmTokens)
-		dcGroups[g] = dcGroupTok{dcTk: dcTk, acmTk: acmTk, count: count}
-		modAlphabet = maxInt(modAlphabet, maxInt(dcMax, acmMax))
-		modTkGroups = append(modTkGroups, dcTk, acmTk)
+		dcGroups[g] = dcGroupTok{dcTk: dcTk, acmTk: acmTk, count: count, acmAlphabet: acmMax + 1}
+		modAlphabet = maxInt(modAlphabet, dcMax)
+		// The shared global modular histogram is sized from the DC-image tokens
+		// only. The AC-metadata tokens (tens of thousands of zeros) get their own
+		// local degenerate histogram instead (see writeDCGroup), so they neither
+		// skew the DC histogram nor pay for it.
+		modTkGroups = append(modTkGroups, dcTk)
 	}
 	var qtTokens []encToken
 	for c := 0; c < 3; c++ {
@@ -98,8 +103,13 @@ func assembleJPEGVarDCT(w, h, bw, bh int, gray bool, cs [3]uint32, csHShift, csV
 		writeModularGroupHeader(dcw)
 		encodeANSData(dcw, ansEncState{tokens: dcGroups[g].dcTk, revMap: modRev, freqs: modFreq})
 		dcw.WriteBits(uint64(dcGroups[g].count-1), ceilLog2Nonzero(uint32(dcGroups[g].count)))
-		writeModularGroupHeader(dcw)
-		encodeANSData(dcw, ansEncState{tokens: dcGroups[g].acmTk, revMap: modRev, freqs: modFreq})
+		// AC metadata is all zeros; give it a local tree + its own (degenerate)
+		// histogram so its tens of thousands of zero tokens cost almost nothing and
+		// don't share — and skew — the DC image's global histogram.
+		writeModularGroupHeaderLocal(dcw)
+		encodeANSStream(dcw, maTreeTokens, numTreeContexts)
+		acmRev, acmFreq := writeANSRealHeader(dcw, dcGroups[g].acmAlphabet, 1, dcGroups[g].acmTk)
+		encodeANSData(dcw, ansEncState{tokens: dcGroups[g].acmTk, revMap: acmRev, freqs: acmFreq})
 	}
 
 	// HfGlobal: RAW dequant matrices + coeff orders + clustered AC histograms.

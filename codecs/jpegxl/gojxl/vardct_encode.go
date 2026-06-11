@@ -327,6 +327,16 @@ func writeModularGroupHeader(s *bitWriter) {
 	s.WriteU32(0, u32Val(0), u32Val(1), u32Off(4, 2), u32Off(8, 18))
 }
 
+// writeModularGroupHeaderLocal writes a modular group header that carries its own
+// local tree and histograms (use_global_tree = false), default WP, no transform.
+// The local tree + data histograms must be written immediately after (matching
+// groupTree's decode order).
+func writeModularGroupHeaderLocal(s *bitWriter) {
+	s.WriteBool(false) // use_global_tree
+	s.WriteBool(true)  // wp_header all_default
+	s.WriteU32(0, u32Val(0), u32Val(1), u32Off(4, 2), u32Off(8, 18))
+}
+
 // writeVarDCTImageMetadata writes ImageMetadata for an XYB VarDCT image.
 func writeVarDCTImageMetadata(w *bitWriter, gray bool) {
 	w.WriteBool(false)                                             // all_default
