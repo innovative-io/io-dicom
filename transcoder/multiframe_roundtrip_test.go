@@ -1,5 +1,3 @@
-//go:build libjxl && cgo
-
 package transcoder_test
 
 import (

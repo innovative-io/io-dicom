@@ -14,9 +14,8 @@ import (
 // modular trees, one or more AC histogram sets, multiple passes (progressive),
 // CfL, Gaborish and EPF — at any image size. Inputs outside those subsets
 // (VarDCT with the rarely-used DCT128/256, non-XYB color, extra channels, JPEG
-// recompression, animation, ICC, non-identity orientation) return an error so a
-// higher-priority native backend (libjxl, when built with -tags libjxl) can
-// take over. Encoding supports the lossless Modular subset via gojxl.Encode.
+// recompression, animation, ICC, non-identity orientation) return an error.
+// Encoding supports the lossless Modular subset via gojxl.Encode.
 type gojpegxlBackend struct{}
 
 func (gojpegxlBackend) Name() string { return "gojpegxl" }
@@ -71,6 +70,7 @@ func (gojpegxlBackend) Encode(raw []byte, width uint16, height uint16, samples u
 }
 
 func registerPureGoBackend() {
-	// Priority -1 so a native libjxl backend (priority 0) wins when present.
+	// gojpegxl is the only built-in backend; an external one can still be plugged
+	// in at a higher priority via RegisterBackend.
 	_ = mgr.RegisterWithPriority("gojpegxl", func() Backend { return gojpegxlBackend{} }, -1)
 }

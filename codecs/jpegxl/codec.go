@@ -10,14 +10,16 @@ import (
 	"github.com/innovative-io/io-dicom/codecs/internal/backendmgr"
 )
 
-var CGOEnabled = nativeBackendEnabled
+// CGOEnabled reports whether a native cgo JPEG XL backend is compiled in. The
+// libjxl backend was retired in favor of the pure-Go gojpegxl codec, so this is
+// always false; it is retained for API compatibility.
+const CGOEnabled = false
 
 const maxCodecPayloadBytes = 512 << 20
 
-// libjxl encoder effort bounds: 1 = fastest/largest, 10 = slowest/smallest.
-// The default matches libjxl's own default so behavior is unchanged unless a
-// caller opts in via SetEncodeEffort. Only the libjxl native backend honors
-// this; other backends ignore it.
+// Encoder effort bounds: 1 = fastest/largest, 10 = slowest/smallest. Retained
+// for API compatibility; the pure-Go backend does not vary its output by effort,
+// so this is currently advisory only.
 const (
 	minEncodeEffort     = 1
 	maxEncodeEffort     = 10
@@ -30,7 +32,7 @@ var jxlEncodeEffort = func() *atomic.Int32 {
 	return v
 }()
 
-// SetEncodeEffort sets the libjxl encoder effort (1 = fastest, largest output;
+// SetEncodeEffort sets the JPEG XL encoder effort (1 = fastest, largest output;
 // 10 = slowest, smallest output). It returns an error for out-of-range values.
 // Effort does not affect correctness: lossless encodes stay lossless.
 func SetEncodeEffort(effort int) error {
@@ -41,11 +43,11 @@ func SetEncodeEffort(effort int) error {
 	return nil
 }
 
-// EncodeEffort returns the current libjxl encoder effort.
+// EncodeEffort returns the current JPEG XL encoder effort.
 func EncodeEffort() int { return int(jxlEncodeEffort.Load()) }
 
 var errInvalidJXLPayload = errors.New("invalid JPEG XL payload size")
-var errBackendUnavailable = errors.New("jpeg xl decode requires the libjxl native backend (build with -tags libjxl)")
+var errBackendUnavailable = errors.New("no JPEG XL decode backend available")
 
 var supportedTransferSyntaxUIDs = []string{
 	"1.2.840.10008.1.2.4.110",
@@ -90,18 +92,21 @@ func (passthroughBackend) Encode(_ []byte, _ uint16, _ uint16, _ uint16, _ uint1
 var mgr = backendmgr.New(func() Backend { return passthroughBackend{} })
 
 func init() {
-	registerPureGoBackend() // pure-Go gojpegxl (lossless Modular decode)
-	registerNativeBackends()
+	registerPureGoBackend() // pure-Go gojpegxl is the only built-in backend
 	mgr.SelectDefault()
 	if mgr.BackendName() == "passthrough" {
 		slog.Warn("jpegxl: no decode backend available")
 	}
 }
 
-// SetBackend overrides the active JPEG XL backend. Passing nil resets to passthrough.
+// SetBackend overrides the active JPEG XL backend. Passing nil resets to the
+// default (pure-Go gojpegxl).
 func SetBackend(backend Backend) {
 	if backend == nil {
+		// Reset to the default (pure-Go gojpegxl) rather than the passthrough
+		// fallback, since gojpegxl is the only built-in backend after libjxl retired.
 		mgr.Reset()
+		mgr.SelectDefault()
 		return
 	}
 	mgr.Set(backend)

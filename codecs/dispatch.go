@@ -24,8 +24,8 @@ import (
 // frames concurrently so each call stays single-threaded and the frames
 // themselves provide the parallelism, avoiding thread oversubscription.
 //
-// Only the native JPEG 2000 (OpenJPEG) and JPEG XL (libjxl) backends honor the
-// hint; all other codecs ignore it.
+// Native codec backends that support intra-frame threading honor the hint; the
+// pure-Go codecs ignore it.
 func WithCodecThreads(ctx context.Context, n int) context.Context {
 	return codecctx.WithThreads(ctx, n)
 }
@@ -151,8 +151,8 @@ func DecompressFrame(ctx context.Context, tsUID string, compressed []byte, bitsa
 		// A JPEG XL JPEG-recompression frame is a losslessly transcoded JPEG.
 		// Reconstruct the original JPEG (pure-Go, byte-exact) and decode it with
 		// the JPEG codec, which already handles photometric/precision. Fall back
-		// to the JXL backend (e.g. native libjxl) for unsupported features such
-		// as progressive scans.
+		// to the JXL backend for inputs the reconstructor does not yet handle
+		// (e.g. progressive scans).
 		if jpegxlcodec.IsJPEGRecompression(compressed) {
 			if jpegBytes, rerr := jpegxlcodec.ReconstructJPEG(compressed); rerr == nil {
 				jb := uint32(len(jpegBytes))
