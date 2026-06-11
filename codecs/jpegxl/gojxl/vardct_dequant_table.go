@@ -74,6 +74,10 @@ type quantEncoding struct {
 	afvWeights  [3][9]float32
 	afv4x4Bands [3][]float32
 	afv4x4BandN int
+	// RAW mode (JPEG reconstruction): the integer quantization table (3*64,
+	// channel-major, row-major within a channel) and its denominator.
+	rawQtable []int32
+	rawDen    float32
 }
 
 // computeInvQuantTable returns the inverse-quant table (length 3*wrows*wcols)

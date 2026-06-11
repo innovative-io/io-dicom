@@ -94,24 +94,31 @@ type encTokenized struct {
 	token uint32
 	nbits int
 	extra uint32
+	ctx   int // raw entropy context (for multi-histogram AC coding)
 }
 
-// encodeANSHeader tokenizes the values, builds a flat histogram, and writes the
-// entropy code header (LZ77 off, simple all-zero context map → 1 histogram).
-func encodeANSHeader(w *bitWriter, tokens []encToken, numContexts int) ansEncState {
+// tokenizeAll hybrid-uint-encodes the values and reports the maximum token. The
+// raw context of each token is carried through for context-clustered coding.
+func tokenizeAll(tokens []encToken) (tks []encTokenized, maxToken int) {
 	cfg := encUintConfig
-	tks := make([]encTokenized, len(tokens))
-	maxToken := 0
+	tks = make([]encTokenized, len(tokens))
 	for i, t := range tokens {
 		tok, nb, ex := encodeHybridUint(cfg, t.value)
-		tks[i] = encTokenized{tok, nb, ex}
+		tks[i] = encTokenized{tok, nb, ex, t.ctx}
 		if int(tok) > maxToken {
 			maxToken = int(tok)
 		}
 	}
-	alphabet := maxToken + 1
+	return tks, maxToken
+}
+
+// writeANSFlatHeader writes the entropy-code header for a single flat histogram
+// over `alphabet` symbols (LZ77 off; a simple all-zero context map when
+// numContexts > 1, mapping every context to histogram 0) and returns the shared
+// alias/frequency tables for encoding the rANS data.
+func writeANSFlatHeader(w *bitWriter, alphabet, numContexts int) (revMap [][]uint16, freqs []uint16) {
 	counts := createFlatHistogram(alphabet, ansTabSize)
-	_, revMap, freqs := reverseAliasMap(counts, encLogAlpha)
+	_, revMap, freqs = reverseAliasMap(counts, encLogAlpha)
 
 	w.WriteBool(false) // lz77 disabled
 	if numContexts > 1 {
@@ -120,11 +127,49 @@ func encodeANSHeader(w *bitWriter, tokens []encToken, numContexts int) ansEncSta
 	}
 	w.WriteBits(0, 1)                     // use_prefix_code = 0 (ANS)
 	w.WriteBits(uint64(encLogAlpha-5), 2) // log_alpha_size
-	writeUintConfig(w, encLogAlpha, cfg)
+	writeUintConfig(w, encLogAlpha, encUintConfig)
 	w.WriteBits(0, 1) // simple_code = 0
 	w.WriteBits(1, 1) // is_flat = 1
 	writeVarLenUint8(w, alphabet-1)
+	return revMap, freqs
+}
 
+// writeANSRealHeader writes the entropy-code header using a real (frequency-
+// derived) histogram instead of a flat one. All contexts share a single merged
+// histogram (a simple all-zero context map when numContexts > 1), built from the
+// combined token frequencies of every supplied group. This compresses skewed
+// distributions far better than the flat header while keeping a single
+// histogram. Returns the alias/frequency tables for encoding the rANS data.
+func writeANSRealHeader(w *bitWriter, alphabet, numContexts int, tokenGroups ...[]encTokenized) (revMap [][]uint16, freqs []uint16) {
+	if alphabet < 1 {
+		alphabet = 1
+	}
+	freq := make([]int64, alphabet)
+	for _, g := range tokenGroups {
+		for _, t := range g {
+			freq[t.token]++
+		}
+	}
+	counts := normalizeHistogram(freq)
+	_, revMap, freqs = reverseAliasMap(counts, encLogAlpha)
+
+	w.WriteBool(false) // lz77 disabled
+	if numContexts > 1 {
+		w.WriteBits(1, 1) // context map is_simple
+		w.WriteBits(0, 2) // bits_per_entry = 0 → all histogram 0
+	}
+	w.WriteBits(0, 1)                     // use_prefix_code = 0 (ANS)
+	w.WriteBits(uint64(encLogAlpha-5), 2) // log_alpha_size
+	writeUintConfig(w, encLogAlpha, encUintConfig)
+	writeANSHistogram(w, counts)
+	return revMap, freqs
+}
+
+// encodeANSHeader tokenizes the values, builds a flat histogram, and writes the
+// entropy code header (LZ77 off, simple all-zero context map → 1 histogram).
+func encodeANSHeader(w *bitWriter, tokens []encToken, numContexts int) ansEncState {
+	tks, maxToken := tokenizeAll(tokens)
+	revMap, freqs := writeANSFlatHeader(w, maxToken+1, numContexts)
 	return ansEncState{tokens: tks, revMap: revMap, freqs: freqs}
 }
 

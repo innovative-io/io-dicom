@@ -38,26 +38,37 @@ func (m *mockBackend) Encode(raw []byte, _ uint16, _ uint16, _ uint16, _ uint16,
 	return out, nil
 }
 
-func TestJXLPassthroughDecodeFails(t *testing.T) {
+func TestJXLDefaultBackendRoundTrips(t *testing.T) {
 	SetBackend(nil)
 	t.Cleanup(func() { SetBackend(nil) })
 
-	if CGOEnabled != nativeBackendEnabled {
-		t.Fatalf("unexpected CGOEnabled value: got %v want %v", CGOEnabled, nativeBackendEnabled)
+	if CGOEnabled {
+		t.Fatal("CGOEnabled should be false after the libjxl backend was retired")
+	}
+	if BackendName() != "gojpegxl" {
+		t.Fatalf("expected default backend gojpegxl, got %s", BackendName())
 	}
 
+	// The pure-Go backend losslessly encodes and decodes a small RGB image.
 	raw := []byte{1, 2, 3, 4, 5, 6}
 	var out []byte
 	var outSize int
-	// There is no pure-Go JPEG XL encoder, so without the native backend encode
-	// must fail rather than emit the raw bytes as a fake stream.
-	if err := JXLencode(raw, 2, 1, 3, 8, &out, &outSize, true); err == nil {
-		t.Fatal("expected JXLencode to fail without native backend")
+	if err := JXLencode(raw, 2, 1, 3, 8, &out, &outSize, true); err != nil {
+		t.Fatalf("JXLencode with default backend: %v", err)
+	}
+	decoded := make([]byte, len(raw))
+	if err := JXLdecode(out, uint32(outSize), decoded); err != nil {
+		t.Fatalf("JXLdecode with default backend: %v", err)
+	}
+	for i := range raw {
+		if decoded[i] != raw[i] {
+			t.Fatalf("round trip mismatch at %d: got %d want %d", i, decoded[i], raw[i])
+		}
 	}
 
-	decoded := make([]byte, len(raw))
-	if err := JXLdecode([]byte{1, 2, 3, 4, 5, 6}, 6, decoded); err == nil {
-		t.Fatal("expected JXLdecode to fail without native backend")
+	// Garbage input must fail cleanly rather than panic.
+	if err := JXLdecode([]byte{1, 2, 3, 4, 5, 6}, 6, make([]byte, 6)); err == nil {
+		t.Fatal("expected JXLdecode of garbage to fail")
 	}
 }
 
@@ -149,20 +160,12 @@ func TestJXLBackendRegistry(t *testing.T) {
 	}
 }
 
-func TestJXLNativeBackendRegistrationMatchesFlag(t *testing.T) {
-	foundLibJXL := false
+func TestJXLNoLibJXLBackend(t *testing.T) {
+	// The native libjxl backend was retired; it must never register.
 	for _, name := range AvailableBackends() {
 		if name == "libjxl" {
-			foundLibJXL = true
-			break
+			t.Fatal("did not expect a libjxl backend after retirement")
 		}
-	}
-
-	if CGOEnabled && !foundLibJXL {
-		t.Fatal("expected libjxl backend when CGOEnabled is true")
-	}
-	if !CGOEnabled && foundLibJXL {
-		t.Fatal("did not expect libjxl backend when CGOEnabled is false")
 	}
 }
 

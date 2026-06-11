@@ -7,9 +7,9 @@ import (
 )
 
 // TestUnsupportedInputsRejected verifies that malformed inputs return a clear
-// error (never a panic or garbage), so the codec backend can degrade gracefully
-// / fall back to libjxl. It also checks that a lossy VarDCT frame now decodes
-// through the public Decode entry point (it routes to the VarDCT decoder).
+// error (never a panic or garbage), so the codec backend degrades gracefully.
+// It also checks that a lossy VarDCT frame now decodes through the public Decode
+// entry point (it routes to the VarDCT decoder).
 func TestUnsupportedInputsRejected(t *testing.T) {
 	t.Run("vardct_now_supported", func(t *testing.T) {
 		data, err := os.ReadFile(filepath.Join("testdata", "lossy_vardct.jxl"))

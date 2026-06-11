@@ -28,6 +28,14 @@ type vardctState struct {
 	acCode      []*ansCode
 	acCtxMap    [][]uint8
 	acCoeffs    [3]map[int][]int32 // per channel: top-left block idx -> coeff block
+	extra       [][]int32          // decoded extra-channel planes (full resolution)
+	extraImg    *modImage          // frame-wide extra-channel modular image
+	extraGroup  bool               // extra channels decoded per AC group (multi-group)
+
+	// Per-JXL-channel chroma subsampling shifts (0=Cb/X, 1=Y, 2=Cr/B). All zero
+	// except for non-XYB YCbCr frames with 4:2:0/4:2:2 subsampling.
+	csHShift [3]int
+	csVShift [3]int
 }
 
 // decodeVarDCTFrame decodes a lossy VarDCT frame. It is being built
@@ -51,10 +59,12 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		return nil, err
 	}
 	st.meta = &meta
-	if meta.Color.WantICC {
-		return nil, errors.New("gojxl: ICC profiles not yet supported")
-	}
 	readTransformData(b, meta.XYBEncoded)
+	if meta.Color.WantICC {
+		if err := consumeICC(b); err != nil {
+			return nil, err
+		}
+	}
 	if err := b.JumpToByteBoundary(); err != nil {
 		return nil, err
 	}
@@ -70,11 +80,10 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 	if err != nil {
 		return nil, err
 	}
-	if st.fh.Flags != 0 {
+	// kSkipAdaptiveDCSmoothing is benign (it only disables a DC post-filter, and
+	// JPEG-mode frames always set it); any other flag is unsupported.
+	if st.fh.Flags&^flagSkipAdaptiveDCSmoothing != 0 {
 		return nil, errors.New("gojxl: frame flags (patches/splines/noise/DC) not yet supported")
-	}
-	if len(st.meta.ExtraChannels) != 0 {
-		return st, errors.New("gojxl: VarDCT with extra channels not yet supported")
 	}
 
 	// Sections are byte-aligned and laid out contiguously after the TOC in
@@ -118,12 +127,42 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		return st, err
 	}
 
+	// ----- Global modular extra channels (alpha, ...) in LfGlobal -----
+	// For VarDCT the modular image is just the extra channels; those that fit a
+	// group are decoded here (ModularGlobal). Channels too big for one group
+	// would be decoded per AC group, which is not yet supported.
+	if err := decodeVarDCTExtraChannels(lfr, st); err != nil {
+		return st, err
+	}
+
 	// ----- DC groups (sections 1..numDCGroups): VarDCT DC (LF) image + AC
 	// metadata. Each DC group is an independent modular sub-stream covering a
 	// groupDim-blocks region of the frame; results are placed into the frame-wide
 	// DC image and AC metadata grids. -----
-	dcW := int(divCeil(st.fd.xsize, acBlockDim))
-	dcH := int(divCeil(st.fd.ysize, acBlockDim))
+	// Chroma subsampling shifts (JXL channel order 0=Cb,1=Y,2=Cr). Only non-XYB
+	// YCbCr frames subsample; everything else stays full-resolution.
+	maxHS, maxVS := 0, 0
+	if st.fh.ColorTransform == ctYCbCr {
+		hs, vs, rawH, rawV := subsamplingShifts(st.fh.ChromaSubsampling)
+		st.csHShift, st.csVShift = hs, vs
+		// The luma grid is padded to the MCU, i.e. the maximum absolute sampling
+		// factor — not the maximum inter-channel shift. These coincide for normal
+		// subsampling, but when every channel shares a non-minimal factor (e.g.
+		// 1x2 on all three) the shifts are all zero while the grid must still be
+		// padded by the shared factor.
+		for c := 0; c < 3; c++ {
+			if rawH[c] > maxHS {
+				maxHS = rawH[c]
+			}
+			if rawV[c] > maxVS {
+				maxVS = rawV[c]
+			}
+		}
+	}
+	// The luma DC block grid is padded up to a multiple of the subsampling
+	// factor so the chroma grid is an exact right-shift (frame_dimensions.h).
+	dcW := divCeilInt(int(st.fd.xsize), acBlockDim<<uint(maxHS)) << uint(maxHS)
+	dcH := divCeilInt(int(st.fd.ysize), acBlockDim<<uint(maxVS)) << uint(maxVS)
 	allocFrameDCAndACM(st, dcW, dcH)
 	dcGroupDim := int(st.fd.groupDim) // DC group dimension in 8x8 blocks
 	ndgx := (dcW + dcGroupDim - 1) / dcGroupDim
@@ -173,9 +212,139 @@ func decodeVarDCTFrame(data []byte) (*vardctState, error) {
 		if err := decodeACGroup(passReaders, st, int(g)); err != nil {
 			return st, err
 		}
+		// Full-resolution extra channels follow the AC coefficients in the same
+		// (pass-0) section, decoded per group (ModularAC). Multi-pass extra
+		// channels are not yet supported.
+		if st.extraGroup {
+			if numPasses != 1 {
+				return st, errors.New("gojxl: multi-pass VarDCT extra channels not yet supported")
+			}
+			if err := decodeVarDCTModularAC(passReaders[0], st, int(g)); err != nil {
+				return st, err
+			}
+		}
+	}
+	if st.extraGroup {
+		for c := st.extraImg.nbMeta; c < len(st.extraImg.channel); c++ {
+			st.extra = append(st.extra, st.extraImg.channel[c].pix)
+		}
 	}
 
 	return st, nil
+}
+
+// decodeVarDCTExtraChannels decodes the modular extra channels (alpha, ...) of a
+// VarDCT frame from the global modular sub-stream (ModularGlobal). For VarDCT
+// the modular image consists solely of the extra channels; channels that fit a
+// group are decoded here at full resolution. Channels too large for one group
+// (multi-group full-res extra channels) and down/upsampled extra channels are
+// not yet supported.
+func decodeVarDCTExtraChannels(b *bitReader, st *vardctState) error {
+	nbExtra := len(st.meta.ExtraChannels)
+	if nbExtra == 0 {
+		return nil
+	}
+	w, h := int(st.fd.xsize), int(st.fd.ysize)
+	groupDim := int(st.fd.groupDim)
+	img := &modImage{bitdepth: int(st.meta.BitDepth.BitsPerSample)}
+	big := false // any channel bigger than one group -> decoded per AC group
+	for ec := 0; ec < nbExtra; ec++ {
+		if st.meta.ExtraChannels[ec].DimShift != 0 {
+			return errors.New("gojxl: downsampled VarDCT extra channels not yet supported")
+		}
+		img.channel = append(img.channel, modChannel{w: w, h: h, pix: make([]int32, w*h)})
+		if w > groupDim || h > groupDim {
+			big = true
+		}
+	}
+	st.extraImg = img
+	st.extraGroup = big
+
+	// The ModularGlobal sub-stream always carries a group header; it then decodes
+	// the channels that fit one group (none when they are all bigger).
+	gh, err := readGroupHeader(b)
+	if err != nil {
+		return err
+	}
+	if !gh.useGlobalTree {
+		return errors.New("gojxl: VarDCT extra-channel local trees not supported")
+	}
+	if big {
+		// Channels are decoded per AC group; the global header here must have no
+		// transforms (libjxl moves global transforms to the group level, which is
+		// not yet handled).
+		if len(gh.transforms) != 0 {
+			return errors.New("gojxl: VarDCT extra-channel global transforms not yet supported")
+		}
+		return nil
+	}
+	for i := range gh.transforms {
+		if err := metaApplyTransform(img, &gh.transforms[i]); err != nil {
+			return err
+		}
+	}
+	reader := newANSSymbolReader(st.code, b, maxChannelWidth(img.channel))
+	for ci := range img.channel {
+		decodeChannel(reader, b, st.tree, st.ctxMap, img.channel, ci, 0, gh.wp) // ModularGlobal stream id = 0
+	}
+	if !reader.checkFinalState() {
+		return errors.New("gojxl: VarDCT extra-channel ANS final state failed")
+	}
+	for i := len(gh.transforms) - 1; i >= 0; i-- {
+		if err := inverseTransform(img, gh.transforms[i], gh.wp); err != nil {
+			return err
+		}
+	}
+	for c := img.nbMeta; c < len(img.channel); c++ {
+		st.extra = append(st.extra, img.channel[c].pix)
+	}
+	return nil
+}
+
+// decodeVarDCTModularAC decodes the full-resolution extra channels of one AC
+// group (ModularStreamId::ModularAC), placing them into the frame-wide extra
+// image. It runs from the AC group's pass-0 bit reader, right after the AC
+// coefficients of that group.
+func decodeVarDCTModularAC(b *bitReader, st *vardctState, groupIdx int) error {
+	groupDim := int(st.fd.groupDim)
+	gx := groupIdx % int(st.fd.xsizeGroups)
+	gy := groupIdx / int(st.fd.xsizeGroups)
+	x0, y0 := gx*groupDim, gy*groupDim
+	gw := minInt(groupDim, st.extraImg.channel[0].w-x0)
+	gh := minInt(groupDim, st.extraImg.channel[0].h-y0)
+
+	sub := &modImage{bitdepth: st.extraImg.bitdepth}
+	for range st.extraImg.channel {
+		sub.channel = append(sub.channel, modChannel{w: gw, h: gh, pix: make([]int32, gw*gh)})
+	}
+	ggh, err := readGroupHeader(b)
+	if err != nil {
+		return err
+	}
+	if !ggh.useGlobalTree {
+		return errors.New("gojxl: VarDCT extra-channel local trees not supported")
+	}
+	if len(ggh.transforms) != 0 {
+		return errors.New("gojxl: VarDCT extra-channel transforms not yet supported")
+	}
+	// ModularAC stream id = 1 + 3*num_dc_groups + kNumQuant + num_groups*pass + g.
+	streamID := 1 + 3*int(st.fd.numDCGroups) + kNumQuantTables + groupIdx
+	reader := newANSSymbolReader(st.code, b, maxChannelWidth(sub.channel))
+	for ci := range sub.channel {
+		decodeChannel(reader, b, st.tree, st.ctxMap, sub.channel, ci, streamID, ggh.wp)
+	}
+	if !reader.checkFinalState() {
+		return errors.New("gojxl: VarDCT extra-channel (group) ANS final state failed")
+	}
+	fw := st.extraImg.channel[0].w
+	for c := range sub.channel {
+		dst := st.extraImg.channel[c].pix
+		src := sub.channel[c].pix
+		for y := 0; y < gh; y++ {
+			copy(dst[(y0+y)*fw+x0:(y0+y)*fw+x0+gw], src[y*gw:(y+1)*gw])
+		}
+	}
+	return nil
 }
 
 // decodeLfGlobal parses the LfGlobal section: the DC dequant matrices, the
@@ -277,7 +446,13 @@ func decodeACGroup(readers []*bitReader, st *vardctState, groupIdx int) error {
 			ctxOffset[p] = cur * st.blockCtx.numACContexts()
 		}
 		ans[p] = newANSSymbolReader(st.acCode[p], rp, 0)
-		nzeros[p] = [3][]int32{make([]int32, gw*gh), make([]int32, gw*gh), make([]int32, gw*gh)}
+		// The non-zero prediction grid is per channel at that channel's
+		// (possibly subsampled) resolution within the group.
+		for c := 0; c < 3; c++ {
+			ngw := divCeilInt(gw, 1<<uint(st.csHShift[c]))
+			ngh := divCeilInt(gh, 1<<uint(st.csVShift[c]))
+			nzeros[p][c] = make([]int32, ngw*ngh)
+		}
 	}
 
 	for by := by0; by < by1; by++ {
@@ -296,10 +471,19 @@ func decodeACGroup(readers []*bitReader, st *vardctState, groupIdx int) error {
 			qf := st.acm.quantF[idx]
 			cbY, cbX := acs.coveredBlocksY(), acs.coveredBlocksX()
 
-			// Channel decode order is Y, X, B = {1, 0, 2}.
+			// Channel decode order is Y, X, B = {1, 0, 2}. Chroma channels are
+			// decoded only at the top-left luma block of each chroma block.
 			for _, c := range [3]int{1, 0, 2} {
+				hs, vs := st.csHShift[c], st.csVShift[c]
+				sbx, sby := bx>>uint(hs), by>>uint(vs)
+				if (sbx<<uint(hs) != bx) || (sby<<uint(vs) != by) {
+					continue
+				}
+				slx, sly := lx>>uint(hs), ly>>uint(vs)
+				ngw := divCeilInt(gw, 1<<uint(hs))
+				cbw := bw >> uint(hs) // frame chroma block width for this channel
 				block := make([]int32, size)
-				st.acCoeffs[c][idx] = block
+				st.acCoeffs[c][sby*cbw+sbx] = block
 				blockCtx := st.blockCtx.blockContext(0, uint32(qf), ord, c)
 				zdOffset := st.blockCtx.zeroDensityContextsOffset(blockCtx)
 				for p := 0; p < numPasses; p++ {
@@ -310,11 +494,11 @@ func decodeACGroup(readers []*bitReader, st *vardctState, groupIdx int) error {
 					shift := uint(st.fh.PassShift[p])
 
 					var rowTop []int32
-					if ly > 0 {
-						rowTop = ng[(ly-1)*gw : ly*gw]
+					if sly > 0 {
+						rowTop = ng[(sly-1)*ngw : sly*ngw]
 					}
-					row := ng[ly*gw : (ly+1)*gw]
-					predicted := int(predictFromTopAndLeft(rowTop, row, lx, 32))
+					row := ng[sly*ngw : (sly+1)*ngw]
+					predicted := int(predictFromTopAndLeft(rowTop, row, slx, 32))
 
 					nzeroCtx := st.blockCtx.nonZeroContext(predicted, blockCtx) + ctxOffset[p]
 					nz := int(reader.readHybridUint(nzeroCtx, rp, cm))
@@ -324,7 +508,7 @@ func decodeACGroup(readers []*bitReader, st *vardctState, groupIdx int) error {
 					val := int32((nz + coveredBlocks - 1) >> uint(log2cov))
 					for yy := 0; yy < cbY; yy++ {
 						for xx := 0; xx < cbX; xx++ {
-							ng[(ly+yy)*gw+(lx+xx)] = val
+							ng[(sly+yy)*ngw+(slx+xx)] = val
 						}
 					}
 
@@ -368,10 +552,12 @@ var kOrderEnc = [4]u32d{u32Val(0x5F), u32Val(0x13), u32Val(0), u32Bits(kNumOrder
 func decodeHfGlobal(b *bitReader, st *vardctState) error {
 	// AC DequantMatrices. all_default -> use the built-in default library.
 	allDefault := b.ReadBits(1) == 1
-	if !allDefault {
-		return errors.New("gojxl: non-default AC dequant matrices not yet supported")
-	}
 	st.quantLib = buildDefaultQuantLibrary()
+	if !allDefault {
+		if err := decodeDequantMatrices(b, st); err != nil {
+			return err
+		}
+	}
 
 	// Number of histogram sets.
 	numHistoBits := ceilLog2Nonzero(st.fd.numGroups)
@@ -611,7 +797,8 @@ const kQuantMax = 256
 
 // dcChannels holds the decoded (still-quantized) LF/DC planes in [Y, X, B] order.
 type dcChannels struct {
-	w, h           int
+	w, h           int // luma (Y) DC dimensions in blocks
+	cw, ch         int // chroma (X=Cb, B=Cr) DC dimensions (== w,h when not subsampled)
 	extraPrecision int
 	y, x, bch      []int32
 }
@@ -620,7 +807,12 @@ type dcChannels struct {
 // that the per-DC-group decoders fill. The DC group block geometry equals the DC
 // image geometry (one DC value per 8x8 block), so bw/bh = dcW/dcH.
 func allocFrameDCAndACM(st *vardctState, dcW, dcH int) {
-	st.dc = &dcChannels{w: dcW, h: dcH, y: make([]int32, dcW*dcH), x: make([]int32, dcW*dcH), bch: make([]int32, dcW*dcH)}
+	// Chroma DC dimensions: X uses HShift/VShift(0), B uses (2); for non-XYB the
+	// two chroma channels always share the same subsampling, so use channel 0.
+	cw := divCeilInt(dcW, 1<<uint(st.csHShift[0]))
+	ch := divCeilInt(dcH, 1<<uint(st.csVShift[0]))
+	st.dc = &dcChannels{w: dcW, h: dcH, cw: cw, ch: ch,
+		y: make([]int32, dcW*dcH), x: make([]int32, cw*ch), bch: make([]int32, cw*ch)}
 	ctW := (dcW + 7) >> 3
 	ctH := (dcH + 7) >> 3
 	st.acm = &acMetadata{
@@ -649,10 +841,16 @@ func decodeVarDCTDCImage(b *bitReader, st *vardctState, groupID, bx0, by0, gbw, 
 	}
 
 	// 3 channels at DC resolution, decoded as a modular image. Channel storage
-	// order matches libjxl: index 0 = Y (c=1), 1 = X (c=0), 2 = B (c=2).
+	// order matches libjxl: index 0 = Y (c=1), 1 = X (c=0), 2 = B (c=2). Chroma
+	// channels are reduced by the subsampling shifts.
+	dcOrder := [3]int{1, 0, 2}
 	img := &modImage{bitdepth: int(st.meta.BitDepth.BitsPerSample)}
-	for i := 0; i < 3; i++ {
-		img.channel = append(img.channel, modChannel{w: gbw, h: gbh, pix: make([]int32, gbw*gbh)})
+	for p := 0; p < 3; p++ {
+		jc := dcOrder[p]
+		hs, vs := st.csHShift[jc], st.csVShift[jc]
+		cgbw := divCeilInt(gbw, 1<<uint(hs))
+		cgbh := divCeilInt(gbh, 1<<uint(vs))
+		img.channel = append(img.channel, modChannel{w: cgbw, h: cgbh, hshift: hs, vshift: vs, pix: make([]int32, cgbw*cgbh)})
 	}
 
 	gh, err := readGroupHeader(b)
@@ -685,11 +883,16 @@ func decodeVarDCTDCImage(b *bitReader, st *vardctState, groupID, bx0, by0, gbw, 
 
 	base := img.nbMeta
 	planes := [3][]int32{st.dc.y, st.dc.x, st.dc.bch}
-	dcW := st.dc.w
+	planeW := [3]int{st.dc.w, st.dc.cw, st.dc.cw}
 	for p := 0; p < 3; p++ {
-		src := img.channel[base+p].pix
-		for y := 0; y < gbh; y++ {
-			copy(planes[p][(by0+y)*dcW+bx0:(by0+y)*dcW+bx0+gbw], src[y*gbw:(y+1)*gbw])
+		jc := dcOrder[p]
+		hs, vs := st.csHShift[jc], st.csVShift[jc]
+		pbx0, pby0 := bx0>>uint(hs), by0>>uint(vs)
+		pw := planeW[p]
+		c := &img.channel[base+p]
+		src := c.pix
+		for y := 0; y < c.h; y++ {
+			copy(planes[p][(pby0+y)*pw+pbx0:(pby0+y)*pw+pbx0+c.w], src[y*c.w:(y+1)*c.w])
 		}
 	}
 	return nil

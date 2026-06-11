@@ -1,4 +1,4 @@
-//go:build libjxl || ffmpeg || st2110
+//go:build ffmpeg || st2110
 
 package media_test
 

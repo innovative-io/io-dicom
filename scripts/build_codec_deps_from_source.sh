@@ -10,7 +10,6 @@ PREFIX="${PREFIX:-$HOME/.local/codec-deps}"
 LIB_DIR="$PREFIX/lib"
 JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 
-JPEGXL_VERSION="${JPEGXL_VERSION:-0.10.3}"
 FFMPEG_VERSION="${FFMPEG_VERSION:-7.1}"
 
 echo "[codec-deps] target: $(uname -s)/$(uname -m)"
@@ -41,74 +40,6 @@ extract_tarball() {
   rm -rf "$dir"
   mkdir -p "$dir"
   tar -xf "$archive" -C "$dir" --strip-components=1
-}
-
-build_jpegxl() {
-  local src="$WORK_DIR/jpegxl-src"
-  local build="$WORK_DIR/jpegxl-build"
-  local tarball="$WORK_DIR/jpegxl-${JPEGXL_VERSION}.tar.gz"
-
-  echo "[codec-deps] building libjxl ${JPEGXL_VERSION}"
-  fetch_tarball "https://github.com/libjxl/libjxl/archive/refs/tags/v${JPEGXL_VERSION}.tar.gz" "$tarball"
-  extract_tarball "$tarball" "$src"
-
-  # GitHub source archives do not contain libjxl's vendored third_party tree.
-  # Bootstrap it before CMake configure so tagged CI builds stay self-contained.
-  (cd "$src" && bash ./deps.sh)
-
-  # Vendored sjpeg still declares a CMake minimum that CMake 4 rejects.
-  perl -0pi -e 's/cmake_minimum_required\(VERSION 2\.8\.7\)/cmake_minimum_required(VERSION 3.5)/' \
-    "$src/third_party/sjpeg/CMakeLists.txt"
-
-  cmake -S "$src" -B "$build" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-    -DCMAKE_INSTALL_LIBDIR=lib \
-    -DBUILD_SHARED_LIBS=ON \
-    -DBUILD_TESTING=OFF \
-    -DCMAKE_DISABLE_FIND_PACKAGE_GTest=ON \
-    -DJPEGXL_ENABLE_TESTS=OFF \
-    -DJPEGXL_ENABLE_TOOLS=ON \
-    -DJPEGXL_ENABLE_DEVTOOLS=OFF \
-    -DJPEGXL_ENABLE_BENCHMARK=OFF \
-    -DJPEGXL_ENABLE_EXAMPLES=OFF \
-    -DJPEGXL_ENABLE_JNI=OFF \
-    -DJPEGXL_FORCE_SYSTEM_BROTLI=ON \
-    -DJPEGXL_FORCE_SYSTEM_HWY=ON
-  cmake --build "$build" --parallel "$JOBS"
-  cmake --install "$build"
-
-  # libjxl is built against system (Homebrew) highway and brotli.
-  # Copy those transitive dependencies into the prefix so they can be bundled
-  # into the app and are present on machines other than the build host.
-  copy_jxl_system_deps
-}
-
-# Detect libhwy and libbrotli{common,dec,enc} by inspecting the installed libjxl
-# via otool, then copy any that resolve outside the prefix into $LIB_DIR.
-copy_jxl_system_deps() {
-  local libjxl="$LIB_DIR/libjxl.dylib"
-  [[ -f "$libjxl" ]] || return 0
-
-  local dep resolved name
-  while IFS= read -r dep; do
-    [[ -z "$dep" ]] && continue
-    [[ "$dep" == /System/* || "$dep" == /usr/lib/* ]] && continue
-    [[ "$dep" == @* ]] && continue
-    name="$(basename "$dep")"
-    # Only the dylibs we care about: highway and brotli
-    case "$name" in
-      libhwy.*.dylib|libbrotli*.dylib) ;;
-      *) continue ;;
-    esac
-    if [[ -f "$dep" && ! -f "$LIB_DIR/$name" ]]; then
-      echo "[codec-deps] bundling jxl dep: $name"
-      cp -f "$dep" "$LIB_DIR/$name"
-      # Fix install name so it resolves via @rpath in the app bundle
-      install_name_tool -id "@rpath/$name" "$LIB_DIR/$name" 2>/dev/null || true
-    fi
-  done < <(otool -L "$libjxl" | tail -n +2 | awk '{print $1}')
 }
 
 build_ffmpeg() {
@@ -174,7 +105,6 @@ main() {
   need_cmd gcc
   need_cmd g++
 
-  build_jpegxl
   build_ffmpeg
   normalize_lib_layout
   write_env_file

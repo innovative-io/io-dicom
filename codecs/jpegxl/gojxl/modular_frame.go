@@ -23,10 +23,12 @@ func decodeModularFrame(data []byte) ([]modChannel, *ImageMetadata, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if meta.Color.WantICC {
-		return nil, nil, errors.New("gojxl: ICC profiles not yet supported")
-	}
 	readTransformData(b, meta.XYBEncoded)
+	if meta.Color.WantICC {
+		if err := consumeICC(b); err != nil {
+			return nil, nil, err
+		}
+	}
 	if err := b.JumpToByteBoundary(); err != nil {
 		return nil, nil, err
 	}

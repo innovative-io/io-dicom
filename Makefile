@@ -1,6 +1,6 @@
 .PHONY: help test test-tags vet lint race fuzz deps-from-source build-native install install-native transfer-syntax-matrix contract-check
 
-NATIVE_CODEC_TAGS := libjxl ffmpeg st2110
+NATIVE_CODEC_TAGS := ffmpeg st2110
 
 # Run via `go run` so contributors and CI need no separate install step. Uses
 # @latest (intentionally not pinned) to track staticcheck releases and stay

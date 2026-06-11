@@ -162,7 +162,8 @@ Latest architecture cleanup includes package path renames.
 - The JPEG family (baseline/extended/lossless) and JPEG-LS (lossless and near-lossless, single- and multi-component) decode and encode entirely in pure Go — no build tag or cgo required. The former `libjpeg` (JPEG) and `charls` (JPEG-LS) cgo backends have been retired; their correctness is preserved by frozen golden vectors under `codecs/jpeg/golden` and `codecs/jpegls/golden`.
 - JPEG 2000 — both classic (EBCOT) and High-Throughput (HTJ2K) — decodes (lossless and lossy) in pure Go, and encodes lossless in pure Go (classic 5/3 and HTJ2K). The former `openjpeg` cgo backend has been retired; out-of-scope codestreams (multi-tile, custom precincts, MCT, non-LRCP) and lossy encode are not yet covered.
 - JPIP / HTJ2K (`.204` / `.205`) decode and encode entirely in pure Go via the JPEG 2000 HTJ2K codec; the former `openjph` cgo backend has been retired.
-- For the remaining cgo-only codecs, decode without the matching native backend fails explicitly instead of returning compressed payload bytes as if they were decoded pixels. Build with the matching tag (`libjxl`, `ffmpeg`, `st2110`) for those production decode/transcode paths.
+- JPEG XL (`.110` / `.111` / `.112`) decodes in pure Go (lossless Modular and lossy VarDCT) and transcodes JPEG Baseline to JPEG XL JPEG-recompression (`.111`) losslessly — byte-exact against the reference `djxl`. The former `libjxl` cgo backend has been retired.
+- For the remaining cgo-only codecs, decode without the matching native backend fails explicitly instead of returning compressed payload bytes as if they were decoded pixels. Build with the matching tag (`ffmpeg`, `st2110`) for those production decode/transcode paths.
 
 ## Codec-Backed Transfer Syntaxes
 
@@ -266,15 +267,12 @@ the supported syntax families.
   golden vectors.
 - `codecs/jpegxl` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
-- `codecs/jpegxl` now includes a build-tagged `libjxl` backend registration path:
-  - default builds keep pure-Go passthrough (`CGOEnabled == false`),
-  - `-tags libjxl` with cgo enables `CGOEnabled == true` and registers backend name `libjxl`.
-  - the `libjxl` backend now bridges directly to the libjxl C API for
-    encode/decode, so it no longer depends on `cjxl` or `djxl` at runtime.
-  - prerequisites for tagged builds:
-    - `pkg-config` must be available,
-    - the libjxl development package must be discoverable via `PKG_CONFIG_PATH`
-      (providing `libjxl.pc`).
+- `codecs/jpegxl` is pure Go (no cgo, no build tag). It decodes the lossless
+  Modular and lossy VarDCT subsets (registered backend `gojpegxl`) and transcodes
+  JPEG Baseline to JPEG XL JPEG-recompression (`.111`) losslessly. The former
+  `libjxl` cgo backend has been retired; `CGOEnabled` is always `false`. The
+  pure-Go decode and `.111` transcode are validated byte-exact against the
+  reference `djxl`.
 - `codecs/mpeg` also supports named backend registration and selection via
   `RegisterBackend`, `UseBackend`, and `AvailableBackends`.
 - `codecs/mpeg` now includes a build-tagged `ffmpeg` backend registration path:
@@ -331,7 +329,7 @@ Applications that need request-scoped cancellation for transcode operations can 
 - Run only the media native-backend representative roundtrip check for a specific tag:
 
 ```bash
-go test -tags libjxl ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
+go test -tags ffmpeg ./media -run TestRepresentativePixelTransferSyntaxRoundTripsWithNativeBackends
 ```
 
 - Equivalent Make targets:
@@ -386,12 +384,6 @@ PREFIX=$PWD/.local/codec-deps JOBS=8 ./scripts/build_codec_deps_from_source.sh
 - The source-built FFmpeg configuration is intentionally headless and disables
   X11/XCB display integration so packaged macOS app runtimes do not inherit
   those GUI-side dylib dependencies.
-- The source-build script also bootstraps libjxl's `third_party` tree via
-  `deps.sh`, because GitHub release archives do not include those fetched
-  dependencies by default.
-- The libjxl source-build step also patches vendored `sjpeg` CMake metadata and
-  sets an explicit policy minimum so it continues to configure under newer
-  CMake releases.
 
 ## Install
 

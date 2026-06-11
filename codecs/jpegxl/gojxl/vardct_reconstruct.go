@@ -26,6 +26,24 @@ func resampleScale1D(cb int) []float32 {
 			1.0593017296817173, 1.1089373535927318, 1.1777765381970435,
 			1.2705593687654873, 1.3944898413647777,
 		}
+	case 16: // DCTResampleScales<16, 128>
+		return []float32{
+			1.0, 1.0015830492062623, 1.0063534990068217, 1.0143759095928793,
+			1.0257600967811158, 1.0406645869480142, 1.0593017296817173, 1.0819447744633812,
+			1.1089373535927318, 1.1407059950032632, 1.1777765381970435, 1.2207956782315876,
+			1.2705593687654873, 1.3280505578213306, 1.3944898413647777, 1.4714043176061107,
+		}
+	case 32: // DCTResampleScales<32, 256>
+		return []float32{
+			1.0, 1.0003954307206069, 1.0015830492062623, 1.0035668445360069,
+			1.0063534990068217, 1.009952439375063, 1.0143759095928793, 1.0196390660647288,
+			1.0257600967811158, 1.0327603660498115, 1.0406645869480142, 1.049501024072585,
+			1.0593017296817173, 1.0701028169146336, 1.0819447744633812, 1.0948728278734026,
+			1.1089373535927318, 1.124194353004584, 1.1407059950032632, 1.158541237256391,
+			1.1777765381970435, 1.1984966740820495, 1.2207956782315876, 1.244777922949508,
+			1.2705593687654873, 1.2982690107339132, 1.3280505578213306, 1.3600643892400104,
+			1.3944898413647777, 1.4315278911623237, 1.4714043176061107, 1.5143734423314616,
+		}
 	default:
 		return nil
 	}
@@ -123,7 +141,7 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 		}
 		t := st.acm.strategy[i]
 		if resampleScale1D(t.coveredBlocksX()) == nil || resampleScale1D(t.coveredBlocksY()) == nil {
-			return nil, errors.New("gojxl: VarDCT reconstruction: DCT128/256 not yet supported")
+			return nil, errors.New("gojxl: VarDCT reconstruction: unsupported transform size")
 		}
 	}
 	W, H := int(st.sh.Xsize), int(st.sh.Ysize)
@@ -333,26 +351,35 @@ func reconstructVarDCT(st *vardctState) (*Image, error) {
 		planeX, planeY, planeB = planes[0], planes[1], planes[2]
 	}
 
-	// Grayscale images carry their luminance in all three (equal) sRGB channels
-	// after XYB conversion; emit a single channel so the output matches the
-	// declared colour space (medical imagery is commonly grayscale).
-	if st.meta.Color.ColorSpace == csGray {
-		pix := make([]byte, W*H)
-		for i := 0; i < W*H; i++ {
-			r, _, _ := xybToLinearRGB(planeX[i], planeY[i], planeB[i])
-			pix[i] = clamp8(linearToSRGB(r))
-		}
-		return &Image{W: W, H: H, Channels: 1, BitDepth: 8, Pixels: pix}, nil
+	// Interleave the colour channels (1 for grayscale — luminance is carried in
+	// the three equal sRGB channels; 3 for RGB) with any decoded extra channels
+	// (alpha, ...). Extra channels are full-resolution 8-bit samples.
+	gray := st.meta.Color.ColorSpace == csGray
+	colorCh := 3
+	if gray {
+		colorCh = 1
 	}
-
-	pix := make([]byte, W*H*3)
+	nc := colorCh + len(st.extra)
+	pix := make([]byte, W*H*nc)
 	for i := 0; i < W*H; i++ {
 		r, g, b := xybToLinearRGB(planeX[i], planeY[i], planeB[i])
-		pix[i*3+0] = clamp8(linearToSRGB(r))
-		pix[i*3+1] = clamp8(linearToSRGB(g))
-		pix[i*3+2] = clamp8(linearToSRGB(b))
+		base := i * nc
+		pix[base] = clamp8(linearToSRGB(r))
+		if !gray {
+			pix[base+1] = clamp8(linearToSRGB(g))
+			pix[base+2] = clamp8(linearToSRGB(b))
+		}
+		for ec := range st.extra {
+			v := st.extra[ec][i]
+			if v < 0 {
+				v = 0
+			} else if v > 255 {
+				v = 255
+			}
+			pix[base+colorCh+ec] = byte(v)
+		}
 	}
-	return &Image{W: W, H: H, Channels: 3, BitDepth: 8, Pixels: pix}, nil
+	return &Image{W: W, H: H, Channels: nc, BitDepth: 8, Pixels: pix}, nil
 }
 
 func clamp8(v float32) byte {
