@@ -55,10 +55,3 @@ func context(mode, p1, p2 int) int {
 	base := mode * 512
 	return int(ctxLut[base+p1]) | int(ctxLut[base+256+p2])
 }
-
-const (
-	ctxModeLSB6   = 0
-	ctxModeMSB6   = 1
-	ctxModeUTF8   = 2
-	ctxModeSigned = 3
-)

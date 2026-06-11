@@ -61,7 +61,7 @@ func EncodeVarDCT(pixels []byte, w, h, channels, globalScale int) ([]byte, error
 	q := newQuantizer(globalScale, kEncQuantDC)
 	mulDC := [3]float32{q.invQuantDC * kDCQuant[0], q.invQuantDC * kDCQuant[1], q.invQuantDC * kDCQuant[2]}
 	xDM := float32(math.Pow(1.0/1.25, 3.0-2.0)) // x_qm_scale default 3
-	bDM := float32(math.Pow(1.0/1.25, 2.0-2.0)) // b_qm_scale default 2
+	bDM := float32(1.0)                         // b_qm_scale default 2 → (1/1.25)^(2-2) = 1
 	dm := [3]float32{xDM, 1.0, bDM}             // applied to X, Y, B (Y unscaled)
 	sd := q.invGlobalScale / float32(kEncQuantField)
 

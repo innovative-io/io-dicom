@@ -17,7 +17,6 @@ import "errors"
 var (
 	errTruncated  = errors.New("brotli: truncated input")
 	errCorrupt    = errors.New("brotli: corrupt stream")
-	errReserved   = errors.New("brotli: reserved/unsupported feature")
 	errDictionary = errors.New("brotli: invalid dictionary reference")
 )
 
