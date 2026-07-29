@@ -75,8 +75,11 @@ func ParseIndexFromFile(path string) (*IndexRecord, error) {
 	buf := *bufPtr
 	defer indexBufPool.Put(bufPtr)
 
-	n, err := f.Read(buf)
-	if err != nil && err != io.EOF {
+	// io.ReadFull rather than a bare Read: a single Read may return fewer bytes
+	// than are available, which would silently truncate the metadata scan and
+	// drop tags that sit past the short read.
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 		return nil, fmt.Errorf("media: ParseIndexFromFile %q: %w", path, err)
 	}
 	if n < 132 {

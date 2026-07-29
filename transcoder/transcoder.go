@@ -138,18 +138,29 @@ func ChangeTransferSyntaxContext(ctx context.Context, obj media.DICOMObject, out
 					return fmt.Errorf("DICOMObject::ConvertTransferSyntax, invalid pixel data size %d", sizePx)
 				}
 				size = uint32(sizePx)
-				img := make([]byte, size)
-				if tag.Length == 0xFFFFFFFF {
+				var img []byte
+				switch {
+				case tag.Length == 0xFFFFFFFF:
+					img = make([]byte, size)
 					if err := uncompress(ctx, obj, i, img, size, frames, bitsa, PhotoInt); err != nil {
 						return fmt.Errorf("DICOMObject::ConvertTransferSyntax, decompress failed: %w", err)
 					}
-				} else { // Uncompressed
-					if RGB && (planar == 1) { // change from planar=1 to planar=0
-						deplanarizeRGBFrames(img, tag.Data, size/frames, frames)
-						planar = 0
-					} else {
-						copy(img, tag.Data)
-					}
+				case RGB && planar == 1: // change from planar=1 to planar=0
+					img = make([]byte, size)
+					deplanarizeRGBFrames(img, tag.Data, size/frames, frames)
+					planar = 0
+				case len(tag.Data) >= int(size):
+					// Already uncompressed and interleaved. compress only reads img,
+					// and the encapsulation helpers reassign tag.Data rather than
+					// writing through it, so the tag's own buffer can be used
+					// directly — saving a full pixel-data allocation and copy
+					// (hundreds of MB on a large multi-frame object).
+					img = tag.Data[:size]
+				default:
+					// Source is shorter than the declared pixel size; allocate so the
+					// tail stays zero-padded, matching the previous behavior.
+					img = make([]byte, size)
+					copy(img, tag.Data)
 				}
 				if err := compress(ctx, obj, &i, img, RGB, cols, rows, bitss, bitsa, pixelrep, planar, frames, outTS.UID); err != nil {
 					return err

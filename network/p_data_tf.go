@@ -10,11 +10,15 @@ import (
 )
 
 // writePDVHeader writes the 12-byte P-DATA-TF + PDV header (big-endian) straight
-// to rw. Building it on the stack avoids allocating a fresh DICOMBuffer for every
-// PDV — the previous approach allocated a 4 KiB buffer per fragment, which adds
-// up across the many fragments of a large pixel-data transfer.
-func writePDVHeader(rw *bufio.ReadWriter, itemType, reserved1 byte, pduLength, pdvLength uint32, pcid, msgHeader byte) error {
-	var hdr [12]byte
+// to rw, avoiding the fresh 4 KiB DICOMBuffer the original implementation
+// allocated for every PDV.
+//
+// hdr is caller-owned scratch space, reused across every fragment of one Write.
+// It cannot be a local: bufio.Writer.Write forwards large writes to its
+// underlying io.Writer interface, so escape analysis moves any slice passed in
+// to the heap. As a local that meant one 16-byte allocation per fragment (~256
+// for a 1 MiB dataset); hoisting it makes that one allocation per Write call.
+func writePDVHeader(rw *bufio.ReadWriter, hdr *[12]byte, itemType, reserved1 byte, pduLength, pdvLength uint32, pcid, msgHeader byte) error {
 	hdr[0] = itemType
 	hdr[1] = reserved1
 	binary.BigEndian.PutUint32(hdr[2:6], pduLength)
@@ -100,6 +104,8 @@ func (pd *PresentationDataTransfer) ReadDynamic(buf *media.DICOMBuffer) (err err
 	return nil
 }
 func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
+	// Reused by every writePDVHeader call below; see that function's comment.
+	var hdr [12]byte
 	TotalSize := uint32(pd.Buffer.GetSize())
 	pd.Buffer.SetPosition(0)
 	if pd.BlockSize == 0 {
@@ -119,7 +125,7 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 		pd.Length = pd.pdv.Length + 4
 		pd.ItemType = pdutype.PDUDataTransfer
 		pd.Reserved1 = 0
-		if err := writePDVHeader(rw, pd.ItemType, pd.Reserved1, pd.Length, pd.pdv.Length, pd.pdv.PresentationContextID, pd.MsgHeader); err != nil {
+		if err := writePDVHeader(rw, &hdr, pd.ItemType, pd.Reserved1, pd.Length, pd.pdv.Length, pd.pdv.PresentationContextID, pd.MsgHeader); err != nil {
 			return fmt.Errorf("pdata::Write: %w", err)
 		}
 		rw.Flush()
@@ -143,7 +149,7 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 		pd.Length = pd.pdv.Length + 4
 		pd.ItemType = pdutype.PDUDataTransfer
 		pd.Reserved1 = 0
-		if err := writePDVHeader(rw, pd.ItemType, pd.Reserved1, pd.Length, pd.pdv.Length, pd.pdv.PresentationContextID, pd.MsgHeader); err != nil {
+		if err := writePDVHeader(rw, &hdr, pd.ItemType, pd.Reserved1, pd.Length, pd.pdv.Length, pd.pdv.PresentationContextID, pd.MsgHeader); err != nil {
 			return fmt.Errorf("pdata::Write: %w", err)
 		}
 
