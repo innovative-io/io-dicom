@@ -99,6 +99,7 @@ type DICOMObject interface {
 type dicomObject struct {
 	Tags           []*DICOMTag
 	tagIndex       map[uint32]*DICOMTag
+	rootIndex      map[uint32]*DICOMTag
 	TransferSyntax *transfersyntax.TransferSyntax
 	ExplicitVR     bool
 	BigEndian      bool
@@ -121,6 +122,49 @@ func (obj *dicomObject) ensureTagIndex() {
 			obj.tagIndex[k] = t
 		}
 	}
+}
+
+// hasUsableLength reports whether a tag carries directly readable value bytes.
+// Zero-length and undefined-length (sequence) tags do not.
+func hasUsableLength(t *DICOMTag) bool {
+	return t.Length > 0 && t.Length != 0xFFFFFFFF
+}
+
+// ensureRootIndex builds the depth-0 lookup map used by findTagGE. For each
+// group+element key it stores the FIRST tag that sits at sequence depth 0 and
+// has a usable length — precisely the tag a depth-0 walk of the flat tag list
+// would return. Tags nested inside sequences are deliberately excluded.
+//
+// It is built lazily and only when findTagGE's primary index lookup misses, so
+// objects whose lookups all resolve against tagIndex never pay for it.
+func (obj *dicomObject) ensureRootIndex() {
+	if obj.rootIndex != nil {
+		return
+	}
+	obj.rootIndex = make(map[uint32]*DICOMTag, len(obj.Tags))
+	sequenceDepth := 0
+	for _, t := range obj.Tags {
+		if (t.VR == "SQ" && t.Length == 0xFFFFFFFF) || (t.Group == 0xFFFE && t.Element == 0xE000 && t.Length == 0xFFFFFFFF) {
+			sequenceDepth++
+		}
+		if sequenceDepth == 0 && hasUsableLength(t) {
+			k := tagKey(t.Group, t.Element)
+			if _, exists := obj.rootIndex[k]; !exists {
+				obj.rootIndex[k] = t
+			}
+		}
+		if (t.Group == 0xFFFE && t.Element == 0xE00D) || (t.Group == 0xFFFE && t.Element == 0xE0DD) {
+			sequenceDepth--
+		}
+	}
+}
+
+// invalidateRootIndex drops the depth-0 index after any mutation that could
+// change sequence nesting or a tag's length. Unlike tagIndex it is not patched
+// incrementally: recomputing sequence depth at an arbitrary insertion point
+// costs as much as a full rebuild, so it is rebuilt lazily on next use.
+func (obj *dicomObject) invalidateRootIndex() {
+	obj.rootIndex = nil
 }
 
 // NewEmptyDCMObj - Create as an interface to a new empty dicomObject
@@ -249,6 +293,7 @@ func (obj *dicomObject) GetTag(dictTag *tags.Tag) *DICOMTag {
 
 func (obj *dicomObject) SetTag(index int, tag *DICOMTag) {
 	FillTag(tag)
+	obj.invalidateRootIndex()
 	if index >= 0 && index < obj.TagCount() {
 		if obj.tagIndex != nil {
 			old := obj.Tags[index]
@@ -267,6 +312,7 @@ func (obj *dicomObject) InsertTag(index int, tag *DICOMTag) {
 	if index < 0 || index > len(obj.Tags) {
 		return
 	}
+	obj.invalidateRootIndex()
 	obj.Tags = append(obj.Tags, nil)
 	copy(obj.Tags[index+1:], obj.Tags[index:])
 	obj.Tags[index] = tag
@@ -282,6 +328,7 @@ func (obj *dicomObject) GetTags() []*DICOMTag {
 }
 
 func (obj *dicomObject) DelTag(index int) {
+	obj.invalidateRootIndex()
 	if obj.tagIndex != nil {
 		deleted := obj.Tags[index]
 		delete(obj.tagIndex, tagKey(deleted.Group, deleted.Element))
@@ -424,28 +471,17 @@ func GetDate(obj DICOMObject, tag *tags.Tag) time.Time {
 // container (SQ / encapsulated pixel data) or a sequence-nested occurrence
 // that was indexed before the top-level one.
 func (obj *dicomObject) findTagGE(group uint16, element uint16) *DICOMTag {
+	key := tagKey(group, element)
 	obj.ensureTagIndex()
-	if t := obj.tagIndex[tagKey(group, element)]; t != nil && t.Length > 0 && t.Length != 0xFFFFFFFF {
+	if t := obj.tagIndex[key]; t != nil && hasUsableLength(t) {
 		return t
 	}
-	// Slow path: the indexed entry is absent, zero-length, or undefined-length.
-	// Walk the flat tag list at depth-0 only.
-	sequenceDepth := 0
-	for i := 0; i < obj.TagCount(); i++ {
-		t := obj.GetTagAt(i)
-		if (t.VR == "SQ" && t.Length == 0xFFFFFFFF) || (t.Group == 0xFFFE && t.Element == 0xE000 && t.Length == 0xFFFFFFFF) {
-			sequenceDepth++
-		}
-		if sequenceDepth == 0 && t.Length > 0 && t.Length != 0xFFFFFFFF {
-			if t.Group == group && t.Element == element {
-				return t
-			}
-		}
-		if (t.Group == 0xFFFE && t.Element == 0xE00D) || (t.Group == 0xFFFE && t.Element == 0xE0DD) {
-			sequenceDepth--
-		}
-	}
-	return nil
+	// The indexed entry is absent, zero-length, or undefined-length. Consult the
+	// depth-0 index, which resolves in O(1) to the same tag a depth-0 walk of the
+	// flat tag list would return. Absent and zero-length tags are common in DICOM,
+	// so this path is hot: walking the list here made every such lookup O(n).
+	obj.ensureRootIndex()
+	return obj.rootIndex[key]
 }
 
 func (obj *dicomObject) GetUint16(tag *tags.Tag) uint16 {
@@ -472,6 +508,7 @@ func (obj *dicomObject) GetString(tag *tags.Tag) string {
 // Add - add a new DICOM Tag to a DICOM Object
 func (obj *dicomObject) Add(tag *DICOMTag) {
 	obj.Tags = append(obj.Tags, tag)
+	obj.invalidateRootIndex()
 	if obj.tagIndex != nil {
 		k := tagKey(tag.Group, tag.Element)
 		if _, exists := obj.tagIndex[k]; !exists {
@@ -487,6 +524,9 @@ func (obj *dicomObject) upsertTag(newTag *DICOMTag) {
 	obj.ensureTagIndex()
 	k := tagKey(newTag.Group, newTag.Element)
 	if existing, ok := obj.tagIndex[k]; ok {
+		// Mutating Length in place can flip whether this tag qualifies for the
+		// depth-0 index, so that index must be dropped.
+		obj.invalidateRootIndex()
 		existing.Data = newTag.Data
 		existing.Length = newTag.Length
 		existing.VR = newTag.VR

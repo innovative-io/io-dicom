@@ -30,7 +30,6 @@ type privateDictionaryTag struct {
 
 var codes []*tags.Tag
 var codeByKey map[uint32]*tags.Tag
-var codeVRByKey map[uint32]string
 var initOnce sync.Once
 var mu sync.Mutex
 
@@ -49,12 +48,10 @@ func dictionaryKey(group uint16, element uint16) uint32 {
 
 func buildDictionaryIndex() {
 	codeByKey = make(map[uint32]*tags.Tag, len(codes))
-	codeVRByKey = make(map[uint32]string, len(codes))
 	for i := 0; i < len(codes); i++ {
 		key := dictionaryKey(codes[i].Group, codes[i].Element)
 		if _, exists := codeByKey[key]; !exists {
 			codeByKey[key] = codes[i]
-			codeVRByKey[key] = codes[i].VR
 		}
 	}
 }
@@ -98,8 +95,8 @@ func GetDictionaryTag(group uint16, element uint16) *tags.Tag {
 // "UN" if it is not in the dictionary.
 func GetDictionaryVR(group uint16, element uint16) string {
 	InitDict()
-	if vr, ok := codeVRByKey[dictionaryKey(group, element)]; ok {
-		return vr
+	if tag, ok := codeByKey[dictionaryKey(group, element)]; ok {
+		return tag.VR
 	}
 	return "UN"
 }
