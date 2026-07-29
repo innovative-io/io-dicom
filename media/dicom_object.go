@@ -94,6 +94,9 @@ type DICOMObject interface {
 	TagCount() int
 	WriteToBytes() []byte
 	WriteToFile(fileName string) error
+	// WriteTo serialises the object to w without buffering it whole; see the
+	// implementation for the one buffering exception (deflated datasets).
+	WriteTo(w io.Writer) (int64, error)
 }
 
 type dicomObject struct {
@@ -542,6 +545,88 @@ func (obj *dicomObject) WriteToBytes() []byte {
 	return obj.encodeToBytes()
 }
 
+// streamScratchFlushBytes is the size at which the tag-header scratch buffer is
+// flushed to the destination writer. Headers are ~12 bytes, so this batches
+// several hundred small tags into one Write while staying trivially small.
+const streamScratchFlushBytes = 8 << 10
+
+// WriteTo serialises the object to w, implementing io.WriterTo.
+//
+// Unlike WriteToBytes it never materialises the whole object: tag headers go
+// through a small scratch buffer and each tag's value is written straight from
+// the tag to w. Peak additional memory is therefore a few KiB rather than a
+// second full copy of the object, which matters for instances whose pixel data
+// runs to hundreds of megabytes.
+//
+// Deflated Explicit VR Little Endian is the one exception — that syntax deflates
+// the entire dataset as a unit, so it cannot be produced incrementally and falls
+// back to buffering.
+func (obj *dicomObject) WriteTo(w io.Writer) (int64, error) {
+	if err := ValidateFileWrite(obj); err != nil {
+		return 0, err
+	}
+
+	if obj.TransferSyntax.UID == transfersyntax.DeflatedExplicitVRLittleEndian.UID {
+		payload := obj.encodeToBytes()
+		if payload == nil {
+			return 0, errors.New("media: WriteTo: failed to encode deflated dataset")
+		}
+		n, err := w.Write(payload)
+		return int64(n), err
+	}
+
+	var written int64
+	scratch := NewDICOMBufferWithCapacity(streamScratchFlushBytes)
+	flush := func() error {
+		data := scratch.GetData()
+		if len(data) == 0 {
+			return nil
+		}
+		n, err := w.Write(data)
+		written += int64(n)
+		scratch.Clear()
+		return err
+	}
+
+	SOPClassUID := obj.GetString(tags.SOPClassUID)
+	SOPInstanceUID := obj.GetString(tags.SOPInstanceUID)
+	scratch.WriteMeta(SOPClassUID, SOPInstanceUID, obj.TransferSyntax.UID)
+	if err := flush(); err != nil {
+		return written, err
+	}
+	// File Meta Information is always little-endian per DICOM PS3.10 §10.1, so
+	// the dataset byte order is only applied once the meta header is out.
+	if obj.TransferSyntax.UID == transfersyntax.ExplicitVRBigEndian.UID {
+		scratch.SetBigEndian(true)
+	}
+
+	explicitVR := obj.IsExplicitVR()
+	for i := 0; i < obj.TagCount(); i++ {
+		tag := obj.GetTagAt(i)
+		writeLen := scratch.writeTagHeader(tag, explicitVR, obj.TransferSyntax)
+		if writeLen != 0 && writeLen != 0xFFFFFFFF {
+			// Flush the pending headers, then hand the value bytes to w directly
+			// so they are never copied into the scratch buffer.
+			if err := flush(); err != nil {
+				return written, err
+			}
+			n, err := w.Write(tag.Data[:writeLen])
+			written += int64(n)
+			if err != nil {
+				return written, err
+			}
+			continue
+		}
+		if scratch.GetSize() >= streamScratchFlushBytes {
+			if err := flush(); err != nil {
+				return written, err
+			}
+		}
+	}
+	err := flush()
+	return written, err
+}
+
 func ValidateFileWrite(obj DICOMObject) error {
 	if obj == nil {
 		return errors.New("media: cannot write nil DICOM object")
@@ -575,7 +660,17 @@ func (obj *dicomObject) WriteToFile(fileName string) error {
 	if err := ValidateFileWrite(obj); err != nil {
 		return err
 	}
-	return os.WriteFile(fileName, obj.encodeToBytes(), 0o600)
+	f, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	// Stream rather than buffering the whole object, so writing a large instance
+	// no longer needs a second full copy of it in memory.
+	if _, err := obj.WriteTo(f); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // DateRange represents a DICOM date range query value (e.g. for C-FIND).

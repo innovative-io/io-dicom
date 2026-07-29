@@ -212,6 +212,17 @@ func (buf *DICOMBuffer) WriteTag(tag *DICOMTag, explicitVR bool) {
 }
 
 func (buf *DICOMBuffer) writeTag(tag *DICOMTag, explicitVR bool, ts *transfersyntax.TransferSyntax) {
+	writeLen := buf.writeTagHeader(tag, explicitVR, ts)
+	if (writeLen != 0) && (writeLen != 0xFFFFFFFF) {
+		buf.Write(tag.Data, int(writeLen))
+	}
+}
+
+// writeTagHeader writes tag's group/element/VR/length header and returns the
+// value length that header declares. Keeping the header separate from the value
+// lets DICOMObject.WriteTo stream a tag's data straight to an io.Writer instead
+// of copying every byte through this buffer.
+func (buf *DICOMBuffer) writeTagHeader(tag *DICOMTag, explicitVR bool, ts *transfersyntax.TransferSyntax) uint32 {
 	writeVR := normalizeExplicitVR(tag, ts)
 
 	// Derive the length to serialize from the actual data length to guarantee the
@@ -253,9 +264,7 @@ func (buf *DICOMBuffer) writeTag(tag *DICOMTag, explicitVR bool, ts *transfersyn
 	} else {
 		buf.WriteUint32(writeLen)
 	}
-	if (writeLen != 0) && (writeLen != 0xFFFFFFFF) {
-		buf.Write(tag.Data, int(writeLen))
-	}
+	return writeLen
 }
 
 // WriteStringTag - Writes a String to a DICOM tag

@@ -241,8 +241,14 @@ func (s *wadoServer) retrieveFrames(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", fmt.Sprintf(
 		`multipart/related; type="application/octet-stream"; boundary=%s`, mw.Boundary()))
 	for _, f := range frames {
-		data, pixErr := obj.GetPixelData(f - 1) // convert to 0-based
+		// GetDecompressedFrame, not GetPixelData: the latter sizes (and caps) its
+		// allocation across ALL frames, so any object whose total pixel data
+		// exceeds the 512 MiB cap failed on every frame and produced an empty
+		// 200 response. It also returns raw compressed fragments for encapsulated
+		// syntaxes, whereas WADO-RS octet-stream frames are uncompressed.
+		data, pixErr := obj.GetDecompressedFrame(r.Context(), f-1) // convert to 0-based
 		if pixErr != nil {
+			slog.Warn("wado: failed to read frame", "frame", f, "err", pixErr)
 			continue
 		}
 		part, partErr := mw.CreatePart(textproto.MIMEHeader{
@@ -357,15 +363,14 @@ func writeMultipartDICOM(w http.ResponseWriter, objects []media.DICOMObject) {
 		if partErr != nil {
 			break
 		}
-		payload := obj.WriteToBytes()
-		if len(payload) == 0 {
+		// Stream straight into the multipart part: buffering the object first
+		// would hold a second full copy of its pixel data in memory.
+		if _, writeErr := obj.WriteTo(part); writeErr != nil {
 			if err := media.ValidateFileWrite(obj); err != nil {
 				slog.Warn("wado: DICOM object not serializable", "err", err)
+			} else {
+				slog.Warn("wado: failed to write DICOM object", "err", writeErr)
 			}
-			break
-		}
-		if _, writeErr := part.Write(payload); writeErr != nil {
-			slog.Warn("wado: failed to write DICOM object", "err", writeErr)
 			break
 		}
 	}
