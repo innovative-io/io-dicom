@@ -31,44 +31,56 @@ func idwt97_1d(a []float32, i0 int) {
 		// openjpeg returns early for a lone sample (no scaling applied).
 		return
 	}
-	at := func(k int) float32 { return a[reflectIdx(k, n)] }
-
 	// Undo scaling: even (low) *= K, odd (high) *= 2/K (openjpeg two_invK).
-	for k := 0; k < n; k++ {
-		if (i0+k)&1 == 0 {
-			a[k] *= dwtK
-		} else {
-			a[k] *= dwtTwoInvK
-		}
+	// Strided by parity so the per-sample parity test disappears.
+	evenStart := 0
+	if (i0 & 1) != 0 {
+		evenStart = 1
+	}
+	for k := evenStart; k < n; k += 2 {
+		a[k] *= dwtK
+	}
+	for k := 1 - evenStart; k < n; k += 2 {
+		a[k] *= dwtTwoInvK
 	}
 	// Inverse lifting, undoing the forward steps in reverse. The forward 9/7
 	// applies alpha→odd, beta→even, gamma→odd, delta→even (T.800; openjpeg
 	// opj_dwt_encode_1_real), so the inverse undoes delta→even, gamma→odd,
 	// beta→even, alpha→odd. (Low-pass = even absolute positions.)
 	//
-	// Undo delta: even -= delta*(odd-1 + odd+1)
-	for k := 0; k < n; k++ {
-		if (i0+k)&1 == 0 {
-			a[k] -= dwtDelta * (at(k-1) + at(k+1))
-		}
+	liftInverse97(a, i0, 0, dwtDelta) // undo delta: even -= delta*(odd-1 + odd+1)
+	liftInverse97(a, i0, 1, dwtGamma) // undo gamma: odd  -= gamma*(even-1 + even+1)
+	liftInverse97(a, i0, 0, dwtBeta)  // undo beta:  even -= beta*(odd-1 + odd+1)
+	liftInverse97(a, i0, 1, dwtAlpha) // undo alpha: odd  -= alpha*(even-1 + even+1)
+}
+
+// liftInverse97 applies one inverse lifting step — a[k] -= coef*(a[k-1]+a[k+1])
+// — to every sample whose absolute position has the given parity.
+//
+// Only k==0 and the final sample can reflect past the array bounds, so the ends
+// are peeled and the interior runs on direct indices. The previous form routed
+// every neighbour access through reflectIdx, paying two integer divisions per
+// access (eight per sample across the four steps) to handle two edge cases.
+// Passing coef by value rather than closing over a helper also keeps this
+// inlinable and allocation-free.
+func liftInverse97(a []float32, i0, parity int, coef float32) {
+	n := len(a)
+	k := 0
+	if (i0 & 1) != parity {
+		k = 1
 	}
-	// Undo gamma: odd -= gamma*(even-1 + even+1)
-	for k := 0; k < n; k++ {
-		if (i0+k)&1 == 1 {
-			a[k] -= dwtGamma * (at(k-1) + at(k+1))
-		}
+	if k >= n {
+		return
 	}
-	// Undo beta: even -= beta*(odd-1 + odd+1)
-	for k := 0; k < n; k++ {
-		if (i0+k)&1 == 0 {
-			a[k] -= dwtBeta * (at(k-1) + at(k+1))
-		}
+	if k == 0 {
+		a[0] -= coef * (a[reflectIdx(-1, n)] + a[reflectIdx(1, n)])
+		k = 2
 	}
-	// Undo alpha: odd -= alpha*(even-1 + even+1)
-	for k := 0; k < n; k++ {
-		if (i0+k)&1 == 1 {
-			a[k] -= dwtAlpha * (at(k-1) + at(k+1))
-		}
+	for ; k+1 < n; k += 2 {
+		a[k] -= coef * (a[k-1] + a[k+1])
+	}
+	if k < n {
+		a[k] -= coef * (a[k-1] + a[reflectIdx(k+1, n)])
 	}
 }
 

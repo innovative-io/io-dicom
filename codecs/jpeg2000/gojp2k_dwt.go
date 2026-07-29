@@ -35,17 +35,43 @@ func idwt53_1d(a []int32, i0 int) {
 		}
 		return
 	}
-	at := func(k int) int32 { return a[reflectIdx(k, n)] }
 	// Even (low) update: y[2n] -= (y[2n-1] + y[2n+1] + 2) >> 2
-	for k := 0; k < n; k++ {
-		if (i0+k)&1 == 0 {
-			a[k] -= (at(k-1) + at(k+1) + 2) >> 2
+	//
+	// As in the 9/7 path, only the first and last sample can reflect past the
+	// array bounds, so the ends are peeled and the interior indexes directly
+	// instead of routing every neighbour through reflectIdx's two divisions.
+	k := 0
+	if (i0 & 1) != 0 {
+		k = 1
+	}
+	if k < n {
+		if k == 0 {
+			a[0] -= (a[reflectIdx(-1, n)] + a[reflectIdx(1, n)] + 2) >> 2
+			k = 2
+		}
+		for ; k+1 < n; k += 2 {
+			a[k] -= (a[k-1] + a[k+1] + 2) >> 2
+		}
+		if k < n {
+			a[k] -= (a[k-1] + a[reflectIdx(k+1, n)] + 2) >> 2
 		}
 	}
+
 	// Odd (high) predict: y[2n+1] += (y[2n] + y[2n+2]) >> 1
-	for k := 0; k < n; k++ {
-		if (i0+k)&1 == 1 {
-			a[k] += (at(k-1) + at(k+1)) >> 1
+	k = 1
+	if (i0 & 1) != 0 {
+		k = 0
+	}
+	if k < n {
+		if k == 0 {
+			a[0] += (a[reflectIdx(-1, n)] + a[reflectIdx(1, n)]) >> 1
+			k = 2
+		}
+		for ; k+1 < n; k += 2 {
+			a[k] += (a[k-1] + a[k+1]) >> 1
+		}
+		if k < n {
+			a[k] += (a[k-1] + a[reflectIdx(k+1, n)]) >> 1
 		}
 	}
 }
