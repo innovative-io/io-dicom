@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -127,6 +128,12 @@ type pduService struct {
 	implClassUID                 string
 	implVersion                  string
 	logger                       *slog.Logger
+	// hdrScratch backs the 10-byte PDU header read. It cannot be a local in
+	// readIncomingPDU: passing a local's slice to io.ReadFull's io.Reader
+	// interface makes escape analysis heap-allocate it, which cost one
+	// allocation per inbound PDU. One association is read by a single
+	// goroutine, so sharing it across calls is safe.
+	hdrScratch [10]byte
 }
 
 // NewPDUService creates a PDUService. Pass PDUServiceOption values to
@@ -644,23 +651,17 @@ func (pdu *pduService) emitRawPDU(direction RawPDUDirection, pduType byte, data 
 }
 
 func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
-	var header [10]byte
+	header := &pdu.hdrScratch
 	if _, err := io.ReadFull(pdu.readWriter, header[:]); err != nil {
 		return 0, nil, err
 	}
 
-	headerStream := media.NewDICOMBufferFromBytes(header[:])
-	itemType, err := headerStream.GetByte()
-	if err != nil {
-		return 0, nil, err
-	}
-	if _, err := headerStream.GetByte(); err != nil {
-		return 0, nil, err
-	}
-	pduLength, err := headerStream.ReadUint32(true)
-	if err != nil {
-		return 0, nil, err
-	}
+	// Decode the fixed header directly. Wrapping it in a DICOMBuffer just to
+	// read three fields cost three bounds-checked method calls per PDU for no
+	// benefit — the layout here is fixed by PS3.8 §9.3: item type, one reserved
+	// byte, then a big-endian uint32 length.
+	itemType := header[0]
+	pduLength := binary.BigEndian.Uint32(header[2:6])
 	if pduLength < 4 {
 		return 0, nil, fmt.Errorf("pdu: malformed PDU length %d (minimum is 4)", pduLength)
 	}

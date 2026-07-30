@@ -156,9 +156,22 @@ func (buf *DICOMBuffer) Write(buffer []byte, count int) (int, error) {
 			// Extend within pre-allocated capacity — zero allocation.
 			buf.data = buf.data[:endPos]
 		} else {
-			// Must grow beyond current capacity; fall back to append.
-			grow := endPos - len(buf.data)
-			buf.data = append(buf.data, make([]byte, grow)...)
+			// Grow with explicit capacity doubling. Deferring to append meant
+			// inheriting its growth factor, which tapers toward ~1.25x for large
+			// slices — accumulating a multi-megabyte message from small fragments
+			// (exactly what the P-DATA receive path does after Reset drops the
+			// backing array) then cost roughly 5x the final size in allocation
+			// and copying.
+			newCap := cap(buf.data) * 2
+			if newCap < endPos {
+				newCap = endPos
+			}
+			if newCap < 4096 {
+				newCap = 4096
+			}
+			grown := make([]byte, endPos, newCap)
+			copy(grown, buf.data)
+			buf.data = grown
 		}
 	}
 
