@@ -1,6 +1,9 @@
 package gojxl
 
-import "math"
+import (
+	"math"
+	"sync"
+)
 
 // Separable orthonormal DCT used by VarDCT inverse transforms. libjxl's
 // dct-inl.h implements the same cosine transform via a fast recursive butterfly
@@ -82,13 +85,43 @@ func dct1d(t *dctTable, in, out []float32) {
 // applying the 1D inverse along columns then rows. in and out may be the same
 // slice. Used for the square DCT8x8 / DCT16x16 / DCT32x32 VarDCT blocks (and the
 // rectangular DCTs via differing tw/th).
+// dctScratch holds the working buffers idct2d needs. They were allocated fresh
+// on every call, which made idct2d the single largest allocation site in JPEG XL
+// decoding — 196653 objects and 48 MB on one 512x512 lossy decode, and a fifth
+// of decode CPU spent in runtime.madvise returning the churn to the OS.
+//
+// A sync.Pool rather than shared package state: frames are decoded concurrently
+// (runFrameJobs), so a single shared buffer would be a data race.
+//
+// Recycled buffers are not zeroed because every element is written before it is
+// read: idct1d assigns out[x] for all x, the column loop fills every tmp entry,
+// and rowIn is fully overwritten by copy.
+type dctScratch struct {
+	col, tmpc, tmp, rowIn, rowOut []float32
+}
+
+var dctScratchPool = sync.Pool{New: func() any { return new(dctScratch) }}
+
+func growF32(b []float32, n int) []float32 {
+	if cap(b) < n {
+		return make([]float32, n)
+	}
+	return b[:n]
+}
+
 func idct2d(coeff []float32, w, h int) []float32 {
-	out := make([]float32, w*h)
+	out := make([]float32, w*h) // returned to the caller, so always fresh
 	tcol := getDCTTable(h)
 	trow := getDCTTable(w)
-	col := make([]float32, h)
-	tmpc := make([]float32, h)
-	tmp := make([]float32, w*h)
+
+	s := dctScratchPool.Get().(*dctScratch)
+	defer dctScratchPool.Put(s)
+	s.col = growF32(s.col, h)
+	s.tmpc = growF32(s.tmpc, h)
+	s.tmp = growF32(s.tmp, w*h)
+	s.rowIn = growF32(s.rowIn, w)
+	s.rowOut = growF32(s.rowOut, w)
+	col, tmpc, tmp, rowIn, rowOut := s.col, s.tmpc, s.tmp, s.rowIn, s.rowOut
 
 	// Columns: inverse-transform each column of length h.
 	for x := 0; x < w; x++ {
@@ -101,8 +134,6 @@ func idct2d(coeff []float32, w, h int) []float32 {
 		}
 	}
 	// Rows: inverse-transform each row of length w.
-	rowIn := make([]float32, w)
-	rowOut := make([]float32, w)
 	for y := 0; y < h; y++ {
 		copy(rowIn, tmp[y*w:y*w+w])
 		idct1d(trow, rowIn, rowOut)
