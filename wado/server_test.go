@@ -108,7 +108,7 @@ func newTestHandler(t *testing.T) (http.Handler, *mockStore) {
 func TestRetrieveStudy_NotFound(t *testing.T) {
 	h, _ := newTestHandler(t)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/wado/rs/studies/1.2.3.missing", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/wado/rs/studies/1.2.3.999999", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", rec.Code)
 	}

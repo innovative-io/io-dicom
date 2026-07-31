@@ -3,6 +3,7 @@ package wado
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -166,6 +168,9 @@ func (s *wadoServer) buildMux() *http.ServeMux {
 // ── WADO-RS retrieve handlers ─────────────────────────────────────────────────
 
 func (s *wadoServer) retrieveStudy(w http.ResponseWriter, r *http.Request) {
+	if !requireUIDs(w, r.PathValue("studyUID")) {
+		return
+	}
 	objects, err := s.params.Store.RetrieveStudy(r.Context(), r.PathValue("studyUID"))
 	if err != nil {
 		httpError(w, err, http.StatusNotFound)
@@ -175,6 +180,9 @@ func (s *wadoServer) retrieveStudy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *wadoServer) retrieveSeries(w http.ResponseWriter, r *http.Request) {
+	if !requireUIDs(w, r.PathValue("studyUID"), r.PathValue("seriesUID")) {
+		return
+	}
 	objects, err := s.params.Store.RetrieveSeries(r.Context(),
 		r.PathValue("studyUID"), r.PathValue("seriesUID"))
 	if err != nil {
@@ -185,6 +193,9 @@ func (s *wadoServer) retrieveSeries(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *wadoServer) retrieveInstance(w http.ResponseWriter, r *http.Request) {
+	if !requireUIDs(w, r.PathValue("studyUID"), r.PathValue("seriesUID"), r.PathValue("sopInstanceUID")) {
+		return
+	}
 	obj, err := s.params.Store.RetrieveInstance(r.Context(),
 		r.PathValue("studyUID"), r.PathValue("seriesUID"), r.PathValue("sopInstanceUID"))
 	if err != nil {
@@ -195,6 +206,9 @@ func (s *wadoServer) retrieveInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *wadoServer) retrieveStudyMetadata(w http.ResponseWriter, r *http.Request) {
+	if !requireUIDs(w, r.PathValue("studyUID")) {
+		return
+	}
 	objects, err := s.params.Store.RetrieveStudy(r.Context(), r.PathValue("studyUID"))
 	if err != nil {
 		httpError(w, err, http.StatusNotFound)
@@ -204,6 +218,9 @@ func (s *wadoServer) retrieveStudyMetadata(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *wadoServer) retrieveSeriesMetadata(w http.ResponseWriter, r *http.Request) {
+	if !requireUIDs(w, r.PathValue("studyUID"), r.PathValue("seriesUID")) {
+		return
+	}
 	objects, err := s.params.Store.RetrieveSeries(r.Context(),
 		r.PathValue("studyUID"), r.PathValue("seriesUID"))
 	if err != nil {
@@ -214,6 +231,9 @@ func (s *wadoServer) retrieveSeriesMetadata(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *wadoServer) retrieveInstanceMetadata(w http.ResponseWriter, r *http.Request) {
+	if !requireUIDs(w, r.PathValue("studyUID"), r.PathValue("seriesUID"), r.PathValue("sopInstanceUID")) {
+		return
+	}
 	obj, err := s.params.Store.RetrieveInstance(r.Context(),
 		r.PathValue("studyUID"), r.PathValue("seriesUID"), r.PathValue("sopInstanceUID"))
 	if err != nil {
@@ -226,6 +246,9 @@ func (s *wadoServer) retrieveInstanceMetadata(w http.ResponseWriter, r *http.Req
 // retrieveFrames handles WADO-RS frame-level retrieval.
 // The {frames} path segment is a comma-separated list of 1-based frame numbers.
 func (s *wadoServer) retrieveFrames(w http.ResponseWriter, r *http.Request) {
+	if !requireUIDs(w, r.PathValue("studyUID"), r.PathValue("seriesUID"), r.PathValue("sopInstanceUID")) {
+		return
+	}
 	obj, err := s.params.Store.RetrieveInstance(r.Context(),
 		r.PathValue("studyUID"), r.PathValue("seriesUID"), r.PathValue("sopInstanceUID"))
 	if err != nil {
@@ -278,30 +301,68 @@ func (s *wadoServer) storeInstances(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing multipart boundary", http.StatusBadRequest)
 		return
 	}
-	mr := multipart.NewReader(r.Body, boundary)
+	// Bound the request body as a whole; each part is separately capped by
+	// limitedReadAll.
+	mr := multipart.NewReader(http.MaxBytesReader(w, r.Body, maxStoreBodyBytes), boundary)
 	var objects []media.DICOMObject
+	failed := 0
 	for {
 		part, partErr := mr.NextPart()
 		if partErr != nil {
-			break
+			if errors.Is(partErr, io.EOF) {
+				break
+			}
+			// A malformed or over-large body is a client error, not the end of
+			// the stream. Treating every NextPart error as "done" is what let a
+			// truncated upload report success for the parts that happened to
+			// arrive first.
+			http.Error(w, "malformed multipart body", http.StatusBadRequest)
+			return
+		}
+		if len(objects)+failed >= maxStoreParts {
+			http.Error(w, "too many parts", http.StatusRequestEntityTooLarge)
+			return
 		}
 		data, readErr := limitedReadAll(part)
 		if readErr != nil {
+			slog.Warn("STOW-RS: failed to read part", "err", readErr)
+			failed++
 			continue
 		}
 		obj, parseErr := media.NewDCMObjFromBytes(data)
 		if parseErr != nil {
 			slog.Warn("STOW-RS: failed to parse DICOM part", "err", parseErr)
+			failed++
 			continue
 		}
 		objects = append(objects, obj)
+	}
+
+	// PS3.18 §10.5: nothing stored is a failure, not a success. Returning 200
+	// with an empty ReferencedSOPSequence told a sending modality its study was
+	// safely archived when none of it was — and a modality that then deletes its
+	// local copy loses the study.
+	if len(objects) == 0 {
+		if failed > 0 {
+			http.Error(w, "no instances could be stored", http.StatusConflict)
+			return
+		}
+		http.Error(w, "no DICOM instances in request", http.StatusBadRequest)
+		return
 	}
 	if storeErr := s.params.Store.StoreInstances(r.Context(), objects); storeErr != nil {
 		httpError(w, storeErr, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/dicom+json")
-	w.WriteHeader(http.StatusOK)
+	// PS3.18 §10.5: partial success is 202 Accepted, so a client can tell that
+	// some instances did not make it rather than assuming the whole study landed.
+	if failed > 0 {
+		slog.Warn("STOW-RS: partial store", "stored", len(objects), "failed", failed)
+		w.WriteHeader(http.StatusAccepted)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
 	_ = json.NewEncoder(w).Encode(buildStowResponse(objects))
 }
 
@@ -466,6 +527,9 @@ func httpError(w http.ResponseWriter, err error, code int) {
 // ── WADO-RS delete handlers ───────────────────────────────────────────────────
 
 func (s *wadoServer) deleteStudy(w http.ResponseWriter, r *http.Request) {
+	if !requireUIDs(w, r.PathValue("studyUID")) {
+		return
+	}
 	if err := s.params.Store.DeleteStudy(r.Context(), r.PathValue("studyUID")); err != nil {
 		httpError(w, err, http.StatusNotFound)
 		return
@@ -474,6 +538,9 @@ func (s *wadoServer) deleteStudy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *wadoServer) deleteSeries(w http.ResponseWriter, r *http.Request) {
+	if !requireUIDs(w, r.PathValue("studyUID"), r.PathValue("seriesUID")) {
+		return
+	}
 	if err := s.params.Store.DeleteSeries(r.Context(),
 		r.PathValue("studyUID"), r.PathValue("seriesUID")); err != nil {
 		httpError(w, err, http.StatusNotFound)
@@ -483,6 +550,9 @@ func (s *wadoServer) deleteSeries(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *wadoServer) deleteInstance(w http.ResponseWriter, r *http.Request) {
+	if !requireUIDs(w, r.PathValue("studyUID"), r.PathValue("seriesUID"), r.PathValue("sopInstanceUID")) {
+		return
+	}
 	if err := s.params.Store.DeleteInstance(r.Context(),
 		r.PathValue("studyUID"), r.PathValue("seriesUID"), r.PathValue("sopInstanceUID")); err != nil {
 		httpError(w, err, http.StatusNotFound)
@@ -494,6 +564,57 @@ func (s *wadoServer) deleteInstance(w http.ResponseWriter, r *http.Request) {
 // limitedReadAll reads at most 64 MiB from r to prevent memory exhaustion.
 const maxPartBytes = 64 * 1024 * 1024
 
+// maxStoreBodyBytes and maxStoreParts bound a STOW-RS upload as a whole.
+// maxPartBytes caps each part, but nothing capped how many parts arrived or the
+// total body, and every parsed object was accumulated before any was handed to
+// the Store: a 1 GB body of 2000 parts held ~1.6 GB resident, with no ceiling
+// other than the client's patience.
+const (
+	maxStoreBodyBytes = 2 << 30 // 2 GiB
+	maxStoreParts     = 10000
+)
+
+// limitedReadAll reads at most maxPartBytes and reports whether the limit was
+// hit, rather than silently returning a truncated part. A truncated DICOM
+// payload fails to parse, so previously an oversized part vanished into the
+// "skip and keep going" path and the response still said 200.
 func limitedReadAll(r io.Reader) ([]byte, error) {
-	return io.ReadAll(io.LimitReader(r, maxPartBytes))
+	data, err := io.ReadAll(io.LimitReader(r, maxPartBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxPartBytes {
+		return nil, fmt.Errorf("part exceeds %d bytes", maxPartBytes)
+	}
+	return data, nil
+}
+
+// uidPattern is the DICOM UI value representation: dot-separated numeric
+// components, at most 64 characters (PS3.5 §9.1).
+var uidPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`)
+
+// validUID reports whether s is a syntactically valid DICOM UID.
+//
+// Go's ServeMux percent-decodes path wildcards, so a request for
+// `..%2f..%2f..%2fetc%2fpasswd` reaches the handler as the literal string
+// `../../../etc/passwd`, and `a%00b` arrives with an embedded NUL. Those went
+// to the Store verbatim. io-scp's Store resolves UIDs through a query engine so
+// it is unaffected, but the Store interface documents no validation obligation,
+// and the canonical DICOM layout is {studyUID}/{seriesUID}/{sopUID}.dcm — any
+// filesystem- or object-store-backed implementation would inherit an arbitrary
+// read/delete primitive.
+func validUID(s string) bool {
+	return s != "" && len(s) <= 64 && uidPattern.MatchString(s)
+}
+
+// requireUIDs validates every supplied path UID, writing 400 and returning
+// false on the first invalid one.
+func requireUIDs(w http.ResponseWriter, uids ...string) bool {
+	for _, uid := range uids {
+		if !validUID(uid) {
+			http.Error(w, "invalid DICOM UID in request path", http.StatusBadRequest)
+			return false
+		}
+	}
+	return true
 }
