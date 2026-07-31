@@ -206,8 +206,17 @@ func decodeTileComponent(cs *j2kCodestream, frame []byte, tc *tileComp) ([]int32
 		samples = idwt53(tc, band)
 	}
 
-	// DC level shift for unsigned components.
-	ci := cs.comps[tc.comp]
+	// The DC level shift is deliberately NOT applied here. T.800 Annex G orders
+	// the inverse multi-component transform before it, and the MCT needs all
+	// three components together, so goJ2Kdecode calls finishComponent after.
+	return samples, nil
+}
+
+// finishComponent applies the DC level shift and range clamp to one component's
+// samples, in place. Split out of decodeTileComponent so the inverse MCT can run
+// first, on the DC-centred values it is defined over.
+func finishComponent(cs *j2kCodestream, comp int, samples []int32) {
+	ci := cs.comps[comp]
 	if !ci.signed {
 		shift := int32(1) << uint(ci.precision-1)
 		for i := range samples {
@@ -232,7 +241,44 @@ func decodeTileComponent(cs *j2kCodestream, frame []byte, tc *tileComp) ([]int32
 			samples[i] = hi
 		}
 	}
-	return samples, nil
+}
+
+// inverseMCT undoes the multi-component transform across the first three
+// components, in place, per ITU-T T.800 Annex G.
+//
+// reversible selects the RCT (G.2), which pairs with the 5/3 wavelet, over the
+// ICT (G.1), which pairs with 9/7. Components beyond the first three (e.g.
+// alpha) are untransformed and left alone.
+//
+// The COD marker's MCT flag was parsed into codingStyle.mct but never read, so
+// no inverse transform ran at all: colour codestreams encoded with the MCT —
+// the usual case for YBR_ICT and YBR_RCT — decoded to raw component planes.
+func inverseMCT(planes [][]int32, reversible bool) {
+	n := len(planes[0])
+	if len(planes[1]) != n || len(planes[2]) != n {
+		return // mismatched geometry: not MCT-eligible, leave untouched
+	}
+	y0, y1, y2 := planes[0], planes[1], planes[2]
+	if reversible {
+		for i := 0; i < n; i++ {
+			// Arithmetic shift, not division: T.800 specifies floor, and Go's
+			// integer division truncates toward zero for negative sums.
+			g := y0[i] - ((y1[i] + y2[i]) >> 2)
+			r := y2[i] + g
+			b := y1[i] + g
+			y0[i], y1[i], y2[i] = r, g, b
+		}
+		return
+	}
+	for i := 0; i < n; i++ {
+		fy, fcb, fcr := float64(y0[i]), float64(y1[i]), float64(y2[i])
+		r := fy + 1.402*fcr
+		g := fy - 0.34413*fcb - 0.71414*fcr
+		b := fy + 1.772*fcb
+		y0[i] = int32(math.Round(r))
+		y1[i] = int32(math.Round(g))
+		y2[i] = int32(math.Round(b))
+	}
 }
 
 // goJ2Kdecode decodes a raw JPEG 2000 codestream into out using the codec's
@@ -293,6 +339,16 @@ func goJ2Kdecode(frame, out []byte) error {
 			return err
 		}
 		planes[c] = s
+	}
+
+	// Inverse multi-component transform, before the DC level shift (T.800
+	// Annex G). The reversible RCT pairs with the 5/3 wavelet, the irreversible
+	// ICT with 9/7; the tile-component's transform byte distinguishes them.
+	if cs.cod.mct != 0 && nc >= 3 {
+		inverseMCT(planes, tcs[0].style.transform == 1)
+	}
+	for c := 0; c < nc; c++ {
+		finishComponent(cs, c, planes[c])
 	}
 
 	// Pack component-interleaved, little-endian.
