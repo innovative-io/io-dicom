@@ -142,3 +142,29 @@ func TestStoreRejectsEmptyBody(t *testing.T) {
 		t.Fatalf("an empty upload returned %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestStoreRejectsInstanceFromDifferentStudy pins the study-scoped STOW check.
+//
+// The {studyUID} path segment was ignored entirely, so POSTing to
+// /stow/rs/studies/{A} happily stored instances belonging to study B. Beyond the
+// PS3.18 §10.5 conformance point, any deployment that authorises STOW per-study
+// had that authorisation bypassed: the path said one study while the payload
+// wrote another.
+func TestStoreRejectsInstanceFromDifferentStudy(t *testing.T) {
+	h, store := newTestHandler(t)
+	body, ct := buildMultipartDICOMBody(t, loadSampleDICOM(t))
+
+	// A syntactically valid UID that is not the instance's study.
+	req := httptest.NewRequest("POST", "/stow/rs/studies/9.9.9.999", body)
+	req.Header.Set("Content-Type", ct)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code < 400 {
+		t.Fatalf("an instance from a different study was accepted with %d: %s",
+			rec.Code, rec.Body.String())
+	}
+	if len(store.stored) != 0 {
+		t.Fatalf("expected nothing stored, got %d", len(store.stored))
+	}
+}

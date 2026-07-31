@@ -215,7 +215,9 @@ func TestStoreInstances_WithStudyUID(t *testing.T) {
 	h, store := newTestHandler(t)
 	body, ct := buildMultipartDICOMBody(t, loadSampleDICOM(t))
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/stow/rs/studies/1.2.3", body)
+	// The path study UID must match the instance's StudyInstanceUID; PS3.18
+	// §10.5 requires rejecting a mismatch.
+	req := httptest.NewRequest("POST", "/stow/rs/studies/1.3.46.670589.11.8410.6.132672291010455276", body)
 	req.Header.Set("Content-Type", ct)
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
