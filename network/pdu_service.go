@@ -99,6 +99,18 @@ func WithImplementationClass(uid, version string) PDUServiceOption {
 	}
 }
 
+// WithMaxMessageSize overrides the ceiling on one DIMSE message accumulated
+// across P-DATA fragments. A non-positive value restores the default
+// (defaultMaxMessageBytes).
+func WithMaxMessageSize(n int) PDUServiceOption {
+	return func(p *pduService) {
+		if n <= 0 {
+			n = defaultMaxMessageBytes
+		}
+		p.maxMessageBytes = n
+	}
+}
+
 // WithLogger sets the structured logger used for PDU-level events on this
 // connection. By default the library logs through slog.Default(). Pass a logger
 // derived with per-association attributes to correlate concurrent associations.
@@ -128,6 +140,9 @@ type pduService struct {
 	implClassUID                 string
 	implVersion                  string
 	logger                       *slog.Logger
+	// maxMessageBytes bounds the total size of one DIMSE message accumulated
+	// across P-DATA fragments. See defaultMaxMessageBytes.
+	maxMessageBytes int
 	// negotiated records that an association has been established on this
 	// connection. PS3.8 §9.3.1 permits exactly one A-ASSOCIATE-RQ per
 	// association; without this guard the same connection can renegotiate
@@ -147,13 +162,14 @@ type pduService struct {
 // configure non-default behaviour (e.g. WithImplementationClass).
 func NewPDUService(opts ...PDUServiceOption) PDUService {
 	p := &pduService{
-		buf:       media.NewDICOMBuffer(),
-		AssocRQ:   newAssociationRequest(),
-		AssocAC:   newAssociationAccept(),
-		AssocRJ:   NewAssociationReject(),
-		ReleaseRQ: NewReleaseRequest(),
-		ReleaseRP: NewReleaseResponse(),
-		AbortRQ:   NewAbortRequest(),
+		maxMessageBytes: defaultMaxMessageBytes,
+		buf:             media.NewDICOMBuffer(),
+		AssocRQ:         newAssociationRequest(),
+		AssocAC:         newAssociationAccept(),
+		AssocRJ:         NewAssociationReject(),
+		ReleaseRQ:       NewReleaseRequest(),
+		ReleaseRP:       NewReleaseResponse(),
+		AbortRQ:         NewAbortRequest(),
 	}
 	p.SetLogger(nil)
 	for _, opt := range opts {
@@ -205,6 +221,19 @@ const maxPduLength uint32 = 16384
 // a multi-gigabyte allocation (DoS). 16 MiB is orders of magnitude above any
 // conformant PDU yet trivially bounded.
 const maxIncomingPDULength uint32 = 16 << 20
+
+// defaultMaxMessageBytes bounds one DIMSE message accumulated across P-DATA
+// fragments.
+//
+// maxIncomingPDULength caps an INDIVIDUAL PDU at 16 MiB, but nothing bounded the
+// sum: NextPDU loops while the last-fragment bit is clear, appending every PDV
+// into Pdata.Buffer, so a peer that simply never sets that bit grows the buffer
+// without limit. 1 GiB is far above any real DIMSE message (a large multi-frame
+// instance is tens of MB) while keeping a hostile peer bounded.
+//
+// Override with WithMaxMessageSize when an archive genuinely handles larger
+// objects.
+const defaultMaxMessageBytes = 1 << 30
 
 const releaseHandshakeTimeout = 5 * time.Second
 
@@ -573,6 +602,13 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 			pdu.buf.SetPosition(1)
 			if err := pdu.Pdata.ReadDynamic(pdu.buf); err != nil {
 				return nil, err
+			}
+			// Bound the accumulated message, not just each PDU. Without this a
+			// peer that never sets the last-fragment bit grows Pdata.Buffer
+			// without limit.
+			if limit := pdu.maxMessageBytes; limit > 0 && pdu.Pdata.Buffer.GetSize() > limit {
+				return nil, pdu.abortWithError(fmt.Sprintf(
+					"DIMSE message exceeds %d bytes", limit))
 			}
 			if pdu.Pdata.MsgStatus > 0 {
 				DCO := media.NewEmptyDCMObj()
