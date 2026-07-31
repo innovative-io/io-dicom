@@ -249,7 +249,7 @@ func (br *bitReader) checkNotTruncated(segments int) error {
 // decodeLossless parses and decodes a lossless SOF3 JPEG, returning interleaved
 // samples (one int per component per pixel, component-minor) plus geometry.
 func decodeLossless(data []byte) (frame losslessFrame, samples []int, err error) {
-	return decodeLosslessBounded(data, -1)
+	return decodeLosslessBounded(data, -1, nil)
 }
 
 // decodeLosslessBounded is decodeLossless with an optional ceiling on the
@@ -260,7 +260,10 @@ func decodeLossless(data []byte) (frame losslessFrame, samples []int, err error)
 // declaring 16384x16384 allocated 2 GiB and spent ~1.8s decoding before the
 // output-size mismatch was noticed -- roughly 44,000,000:1 amplification,
 // multiplied by the worker count under concurrent frame decoding.
-func decodeLosslessBounded(data []byte, maxOutputBytes int) (frame losslessFrame, samples []int, err error) {
+// When into is non-nil the scan is streamed directly into it (see
+// decodeScanInto) and samples is returned nil; otherwise the full sample plane
+// is materialised for callers that want it.
+func decodeLosslessBounded(data []byte, maxOutputBytes int, into []byte) (frame losslessFrame, samples []int, err error) {
 	if len(data) < 2 || data[0] != 0xFF || data[1] != mSOI {
 		return frame, nil, errGoJPEGMalformed
 	}
@@ -324,7 +327,15 @@ func decodeLosslessBounded(data []byte, maxOutputBytes int) (frame losslessFrame
 			if err := parseSOS(seg, &frame); err != nil {
 				return frame, nil, err
 			}
-			samples, err = decodeScan(data[i+segLen:], &frame, &huff)
+			if into != nil {
+				bps := 1
+				if frame.precision > 8 {
+					bps = 2
+				}
+				err = decodeScanInto(data[i+segLen:], &frame, &huff, into, bps)
+			} else {
+				samples, err = decodeScan(data[i+segLen:], &frame, &huff)
+			}
 			return frame, samples, err
 		default:
 			if marker >= 0xC0 && marker <= 0xCF && marker != mDHT {
@@ -446,6 +457,109 @@ func parseSOS(seg []byte, frame *losslessFrame) error {
 
 // decodeScan runs the lossless entropy decode for a fully-interleaved scan of
 // 1x1-sampled components, returning component-minor interleaved samples.
+
+// decodeScanInto decodes a lossless scan directly into output, using two line
+// buffers instead of a full-image intermediate.
+//
+// decodeScan materialises w*h*nc ints — 8 bytes per sample for data that is at
+// most 16-bit — which was 100% of the decoder's allocation and four times the
+// output buffer: 134 MB for a 4096x4096 16-bit frame. The lossless predictor
+// only reads Ra (left), Rb (above) and Rc (above-left), so the current and
+// previous lines are all that must be retained; each line is packed into output
+// as soon as it completes. This mirrors decodePlaneInto in codecs/jpegls, which
+// already streams for the same reason.
+//
+// Output packing matches decodeLosslessInto exactly: component-minor, and
+// little-endian for >8-bit samples.
+func decodeScanInto(entropy []byte, frame *losslessFrame, huff *[4]*huffTable, output []byte, bytesPerSample int) error {
+	nc := len(frame.comps)
+	w, h := frame.width, frame.height
+	br := &bitReader{data: entropy}
+
+	defaultPx := 1 << (frame.precision - frame.pointXfrm - 1)
+	mask := (1 << frame.precision) - 1
+
+	tables := make([]*huffTable, nc)
+	for c := range frame.comps {
+		t := huff[frame.comps[c].dcTable]
+		if t == nil {
+			return errGoJPEGMalformed
+		}
+		tables[c] = t
+	}
+
+	lineLen := w * nc
+	prev := make([]int, lineLen) // reconstructed line above
+	cur := make([]int, lineLen)
+
+	restartIv := frame.restartIv
+	mcu := 0 // MCU == pixel position for 1x1 sampling
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if restartIv > 0 && mcu > 0 && mcu%restartIv == 0 {
+				br.restart()
+			}
+			restarted := restartIv > 0 && mcu%restartIv == 0
+			for c := 0; c < nc; c++ {
+				sym, err := br.decodeHuff(tables[c])
+				if err != nil {
+					return err
+				}
+				if sym > 16 {
+					return errGoJPEGMalformed
+				}
+				var diff int
+				if sym == 16 {
+					diff = -32768
+				} else {
+					diff = extend(br.receive(int(sym)), int(sym))
+				}
+
+				var px int
+				switch {
+				case restarted, x == 0 && y == 0:
+					px = defaultPx
+				case y == 0:
+					px = cur[(x-1)*nc+c] // first line: predictor 1 (Ra)
+				case x == 0:
+					px = prev[c] // first column: predictor 2 (Rb)
+				default:
+					ra := cur[(x-1)*nc+c]
+					rb := prev[x*nc+c]
+					rc := prev[(x-1)*nc+c]
+					px = predict(frame.predictor, ra, rb, rc)
+				}
+				cur[x*nc+c] = (px + diff) & mask
+			}
+			mcu++
+		}
+
+		// Pack the completed line. Every element of cur was written above, so
+		// the buffer recycled from two lines back carries nothing stale.
+		// Slice the destination row up front and range over cur, so neither
+		// loop carries a per-element bounds check.
+		base := y * lineLen * bytesPerSample
+		row := output[base : base+lineLen*bytesPerSample]
+		if bytesPerSample == 1 {
+			for i, v := range cur {
+				row[i] = byte(v)
+			}
+		} else {
+			for i, v := range cur {
+				row[i*2] = byte(v)
+				row[i*2+1] = byte(v >> 8)
+			}
+		}
+		prev, cur = cur, prev
+	}
+
+	segments := 1
+	if frame.restartIv > 0 {
+		segments += (w * h) / frame.restartIv
+	}
+	return br.checkNotTruncated(segments)
+}
+
 func decodeScan(entropy []byte, frame *losslessFrame, huff *[4]*huffTable) ([]int, error) {
 	nc := len(frame.comps)
 	w, h := frame.width, frame.height
@@ -549,30 +663,10 @@ func predict(sel, ra, rb, rc int) int {
 // decodeLosslessInto decodes a lossless JPEG and packs it into output using the
 // codec's little-endian convention: 1 byte/sample when precision <= 8, else 2.
 func decodeLosslessInto(encoded, output []byte) error {
-	frame, samples, err := decodeLosslessBounded(encoded, len(output))
-	if err != nil {
-		return err
-	}
-	nc := len(frame.comps)
-	bytesPerSample := 1
-	if frame.precision > 8 {
-		bytesPerSample = 2
-	}
-	need := frame.width * frame.height * nc * bytesPerSample
-	if need > len(output) {
-		return errGoJPEGOutputSize
-	}
-	if bytesPerSample == 1 {
-		for idx, s := range samples {
-			output[idx] = byte(s)
-		}
-		return nil
-	}
-	for idx, s := range samples {
-		output[idx*2] = byte(s)
-		output[idx*2+1] = byte(s >> 8)
-	}
-	return nil
+	// Stream straight into output: the intermediate sample plane was 8 bytes
+	// per sample and 100% of this decoder's allocation.
+	_, _, err := decodeLosslessBounded(encoded, len(output), output)
+	return err
 }
 
 // gojpegBackend is the pure-Go JPEG backend. It decodes lossless SOF3 at any
