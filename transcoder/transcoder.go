@@ -472,22 +472,18 @@ func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RG
 	case transfersyntax.JPEGLossless.UID:
 		index = beginEncapsulatedPixelData(obj, index)
 		for j = 0; j < frames; j++ {
-			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if RGB {
-				offset = 3 * offset
-			}
+			// frameBounds gives this frame's [start,end). The previous code
+			// built a byte offset and then handed the 16-bit encoder
+			// img[offset/2:] — a sample index, and open-ended besides.
+			// encodeLosslessJPEG checks width*height*samples*bps == len(raw)
+			// exactly, so every multi-frame 16-bit object was rejected outright.
+			samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
 			if bitsa == 8 {
-				if RGB {
-					if err := jpeg.EIJG8encode(img[offset:], cols, rows, 3, &JPEGData, &JPEGBytes, 4); err != nil {
-						return err
-					}
-				} else {
-					if err := jpeg.EIJG8encode(img[offset:], cols, rows, 1, &JPEGData, &JPEGBytes, 4); err != nil {
-						return err
-					}
+				if err := jpeg.EIJG8encode(img[start:end], cols, rows, samples, &JPEGData, &JPEGBytes, 4); err != nil {
+					return err
 				}
 			} else {
-				if err := jpeg.EIJG16encodeContext(ctx, img[offset/2:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
+				if err := jpeg.EIJG16encodeContext(ctx, img[start:end], cols, rows, samples, &JPEGData, &JPEGBytes, 0); err != nil {
 					return err
 				}
 			}
@@ -499,21 +495,14 @@ func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RG
 	case transfersyntax.JPEGBaseline8Bit.UID:
 		index = beginEncapsulatedPixelData(obj, index)
 		for j = 0; j < frames; j++ {
-			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if RGB {
-				offset = 3 * offset
-				if err := jpeg.EIJG8encode(img[offset:], cols, rows, 3, &JPEGData, &JPEGBytes, 0); err != nil {
+			samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
+			if bitsa == 8 {
+				if err := jpeg.EIJG8encode(img[start:end], cols, rows, samples, &JPEGData, &JPEGBytes, 0); err != nil {
 					return err
 				}
 			} else {
-				if bitsa == 8 {
-					if err := jpeg.EIJG8encode(img[offset:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
-						return err
-					}
-				} else {
-					if err := jpeg.EIJG12encodeContext(ctx, img[offset:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
-						return err
-					}
+				if err := jpeg.EIJG12encodeContext(ctx, img[start:end], cols, rows, samples, &JPEGData, &JPEGBytes, 0); err != nil {
+					return err
 				}
 			}
 			index = appendEncapsulatedFrame(obj, index, JPEGData)
@@ -524,8 +513,8 @@ func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RG
 	case transfersyntax.JPEGExtended12Bit.UID:
 		index = beginEncapsulatedPixelData(obj, index)
 		for j = 0; j < frames; j++ {
-			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if err := jpeg.EIJG12encodeContext(ctx, img[offset/2:], cols, rows, 1, &JPEGData, &JPEGBytes, 0); err != nil {
+			samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
+			if err := jpeg.EIJG12encodeContext(ctx, img[start:end], cols, rows, samples, &JPEGData, &JPEGBytes, 0); err != nil {
 				return err
 			}
 			index = appendEncapsulatedFrame(obj, index, JPEGData)
