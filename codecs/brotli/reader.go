@@ -17,6 +17,7 @@ import "errors"
 var (
 	errTruncated  = errors.New("brotli: truncated input")
 	errCorrupt    = errors.New("brotli: corrupt stream")
+	errTooLarge   = errors.New("brotli: decompressed size exceeds limit")
 	errDictionary = errors.New("brotli: invalid dictionary reference")
 )
 
@@ -107,6 +108,15 @@ func (b *bitReader) alignToByte() {
 
 // readAlignedBytes copies n bytes assuming the reader is byte-aligned.
 func (b *bitReader) readAlignedBytes(n int) ([]byte, error) {
+	// Check availability before allocating. n comes from the codestream (MLEN,
+	// up to 2^24), so allocating first let a 4-byte input reserve 16 MiB before
+	// failing the bounds check below.
+	if n < 0 {
+		return nil, errCorrupt
+	}
+	if buffered := int(b.bitcnt / 8); n > buffered && b.pos+(n-buffered) > len(b.src) {
+		return nil, errTruncated
+	}
 	out := make([]byte, 0, n)
 	for n > 0 && b.bitcnt >= 8 {
 		out = append(out, byte(b.bitbuf&0xFF))

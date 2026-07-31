@@ -1,10 +1,29 @@
 package brotli
 
+// MaxDecompressedBytes caps output when a caller does not supply an explicit
+// bound. Brotli expands enormously on crafted input — 809 bytes decode to
+// 976 MiB, over 1,200,000:1 — so without a cap this is an out-of-memory
+// condition reachable from any received JPEG XL instance carrying a jbrd box.
+// 512 MiB mirrors the ceilings used elsewhere in this library.
+const MaxDecompressedBytes = 512 << 20
+
 // Decompress decodes a complete Brotli stream and returns the original bytes.
-// If sizeHint > 0 it is used to pre-size the output buffer.
+// If sizeHint > 0 it is used to pre-size the output buffer. Output is bounded by
+// MaxDecompressedBytes; callers that know the exact expected size should use
+// DecompressBounded instead, which fails as soon as the stream exceeds it.
 func Decompress(src []byte, sizeHint int) ([]byte, error) {
-	d := &decoder{b: newBitReader(src)}
-	if sizeHint > 0 {
+	return DecompressBounded(src, sizeHint, MaxDecompressedBytes)
+}
+
+// DecompressBounded decodes a Brotli stream, failing once the output would
+// exceed maxOut rather than after the fact. A non-positive maxOut falls back to
+// MaxDecompressedBytes.
+func DecompressBounded(src []byte, sizeHint, maxOut int) ([]byte, error) {
+	if maxOut <= 0 {
+		maxOut = MaxDecompressedBytes
+	}
+	d := &decoder{b: newBitReader(src), maxOut: maxOut}
+	if sizeHint > 0 && sizeHint <= maxOut {
 		d.out = make([]byte, 0, sizeHint)
 	}
 	if err := d.run(); err != nil {
@@ -17,6 +36,7 @@ type decoder struct {
 	b           *bitReader
 	out         []byte
 	maxBackward int
+	maxOut      int    // hard ceiling on len(out); see MaxDecompressedBytes
 	p1, p2      int    // previous two output bytes (literal context)
 	ring        [4]int // distance ring buffer, ring[0] = most recent
 }
@@ -59,6 +79,11 @@ func (d *decoder) run() error {
 			raw, err := d.b.readAlignedBytes(mlen)
 			if err != nil {
 				return err
+			}
+			// Uncompressed meta-blocks bypass the per-command cap check in
+			// decodeMetaBlock, so bound them here too.
+			if len(d.out)+len(raw) > d.maxOut {
+				return errTooLarge
 			}
 			d.out = append(d.out, raw...)
 			if len(raw) >= 2 {
@@ -248,7 +273,19 @@ func (d *decoder) decodeMetaBlock(mlen int) error {
 
 	dict := dictionary()
 	produced := 0
+	// Fixed-point detection. A command with insertLen == 0 whose copy resolves to
+	// a dictionary transform that emits nothing (OMIT_LAST_n/OMIT_FIRST_n with
+	// n >= len(word)) advances neither the output nor the bit reader; combined
+	// with single-symbol prefix codes (which consume 0 bits) and the reader
+	// returning implicit zeros past EOF, the decoder spins forever at 100% CPU.
+	// Requiring that each iteration change either the output length or the reader
+	// position rejects exactly that state without constraining legal streams.
+	lastOut, lastPos, lastBits := -1, -1, ^uint(0)
 	for produced < mlen {
+		if len(d.out) == lastOut && b.pos == lastPos && b.bitcnt == lastBits {
+			return errCorrupt
+		}
+		lastOut, lastPos, lastBits = len(d.out), b.pos, b.bitcnt
 		if icSplit.length == 0 {
 			icSplit.advance(b)
 		}
@@ -260,6 +297,11 @@ func (d *decoder) decodeMetaBlock(mlen int) error {
 		e := kCmdLut[cmdSym]
 		insertLen := int(e.insOffset + b.readBits(e.insExtra))
 		copyLen := int(e.cpOffset + b.readBits(e.cpExtra))
+		// Bound the output before emitting, so a bomb fails here rather than
+		// after materialising hundreds of megabytes.
+		if insertLen < 0 || copyLen < 0 || len(d.out)+insertLen+copyLen > d.maxOut {
+			return errTooLarge
+		}
 
 		for j := 0; j < insertLen; j++ {
 			if litSplit.length == 0 {
