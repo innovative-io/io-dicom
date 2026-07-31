@@ -536,23 +536,23 @@ func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RG
 	case transfersyntax.JPEGLSLossless.UID:
 		fallthrough
 	case transfersyntax.JPEGLSNearLossless.UID:
-		index = beginEncapsulatedPixelData(obj, index)
+		// Encode every frame before mutating the object, and bound each frame to
+		// its own [start,end). Passing img[start:] handed the encoder a slice
+		// running to the end of the whole multi-frame buffer, which its
+		// exact-size check rejected — so JPEG-LS encoding failed for every
+		// object with more than one frame.
+		jlsFrames := make([][]byte, 0, frames)
+		nearLossless := outTS == transfersyntax.JPEGLSNearLossless.UID
 		for j = 0; j < frames; j++ {
-			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if RGB {
-				offset = 3 * offset
-				if err := jpegls.JLSencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGLSNearLossless.UID); err != nil {
-					return err
-				}
-			} else {
-				if err := jpegls.JLSencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS == transfersyntax.JPEGLSNearLossless.UID); err != nil {
-					return err
-				}
+			samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
+			if err := jpegls.JLSencodeContext(ctx, img[start:end], cols, rows, samples, bitsa,
+				&JPEGData, &JPEGBytes, nearLossless); err != nil {
+				return err
 			}
-			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			jlsFrames = append(jlsFrames, JPEGData)
 			JPEGData = nil
 		}
-		index = endEncapsulatedPixelData(obj, index)
+		index = appendEncapsulatedFrames(obj, index, jlsFrames)
 		*i = index
 	case transfersyntax.JPEG2000Lossless.UID:
 		fallthrough
@@ -611,23 +611,28 @@ func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RG
 	case transfersyntax.JPIPHTJ2KReferenced.UID:
 		fallthrough
 	case transfersyntax.JPIPHTJ2KReferencedDeflate.UID:
-		index = beginEncapsulatedPixelData(obj, index)
+		// Encode every frame before mutating the object. The encapsulation
+		// helpers rewrite the pixel-data tag in place, so returning an error
+		// partway through the loop used to leave the object converted to
+		// encapsulated form with no sequence delimiter — neither the original
+		// nor a valid result.
+		jpipFrames := make([][]byte, 0, frames)
 		for j = 0; j < frames; j++ {
-			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if RGB {
-				offset = 3 * offset
-				if err := jpip.JPIPencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
-					return err
-				}
-			} else {
-				if err := jpip.JPIPencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
-					return err
-				}
+			// frameBounds gives a proper [start,end) for this frame. Passing
+			// img[start:] instead handed the encoder a slice running to the end
+			// of the whole multi-frame buffer; the exact-size check in
+			// jpip.purego_backend then rejected it, so JPIP encoding failed for
+			// every object with more than one frame.
+			samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
+			if err := jpip.JPIPencodeContext(ctx, img[start:end], cols, rows, samples, bitsa,
+				&JPEGData, &JPEGBytes, outTS); err != nil {
+				return err
 			}
-			index = appendEncapsulatedFrame(obj, index, JPEGData)
+			jpipFrames = append(jpipFrames, JPEGData)
 			JPEGData = nil
 		}
-		index = endEncapsulatedPixelData(obj, index)
+		// appendEncapsulatedFrames wraps the begin/end delimiters itself.
+		index = appendEncapsulatedFrames(obj, index, jpipFrames)
 		*i = index
 	case transfersyntax.MPEG2MPML.UID:
 		fallthrough
