@@ -3,7 +3,6 @@ package rle
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
 	"strings"
 )
 
@@ -176,16 +175,6 @@ func readSegment(in []byte, out []byte, segmentOffset uint32, segmentSize uint32
 	return nil
 }
 
-func clampByte(v float32) byte {
-	if v <= 0 {
-		return 0
-	}
-	if v >= 255 {
-		return 255
-	}
-	return byte(math.Round(float64(v)))
-}
-
 func RLEdecode(in []byte, out []byte, length uint32, size uint32, photoInt string) error {
 	if len(in) < 64 || len(out) < int(size) || length == 0 || length > uint32(len(in)) {
 		return fmt.Errorf("ERROR, overflow decoding RLE")
@@ -223,21 +212,6 @@ func RLEdecode(in []byte, out []byte, length uint32, size uint32, photoInt strin
 		if err := readSegment(in, temp, segmentOffset[i], segmentLength, i, decodedPlaneSize); err != nil {
 			return err
 		}
-	}
-
-	offset := decodedPlaneSize
-
-	// YBR_FULL keeps its dedicated path because it also colour-converts to RGB.
-	if photoInt == "YBR_FULL" && segmentCount == 3 {
-		for i := uint32(0); i < decodedPlaneSize; i++ {
-			y := float32(temp[i])
-			cb := float32(temp[i+offset])
-			cr := float32(temp[i+2*offset])
-			out[3*i] = clampByte(y + 1.402*(cr-128.0))
-			out[3*i+1] = clampByte(y - 0.344136*(cb-128.0) - 0.714136*(cr-128.0))
-			out[3*i+2] = clampByte(y + 1.772*(cb-128.0))
-		}
-		return nil
 	}
 
 	// Everything else is a planar de-interleave. DICOM RLE (PS3.5 Annex G)
