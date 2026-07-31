@@ -95,6 +95,15 @@ func idct8x8(block *[64]float64) {
 
 // decodeDCT parses and decodes a SOF0/SOF1 JPEG into per-component planes.
 func decodeDCT(data []byte) (dctFrame, error) {
+	return decodeDCTBounded(data, -1)
+}
+
+// decodeDCTBounded is decodeDCT with an optional ceiling on the decoded byte
+// size, enforced as soon as the SOF header is parsed rather than after the scan.
+// It also rejects the unsupported multi-component case there: that rejection
+// previously happened after a full decode, burning 96 MiB and ~90ms on a
+// 3-component 2048x2048 stream before returning "unsupported".
+func decodeDCTBounded(data []byte, maxOutputBytes int) (dctFrame, error) {
 	var frame dctFrame
 	if len(data) < 2 || data[0] != 0xFF || data[1] != mSOI {
 		return frame, errGoJPEGMalformed
@@ -132,6 +141,22 @@ func decodeDCT(data []byte) (dctFrame, error) {
 		case mSOF0, mSOF1:
 			if err := parseSOFDCT(seg, &frame); err != nil {
 				return frame, err
+			}
+			if len(frame.comps) != 1 {
+				// Multi-component DCT is deferred to libjpeg; reject before
+				// allocating rather than after decoding.
+				return frame, errGoJPEGUnsupported
+			}
+			if maxOutputBytes >= 0 {
+				bps := 1
+				if frame.precision > 8 {
+					bps = 2
+				}
+				// int64 so the product cannot wrap on 32-bit builds.
+				if need := int64(frame.width) * int64(frame.height) *
+					int64(len(frame.comps)) * int64(bps); need > int64(maxOutputBytes) {
+					return frame, errGoJPEGOutputSize
+				}
 			}
 			sawSOF = true
 		case mDHT:
@@ -468,7 +493,7 @@ func gojpegDecodeInto(encoded, output []byte) error {
 // decodeDCTInto decodes a DCT JPEG and packs grayscale/RGB samples into output
 // using the codec's little-endian convention (2 bytes/sample at 12-bit).
 func decodeDCTInto(encoded, output []byte) error {
-	frame, err := decodeDCT(encoded)
+	frame, err := decodeDCTBounded(encoded, len(output))
 	if err != nil {
 		return err
 	}

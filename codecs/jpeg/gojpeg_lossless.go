@@ -249,6 +249,18 @@ func (br *bitReader) checkNotTruncated(segments int) error {
 // decodeLossless parses and decodes a lossless SOF3 JPEG, returning interleaved
 // samples (one int per component per pixel, component-minor) plus geometry.
 func decodeLossless(data []byte) (frame losslessFrame, samples []int, err error) {
+	return decodeLosslessBounded(data, -1)
+}
+
+// decodeLosslessBounded is decodeLossless with an optional ceiling on the
+// decoded byte size. Pass -1 for no ceiling.
+//
+// The bound is enforced as soon as the SOF header is parsed, before any buffer
+// is sized from it. Checking only after the scan meant a 49-byte header
+// declaring 16384x16384 allocated 2 GiB and spent ~1.8s decoding before the
+// output-size mismatch was noticed -- roughly 44,000,000:1 amplification,
+// multiplied by the worker count under concurrent frame decoding.
+func decodeLosslessBounded(data []byte, maxOutputBytes int) (frame losslessFrame, samples []int, err error) {
 	if len(data) < 2 || data[0] != 0xFF || data[1] != mSOI {
 		return frame, nil, errGoJPEGMalformed
 	}
@@ -283,6 +295,17 @@ func decodeLossless(data []byte) (frame losslessFrame, samples []int, err error)
 		case mSOF3:
 			if err := parseSOF3(seg, &frame); err != nil {
 				return frame, nil, err
+			}
+			if maxOutputBytes >= 0 {
+				bps := 1
+				if frame.precision > 8 {
+					bps = 2
+				}
+				// int64 so the product cannot wrap on 32-bit builds.
+				if need := int64(frame.width) * int64(frame.height) *
+					int64(len(frame.comps)) * int64(bps); need > int64(maxOutputBytes) {
+					return frame, nil, errGoJPEGOutputSize
+				}
 			}
 			sawSOF = true
 		case mDHT:
@@ -526,7 +549,7 @@ func predict(sel, ra, rb, rc int) int {
 // decodeLosslessInto decodes a lossless JPEG and packs it into output using the
 // codec's little-endian convention: 1 byte/sample when precision <= 8, else 2.
 func decodeLosslessInto(encoded, output []byte) error {
-	frame, samples, err := decodeLossless(encoded)
+	frame, samples, err := decodeLosslessBounded(encoded, len(output))
 	if err != nil {
 		return err
 	}
