@@ -166,15 +166,51 @@ func extend(v, t int) int {
 	return v
 }
 
-// reset clears the bit accumulator and clears a consumed restart marker so
-// decoding can continue after RSTn.
+// restart clears the bit accumulator at a restart-interval boundary and
+// consumes the RSTn marker that terminates the interval, so decoding can
+// continue with the next interval.
+//
+// Both cases matter. If a previous fill() already latched the marker, it is
+// consumed from the latched state. Otherwise the accumulator still held buffered
+// bits when the boundary was reached, so no fill() has looked at the marker yet
+// and br.pos still sits at (or just before) it — the marker must be located and
+// skipped here.
+//
+// Handling only the latched case silently corrupted every conforming file that
+// uses restart intervals: the marker was never consumed, the next fill() latched
+// it and returned false, and from then on readBit returned 0 forever, so every
+// interval after the first decoded as padding with no error reported.
 func (br *bitReader) restart() {
 	br.bits = 0
 	br.nbits = 0
-	if br.atMarker && br.marker >= 0xD0 && br.marker <= 0xD7 {
-		br.pos += 2 // consume the RSTn marker
-		br.atMarker = false
-		br.marker = 0
+
+	if br.atMarker {
+		if br.marker >= 0xD0 && br.marker <= 0xD7 {
+			br.pos += 2 // consume the RSTn marker
+			br.atMarker = false
+			br.marker = 0
+		}
+		return
+	}
+
+	// Scan forward for the RSTn. Any bytes in between are the encoder's pad bits
+	// (T.81 E.1.1 requires padding to a byte boundary before the marker); stuffed
+	// 0xFF00 sequences are skipped. A marker that is not an RSTn ends the scan and
+	// is left for the caller's normal marker handling.
+	for i := br.pos; i+1 < len(br.data); i++ {
+		if br.data[i] != 0xFF {
+			continue
+		}
+		next := br.data[i+1]
+		if next >= 0xD0 && next <= 0xD7 {
+			br.pos = i + 2
+			br.atMarker = false
+			br.marker = 0
+			return
+		}
+		if next != 0x00 { // a real, non-restart marker: stop here
+			return
+		}
 	}
 }
 
