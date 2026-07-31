@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -46,6 +47,19 @@ func FuzzNewDCMObjFromBytes(f *testing.F) {
 				continue
 			}
 			_ = tag.GetString()
+		}
+
+		// Exercise the pixel accessors too. They size and index buffers from
+		// Rows/Columns/BitsAllocated/PlanarConfiguration/NumberOfFrames, all of
+		// which are attacker-controlled and independent of how many pixel bytes
+		// actually arrived. Leaving them out of the fuzz target is why two
+		// remotely-reachable panics (an unchecked planar de-interleave and a
+		// uint32 frame-offset overflow) went unnoticed. Frame indices beyond 0
+		// are included because the overflow needed a large in-range frame number.
+		ctx := context.Background()
+		for _, frame := range []int{0, 1, 65535} {
+			_, _ = obj.GetPixelData(frame)
+			_, _ = obj.GetDecompressedFrame(ctx, frame)
 		}
 	})
 }

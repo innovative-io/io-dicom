@@ -127,6 +127,25 @@ func (obj *dicomObject) ensureTagIndex() {
 	}
 }
 
+// checkPlanarBounds verifies that the planar (PlanarConfiguration=1) RGB
+// de-interleave can read all three colour planes without running past the pixel
+// data actually present.
+//
+// The loop reads tag.Data at j+off, j+pixels+off and j+2*pixels+off for j in
+// [0,pixels), so the highest index touched is off+3*pixels-1. off and pixels are
+// derived from Rows/Columns/BitsAllocated/NumberOfFrames, which are all
+// attacker-controlled, while tag.Data holds only the bytes that actually
+// arrived. Without this check an object declaring large dimensions but carrying
+// a few bytes of pixel data panics the process — reachable from any received
+// instance. The arithmetic is done in 64-bit so it cannot itself wrap.
+func checkPlanarBounds(dataLen int, off, pixels uint32) error {
+	need := uint64(off) + 3*uint64(pixels)
+	if need > uint64(dataLen) {
+		return fmt.Errorf("planar pixel data truncated: need %d bytes, have %d", need, dataLen)
+	}
+	return nil
+}
+
 // hasUsableLength reports whether a tag carries directly readable value bytes.
 // Zero-length and undefined-length (sequence) tags do not.
 func hasUsableLength(t *DICOMTag) bool {
@@ -157,7 +176,12 @@ func (obj *dicomObject) ensureRootIndex() {
 			}
 		}
 		if (t.Group == 0xFFFE && t.Element == 0xE00D) || (t.Group == 0xFFFE && t.Element == 0xE0DD) {
-			sequenceDepth--
+			// Guard against underflow: a stray top-level delimiter would drive
+			// this negative, after which a later legitimate SQ returns it to 0
+			// and tags nested inside that sequence get treated as top-level.
+			if sequenceDepth > 0 {
+				sequenceDepth--
+			}
 		}
 	}
 }
@@ -976,7 +1000,11 @@ func readPixelMeta(tagList []*DICOMTag) (pm pixelMeta, pixelIdx int) {
 			}
 		}
 		if (tag.Group == 0xFFFE && tag.Element == 0xE00D) || (tag.Group == 0xFFFE && tag.Element == 0xE0DD) {
-			sq--
+			// See ensureRootIndex: an unmatched delimiter must not drive the
+			// depth negative, or nested tags are mistaken for top-level ones.
+			if sq > 0 {
+				sq--
+			}
 		}
 	}
 	return
@@ -1062,7 +1090,7 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 		return nil, fmt.Errorf("DICOMObject::GetPixelData, invalid pixel data size %d", sizePx)
 	}
 
-	if frame >= int(frames) {
+	if frame < 0 || frame >= int(frames) {
 		return nil, errors.New("invalid frame")
 	}
 
@@ -1079,6 +1107,9 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 		imgSize := size / frames
 		off := imgSize * uint32(frame)
 		pixels := imgSize / 3
+		if err := checkPlanarBounds(len(tag.Data), off, pixels); err != nil {
+			return nil, err
+		}
 		img := make([]byte, imgSize)
 		for j := uint32(0); j < pixels; j++ {
 			img[3*j] = tag.Data[j+off]
@@ -1088,10 +1119,12 @@ func (obj *dicomObject) GetPixelData(frame int) ([]byte, error) {
 		return img, nil
 	}
 	imgSize := size / frames
-	offset := uint32(frame) * imgSize
-	if offset+imgSize > uint32(len(tag.Data)) {
+	// 64-bit arithmetic: uint32 multiply/add here can wrap, which would let an
+	// out-of-range frame pass this guard and then slice with high < low.
+	if uint64(frame)*uint64(imgSize)+uint64(imgSize) > uint64(len(tag.Data)) {
 		return nil, fmt.Errorf("frame %d out of range", frame)
 	}
+	offset := uint32(frame) * imgSize
 	out := make([]byte, imgSize)
 	copy(out, tag.Data[offset:offset+imgSize])
 	return out, nil
@@ -1153,7 +1186,7 @@ func (obj *dicomObject) GetDecompressedFrame(ctx context.Context, frameIndex int
 	if frames == 0 {
 		frames = 1
 	}
-	if frameIndex >= int(frames) {
+	if frameIndex < 0 || frameIndex >= int(frames) {
 		return nil, errors.New("invalid frame index")
 	}
 	frameSize := uint32(frameSz)
@@ -1176,6 +1209,9 @@ func (obj *dicomObject) GetDecompressedFrame(ctx context.Context, frameIndex int
 	if RGB && (planar == 1) {
 		off := frameSize * uint32(frameIndex)
 		pixels := frameSize / 3
+		if err := checkPlanarBounds(len(tag.Data), off, pixels); err != nil {
+			return nil, err
+		}
 		img := make([]byte, frameSize)
 		for j := uint32(0); j < pixels; j++ {
 			img[3*j] = tag.Data[j+off]
@@ -1184,10 +1220,12 @@ func (obj *dicomObject) GetDecompressedFrame(ctx context.Context, frameIndex int
 		}
 		return img, nil
 	}
-	offset := uint32(frameIndex) * frameSize
-	if offset+frameSize > uint32(len(tag.Data)) {
+	// 64-bit arithmetic: uint32 multiply/add here can wrap, which would let an
+	// out-of-range frame pass this guard and then slice with high < low.
+	if uint64(frameIndex)*uint64(frameSize)+uint64(frameSize) > uint64(len(tag.Data)) {
 		return nil, fmt.Errorf("frame %d out of range", frameIndex)
 	}
+	offset := uint32(frameIndex) * frameSize
 	out := make([]byte, frameSize)
 	copy(out, tag.Data[offset:offset+frameSize])
 	return out, nil
