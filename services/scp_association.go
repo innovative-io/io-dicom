@@ -87,11 +87,11 @@ func (s *scp) pollCommand(conn net.Conn, pdu network.PDUService) (media.DICOMObj
 		return nil, nil
 	}
 
-	if err := conn.SetReadDeadline(time.Now().Add(s.cancelPoll)); err != nil {
+	if err := pdu.SetReadDeadline(time.Now().Add(s.cancelPoll)); err != nil {
 		return nil, err
 	}
 	dco, err := pdu.NextPDU()
-	_ = conn.SetReadDeadline(time.Time{})
+	_ = pdu.SetReadDeadline(time.Time{})
 
 	if err != nil {
 		if isReadTimeout(err) {
@@ -184,14 +184,14 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			// transfer is never interrupted. pollCommand manages its own, much
 			// shorter, cancel-poll deadline on a separate path and is unaffected.
 			if s.idleTimeout > 0 {
-				if dlErr := conn.SetReadDeadline(time.Now().Add(s.idleTimeout)); dlErr != nil {
+				if dlErr := pdu.SetReadDeadline(time.Now().Add(s.idleTimeout)); dlErr != nil {
 					pdu.Logger().Error("failed to set idle deadline", "error", dlErr)
 					return
 				}
 			}
 			dco, err = pdu.NextPDU()
 			if s.idleTimeout > 0 {
-				_ = conn.SetReadDeadline(time.Time{})
+				_ = pdu.SetReadDeadline(time.Time{})
 			}
 			if err != nil {
 				if isReadTimeout(err) {

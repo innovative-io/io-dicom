@@ -68,6 +68,11 @@ type PDUService interface {
 	SetCallingAE(callingAE string)
 	SetConn(rw *bufio.ReadWriter)
 	SetNetConn(conn net.Conn)
+	// SetReadDeadline bounds the next read with an absolute deadline. Pass the
+	// zero Time to clear it. Callers must use this rather than setting the
+	// deadline on the connection directly, so the per-read progress timeout can
+	// take it into account instead of overwriting it.
+	SetReadDeadline(t time.Time) error
 	NextPDU() (media.DICOMObject, error)
 	AddPresContexts(presentationContext PresentationContext)
 	GetPresentationContextID() byte
@@ -111,6 +116,19 @@ func WithMaxMessageSize(n int) PDUServiceOption {
 	}
 }
 
+// WithReadProgressTimeout bounds how long a single read may take without
+// completing. A non-positive value disables the bound; omitted, the default is
+// defaultReadProgressTimeout.
+//
+// This is a progress bound, not a transfer bound: it is re-armed before every
+// read, so an arbitrarily large transfer may take arbitrarily long as long as
+// it keeps moving. Only a peer that stops feeding bytes mid-PDU trips it.
+func WithReadProgressTimeout(d time.Duration) PDUServiceOption {
+	return func(p *pduService) {
+		p.progressTimeout = d
+	}
+}
+
 // WithLogger sets the structured logger used for PDU-level events on this
 // connection. By default the library logs through slog.Default(). Pass a logger
 // derived with per-association attributes to correlate concurrent associations.
@@ -124,6 +142,8 @@ type pduService struct {
 	AcceptedPresentationContexts []PresentationContextAccept
 	conn                         net.Conn
 	readWriter                   *bufio.ReadWriter
+	progressTimeout              time.Duration
+	externalDeadline             time.Time
 	buf                          *media.DICOMBuffer
 	pdutype                      int
 	pdulength                    uint32
@@ -163,6 +183,7 @@ type pduService struct {
 func NewPDUService(opts ...PDUServiceOption) PDUService {
 	p := &pduService{
 		maxMessageBytes: defaultMaxMessageBytes,
+		progressTimeout: defaultReadProgressTimeout,
 		buf:             media.NewDICOMBuffer(),
 		AssocRQ:         newAssociationRequest(),
 		AssocAC:         newAssociationAccept(),
@@ -235,6 +256,20 @@ const maxIncomingPDULength uint32 = 16 << 20
 // objects.
 const defaultMaxMessageBytes = 1 << 30
 
+// defaultReadProgressTimeout bounds a single read on an established
+// association.
+//
+// The idle timeout in the services layer covers a peer that goes quiet between
+// commands, but once a command had been accepted the dataset reads that
+// followed were unbounded: a peer could send a valid C-STORE header and then
+// dribble its dataset forever, held only by the total-message ceiling, which
+// bounds bytes rather than time.
+//
+// One PDU is capped at maxIncomingPDULength (16 MiB), so this only requires a
+// peer to sustain progress within a single read — it never limits how long a
+// whole study takes to arrive.
+const defaultReadProgressTimeout = 60 * time.Second
+
 const releaseHandshakeTimeout = 5 * time.Second
 
 // resolveImplClass returns the implementation class UID and version to use
@@ -249,6 +284,37 @@ func (pdu *pduService) resolveImplClass() (uid, version string) {
 
 func (pdu *pduService) SetConn(rw *bufio.ReadWriter) {
 	pdu.readWriter = rw
+}
+
+// SetReadDeadline records an absolute deadline for the next read and applies it
+// immediately. applyReadDeadline keeps it in force when it is sooner than the
+// per-read progress timeout, so a short poll (e.g. the SCP's C-CANCEL window)
+// is never lengthened by the progress bound.
+func (pdu *pduService) SetReadDeadline(t time.Time) error {
+	pdu.externalDeadline = t
+	if pdu.conn == nil {
+		return nil
+	}
+	return pdu.conn.SetReadDeadline(t)
+}
+
+// applyReadDeadline arms the connection for one read, using whichever of the
+// caller's deadline and the progress timeout expires first.
+func (pdu *pduService) applyReadDeadline() error {
+	if pdu.conn == nil {
+		return nil
+	}
+	var eff time.Time
+	if pdu.progressTimeout > 0 {
+		eff = time.Now().Add(pdu.progressTimeout)
+	}
+	if !pdu.externalDeadline.IsZero() && (eff.IsZero() || pdu.externalDeadline.Before(eff)) {
+		eff = pdu.externalDeadline
+	}
+	if eff.IsZero() {
+		return nil
+	}
+	return pdu.conn.SetReadDeadline(eff)
 }
 
 func (pdu *pduService) SetNetConn(conn net.Conn) {
@@ -728,6 +794,9 @@ func (pdu *pduService) emitRawPDU(direction RawPDUDirection, pduType byte, data 
 
 func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
 	header := &pdu.hdrScratch
+	if err := pdu.applyReadDeadline(); err != nil {
+		return 0, nil, err
+	}
 	if _, err := io.ReadFull(pdu.readWriter, header[:]); err != nil {
 		return 0, nil, err
 	}
@@ -749,6 +818,11 @@ func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
 	data := make([]byte, 10+remaining)
 	copy(data, header[:])
 	if remaining > 0 {
+		// Re-arm: the body is a separate read, and a peer that delivered a
+		// header must still make progress on the payload.
+		if err := pdu.applyReadDeadline(); err != nil {
+			return 0, nil, err
+		}
 		if _, err := io.ReadFull(pdu.readWriter, data[10:]); err != nil {
 			return 0, nil, err
 		}
