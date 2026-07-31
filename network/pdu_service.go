@@ -128,6 +128,13 @@ type pduService struct {
 	implClassUID                 string
 	implVersion                  string
 	logger                       *slog.Logger
+	// negotiated records that an association has been established on this
+	// connection. PS3.8 §9.3.1 permits exactly one A-ASSOCIATE-RQ per
+	// association; without this guard the same connection can renegotiate
+	// repeatedly, which both accumulates presentation-context state without
+	// bound and makes NextPDU return (nil, nil) at a point where the caller is
+	// reading a command's dataset and will dereference the result.
+	negotiated bool
 	// hdrScratch backs the 10-byte PDU header read. It cannot be a local in
 	// readIncomingPDU: passing a local's slice to io.ReadFull's io.Reader
 	// interface makes escape analysis heap-allocate it, which cost one
@@ -403,6 +410,9 @@ func (pdu *pduService) finishConnect(conn net.Conn) error {
 		if !pdu.interogateAAssociateAC() {
 			return errors.New("pduservice::Connect - No accepted presentation contexts found")
 		}
+		// The SCU side is now established; any later A-ASSOCIATE PDU on this
+		// connection is out of sequence (see NextPDU).
+		pdu.negotiated = true
 		maxSendPDV := pdu.AssocAC.GetMaxSubLength()
 		if maxSendPDV == 0 || maxSendPDV > maxPduLength {
 			maxSendPDV = maxPduLength
@@ -527,6 +537,14 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 
 		switch int(itemType) {
 		case pdutype.AssociationRequest:
+			if pdu.negotiated {
+				// PS3.8 §9.3.1 allows one A-ASSOCIATE-RQ per association; state
+				// AA-8 requires A-ABORT for a PDU received out of sequence.
+				// Returning an error here (rather than falling through to the
+				// (nil, nil) below) is what stops a caller reading a command's
+				// dataset from dereferencing a nil object.
+				return nil, pdu.abortWithError("unexpected A-ASSOCIATE-RQ on an established association")
+			}
 			pdu.buf.SetPosition(6)
 			if err := pdu.AssocRQ.Read(pdu.buf); err != nil {
 				return nil, err
@@ -539,10 +557,17 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 				}
 				return nil, err
 			}
+			pdu.negotiated = true
+			// The one legitimate (nil, nil): the association is now established
+			// and this PDU carried no data object. Callers reading a dataset must
+			// never reach this point — the guard above ensures they do not.
 			return nil, nil
 		case pdutype.AssociationAccept:
+			// An A-ASSOCIATE-AC is only valid while Connect is negotiating, and
+			// finishConnect consumes it there. Reaching NextPDU means the peer
+			// sent it out of sequence.
 			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
-			return nil, nil
+			return nil, pdu.abortWithError("unexpected A-ASSOCIATE-AC")
 		case pdutype.PDUDataTransfer:
 			pdu.emitRawPDU(RawPDUDirectionInbound, itemType, rawData)
 			pdu.buf.SetPosition(1)
@@ -585,6 +610,21 @@ func (pdu *pduService) NextPDU() (command media.DICOMObject, err error) {
 			return nil, errors.New("pduservice::Read - unknown ItemType")
 		}
 	}
+}
+
+// abortWithError sends an A-ABORT for a PDU received out of sequence and
+// returns the error to report. Used for protocol violations that PS3.8 §9.3.1
+// (state AA-8) requires be aborted rather than processed.
+//
+// NextPDU must never return (nil, nil) to a caller that is reading a dataset:
+// every such caller dereferences the returned object, and a nil dereference in
+// the per-connection goroutine terminates the process.
+func (pdu *pduService) abortWithError(reason string) error {
+	pdu.logger.Warn("aborting association: protocol violation", "reason", reason)
+	_ = pdu.writeEncodedPDU(byte(pdutype.AssociationAbortRequest), func(rw *bufio.ReadWriter) error {
+		return pdu.AbortRQ.Write(rw)
+	})
+	return fmt.Errorf("pduservice: %s", reason)
 }
 
 func (pdu *pduService) GetAAssociationRQ() AssociationRequest {
