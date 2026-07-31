@@ -108,14 +108,20 @@ func TestValidatePixelData(t *testing.T) {
 				"BitsAllocated":   float64(16),
 				"BitsStored":      float64(12),
 			},
-			expectErrors:   0,
-			expectWarnings: 1,
+			// Rows is Type 1, so its absence is an error rather than a warning.
+			expectErrors:   1,
+			expectWarnings: 0,
 		},
 		{
-			name:           "Missing all pixel attributes",
-			pixelData:      map[string]interface{}{},
-			expectErrors:   0,
-			expectWarnings: 5, // Rows, Columns, SamplesPerPixel, BitsAllocated, BitsStored
+			name:      "Missing all pixel attributes",
+			pixelData: map[string]interface{}{},
+			// Rows, Columns, SamplesPerPixel and BitsAllocated are Type 1
+			// (PS3.3 C.7.6.3): an object carrying Pixel Data without them is not
+			// renderable, so their absence is an error. BitsStored remains a
+			// warning. This previously reported 0 errors, which meant an object
+			// with no pixel geometry at all was certified compliant.
+			expectErrors:   4,
+			expectWarnings: 1,
 		},
 		{
 			name: "BitsStored exceeds BitsAllocated",
