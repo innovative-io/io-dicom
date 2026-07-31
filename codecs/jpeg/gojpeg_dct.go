@@ -364,6 +364,13 @@ func decodeDCTScan(entropy []byte, frame *dctFrame, quant *[4][64]int, dcTab, ac
 			mcuCount++
 		}
 	}
+	segments := 1
+	if frame.restartIv > 0 && mcuCount > 0 {
+		segments += mcuCount / frame.restartIv
+	}
+	if err := br.checkNotTruncated(segments); err != nil {
+		return err
+	}
 	return nil
 }
 

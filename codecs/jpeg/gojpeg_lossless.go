@@ -19,6 +19,7 @@ var (
 	errGoJPEGMalformed   = errors.New("gojpeg: malformed JPEG payload")
 	errGoJPEGUnsupported = errors.New("gojpeg: unsupported JPEG variant (pure-Go decoder handles lossless SOF3 only)")
 	errGoJPEGOutputSize  = errors.New("gojpeg: decoded payload does not fit output buffer")
+	errGoJPEGTruncated   = errors.New("gojpeg: truncated entropy data")
 )
 
 const (
@@ -90,6 +91,14 @@ type bitReader struct {
 	nbits    uint
 	atMarker bool // a marker (other than stuffed 0x00) was reached
 	marker   byte
+	// padBits counts bits served from padding after the entropy-coded data ran
+	// out. A few are normal (each segment is bit-padded to a byte boundary), but
+	// a truncated stream reconstructs whole samples from zeros — which previously
+	// produced a fully populated output buffer and a nil error.
+	padBits int
+	// realBits counts bits actually served from the entropy-coded data, as
+	// opposed to manufactured padding.
+	realBits int
 }
 
 // fill loads one more byte into the bit accumulator. Returns false at a marker
@@ -117,11 +126,13 @@ func (br *bitReader) fill() bool {
 	}
 	br.bits |= uint32(b) << (24 - br.nbits)
 	br.nbits += 8
+	br.realBits += 8
 	return true
 }
 
 func (br *bitReader) readBit() int {
 	if br.nbits == 0 && !br.fill() {
+		br.padBits++
 		return 0
 	}
 	bit := int((br.bits >> 31) & 1)
@@ -212,6 +223,27 @@ func (br *bitReader) restart() {
 			return
 		}
 	}
+}
+
+// checkNotTruncated reports an error when more bits were manufactured from
+// padding than the format legitimately allows. T.81 pads each entropy-coded
+// segment to a byte boundary, so up to 7 bits per segment are expected; beyond
+// that the entropy data ended before the image did.
+func (br *bitReader) checkNotTruncated(segments int) error {
+	// A scan that served no real bits at all cannot have legitimate padding: the
+	// entropy data is absent entirely. Checking this separately matters because
+	// a segment-count-derived allowance alone let a tiny empty scan through, and
+	// it decoded to a full buffer of the predictor seed with no error.
+	if br.realBits == 0 && br.padBits > 0 {
+		return errGoJPEGTruncated
+	}
+	if segments < 1 {
+		segments = 1
+	}
+	if allowed := 7 * segments; br.padBits > allowed {
+		return errGoJPEGTruncated
+	}
+	return nil
 }
 
 // decodeLossless parses and decodes a lossless SOF3 JPEG, returning interleaved
@@ -460,6 +492,13 @@ func decodeScan(entropy []byte, frame *losslessFrame, huff *[4]*huffTable) ([]in
 			}
 			mcu++
 		}
+	}
+	segments := 1
+	if frame.restartIv > 0 {
+		segments += (w * h) / frame.restartIv
+	}
+	if err := br.checkNotTruncated(segments); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
