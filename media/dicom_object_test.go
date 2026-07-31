@@ -605,16 +605,22 @@ func forceCodecBackends(t *testing.T, cfg codecs.BackendConfig) {
 	}
 
 	t.Cleanup(func() {
+		// Restore the pure-Go defaults, not "passthrough". Restoring to
+		// passthrough left every codec unable to encode or decode for whatever
+		// test ran next, which is a leak across tests: a later test would fail
+		// with "no encode backend available" while passing in isolation.
+		// MPEG and SMPTE2110 have no pure-Go implementation, so passthrough is
+		// their default.
 		if err := codecs.UseBackends(codecs.BackendConfig{
-			JPEG:      "passthrough",
-			JPEGLS:    "passthrough",
-			JPEG2000:  "passthrough",
-			JPEGXL:    "passthrough",
+			JPEG:      "gojpeg",
+			JPEGLS:    "gojpegls",
+			JPEG2000:  "gojpeg2000",
+			JPEGXL:    "gojpegxl",
 			MPEG:      "passthrough",
-			JPIP:      "passthrough",
+			JPIP:      "gojpip",
 			SMPTE2110: "passthrough",
 		}); err != nil {
-			t.Fatalf("failed to restore passthrough codec backends: %v", err)
+			t.Fatalf("failed to restore default codec backends: %v", err)
 		}
 	})
 }

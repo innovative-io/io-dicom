@@ -110,7 +110,7 @@ func TestClient_StoreInstances_WithStudyUID(t *testing.T) {
 	obj := loadSampleDICOM(t)
 
 	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
-	err := client.StoreInstances(context.Background(), "1.2.3", []media.DICOMObject{obj})
+	err := client.StoreInstances(context.Background(), "1.3.46.670589.11.8410.6.132672291010455276", []media.DICOMObject{obj})
 	if err != nil {
 		t.Fatalf("StoreInstances() error: %v", err)
 	}

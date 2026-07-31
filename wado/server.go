@@ -291,6 +291,11 @@ func (s *wadoServer) retrieveFrames(w http.ResponseWriter, r *http.Request) {
 // ── STOW-RS store handler ─────────────────────────────────────────────────────
 
 func (s *wadoServer) storeInstances(w http.ResponseWriter, r *http.Request) {
+	// The study-scoped route carries a UID; the generic route does not.
+	targetStudyUID := r.PathValue("studyUID")
+	if targetStudyUID != "" && !requireUIDs(w, targetStudyUID) {
+		return
+	}
 	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
 		http.Error(w, "expected multipart/related content", http.StatusBadRequest)
@@ -334,6 +339,20 @@ func (s *wadoServer) storeInstances(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("STOW-RS: failed to parse DICOM part", "err", parseErr)
 			failed++
 			continue
+		}
+		// PS3.18 §10.5: when the request targets a specific study, an instance
+		// belonging to a different one must be rejected. The path segment was
+		// previously ignored entirely, so POSTing to /stow/rs/studies/{A} happily
+		// stored instances belonging to study B — and any deployment that
+		// authorises STOW per-study had that authorisation bypassed, because the
+		// path said one study while the payload wrote another.
+		if targetStudyUID != "" {
+			if got := obj.GetString(tags.StudyInstanceUID); got != targetStudyUID {
+				slog.Warn("STOW-RS: instance belongs to a different study",
+					"want", targetStudyUID, "got", got)
+				failed++
+				continue
+			}
 		}
 		objects = append(objects, obj)
 	}
