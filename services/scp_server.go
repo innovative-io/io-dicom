@@ -17,6 +17,19 @@ const scpBufSize = 256 * 1024
 // DIMSE commands, including in-flight C-CANCEL, during active operations.
 const cancelPollWindow = 5 * time.Millisecond
 
+// defaultAssociationIdleTimeout bounds how long the SCP waits for a peer to
+// begin the next command.
+//
+// The association read loop called NextPDU with no deadline at all, so a peer
+// that opened a connection, sent a few bytes and stalled held its goroutine —
+// and, with WithMaxAssociations configured, a slot in the semaphore — forever.
+// N such connections lock out every legitimate client. SetTimeout does not help:
+// it is only applied on the client dial path, never on the accept path.
+//
+// The bound applies only while waiting for a new command, never during a dataset
+// transfer, so a slow but active transfer is not interrupted.
+const defaultAssociationIdleTimeout = 60 * time.Second
+
 // cancelGraceWindow bounds how long SCP waits for a handler to exit after a
 // matching C-CANCEL is received before aborting the association.
 const cancelGraceWindow = 250 * time.Millisecond
