@@ -93,13 +93,33 @@ func TestRLEdecodeRGB(t *testing.T) {
 	}
 }
 
-func TestRLEdecodeUnsupportedFormat(t *testing.T) {
+// TestRLEdecodePaletteColor: PALETTE COLOR is single-sample, so a one-segment
+// stream decodes as a plain plane. This previously fell to the reassembly
+// switch's default and errored with "format not supported", even though PALETTE
+// COLOR RLE is legal DICOM and common in ultrasound and secondary capture.
+func TestRLEdecodePaletteColor(t *testing.T) {
 	in := buildRLEStream(t, [][]byte{{1, 2, 3, 4}})
 	out := make([]byte, 4)
 
-	err := RLEdecode(in, out, uint32(len(in)), 4, "PALETTE COLOR")
-	if err == nil {
-		t.Fatal("expected error for unsupported format")
+	if err := RLEdecode(in, out, uint32(len(in)), 4, "PALETTE COLOR"); err != nil {
+		t.Fatalf("PALETTE COLOR is single-sample and should decode: %v", err)
+	}
+	for i, want := range []byte{1, 2, 3, 4} {
+		if out[i] != want {
+			t.Fatalf("decoded %v, want [1 2 3 4]", out)
+		}
+	}
+}
+
+// TestRLEdecodeSegmentCountMismatch: a segment count that is not a multiple of
+// the photometric interpretation's sample count is malformed.
+func TestRLEdecodeSegmentCountMismatch(t *testing.T) {
+	// Two segments for a 3-sample photometric interpretation.
+	in := buildRLEStream(t, [][]byte{{1, 2}, {3, 4}})
+	out := make([]byte, 4)
+
+	if err := RLEdecode(in, out, uint32(len(in)), 4, "RGB"); err == nil {
+		t.Fatal("expected an error for 2 segments with 3 samples per pixel")
 	}
 }
 
