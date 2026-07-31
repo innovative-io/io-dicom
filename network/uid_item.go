@@ -100,9 +100,21 @@ func (u *uidItem) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 		return err
 	}
 
-	buffer := make([]byte, u.length)
-	buf.ReadData(buffer)
-	u.uid = string(buffer)
+	// ReadSlice bounds-checks against the bytes actually present and returns a
+	// zero-copy view; string() then makes the single copy we keep.
+	//
+	// The previous form allocated make([]byte, u.length) BEFORE any bounds check
+	// and discarded ReadData's error. u.length is an attacker-controlled uint16,
+	// so a 4-byte item on the wire could declare 65535 bytes: the allocation
+	// happened anyway, the error was dropped, and the 64 KiB buffer was retained
+	// as the item's UID. A presentation-context item can pack thousands of such
+	// sub-items, which an audit measured at a 65,622-byte A-ASSOCIATE-RQ
+	// retaining 1,023 MiB.
+	data, err := buf.ReadSlice(int(u.length))
+	if err != nil {
+		return err
+	}
+	u.uid = string(data)
 
 	return
 }

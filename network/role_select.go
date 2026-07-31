@@ -63,9 +63,12 @@ func (scpscu *roleSelect) ReadDynamic(buf *media.DICOMBuffer) (err error) {
 		return err
 	}
 
-	tuid := make([]byte, tl)
-	buf.ReadData(tuid)
-
+	// Bounds-checked, zero-copy read; see uid_item.go for why the previous
+	// allocate-then-ignore-the-error form was exploitable.
+	tuid, err := buf.ReadSlice(int(tl))
+	if err != nil {
+		return err
+	}
 	scpscu.uid = string(tuid)
 	if scpscu.SCURole, err = buf.GetByte(); err != nil {
 		return err
