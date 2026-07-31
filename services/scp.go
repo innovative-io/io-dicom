@@ -132,6 +132,7 @@ type scp struct {
 	canceledMessageIDs   map[uint16]struct{}
 
 	bufSize         int
+	idleTimeout     time.Duration
 	cancelPoll      time.Duration
 	cancelGrace     time.Duration
 	implClassUID    string
@@ -152,6 +153,18 @@ func WithReadBufferSize(n int) SCPOption {
 		if n > 0 {
 			s.bufSize = n
 		}
+	}
+}
+
+// WithAssociationIdleTimeout sets how long the SCP waits for a peer to begin
+// the next command before closing the association. The default is
+// defaultAssociationIdleTimeout; a non-positive value disables the bound.
+//
+// This applies only while waiting for a new command, not while a dataset is
+// being transferred, so a slow but active transfer is never interrupted.
+func WithAssociationIdleTimeout(d time.Duration) SCPOption {
+	return func(s *scp) {
+		s.idleTimeout = d
 	}
 }
 
@@ -216,6 +229,7 @@ func NewSCP(port int, opts ...SCPOption) SCP {
 		Port:               port,
 		canceledMessageIDs: make(map[uint16]struct{}),
 		bufSize:            scpBufSize,
+		idleTimeout:        defaultAssociationIdleTimeout,
 		cancelPoll:         cancelPollWindow,
 		cancelGrace:        cancelGraceWindow,
 		logger:             slog.Default(),
@@ -234,6 +248,7 @@ func NewSCPWithTLS(port int, cfg *tls.Config, opts ...SCPOption) SCP {
 		tlsConfig:          normalizeServerTLSConfig(cfg),
 		canceledMessageIDs: make(map[uint16]struct{}),
 		bufSize:            scpBufSize,
+		idleTimeout:        defaultAssociationIdleTimeout,
 		cancelPoll:         cancelPollWindow,
 		cancelGrace:        cancelGraceWindow,
 		logger:             slog.Default(),

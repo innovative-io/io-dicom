@@ -174,8 +174,31 @@ func (s *scp) handleConnection(ctx context.Context, conn net.Conn) {
 			dco = queuedCommands[0]
 			queuedCommands = queuedCommands[1:]
 		} else {
+			// Bound the wait for the next command. This read is where a stalled
+			// peer parks: it previously had no deadline, so one connection that
+			// sent a few bytes and stopped held its goroutine — and a slot in the
+			// association semaphore — indefinitely.
+			//
+			// The deadline is cleared immediately after, so the dataset reads that
+			// follow a command are not bounded by it and a slow but active
+			// transfer is never interrupted. pollCommand manages its own, much
+			// shorter, cancel-poll deadline on a separate path and is unaffected.
+			if s.idleTimeout > 0 {
+				if dlErr := conn.SetReadDeadline(time.Now().Add(s.idleTimeout)); dlErr != nil {
+					pdu.Logger().Error("failed to set idle deadline", "error", dlErr)
+					return
+				}
+			}
 			dco, err = pdu.NextPDU()
+			if s.idleTimeout > 0 {
+				_ = conn.SetReadDeadline(time.Time{})
+			}
 			if err != nil {
+				if isReadTimeout(err) {
+					pdu.Logger().Warn("closing idle association",
+						"idle_timeout", s.idleTimeout)
+					return
+				}
 				if errors.Is(err, io.EOF) {
 					pdu.Logger().Debug("connection closed (EOF)")
 				} else if !errors.Is(err, network.ErrAssociationReleased) &&
