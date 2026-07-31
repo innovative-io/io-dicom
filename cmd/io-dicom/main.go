@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -22,6 +23,82 @@ import (
 	"github.com/innovative-io/io-dicom/network/dicomstatus"
 	"github.com/innovative-io/io-dicom/services"
 )
+
+// safeComponent reduces one wire-supplied attribute to a single, inert path
+// element. Anything outside a conservative allow-list becomes '_', so a
+// separator or a traversal sequence cannot survive.
+func safeComponent(s string) string {
+	s = strings.TrimSpace(s)
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9',
+			r == '.', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	// "", ".", ".." and friends are all path-significant rather than names.
+	if strings.Trim(out, ".") == "" {
+		return ""
+	}
+	if len(out) > 64 {
+		out = out[:64]
+	}
+	return out
+}
+
+// storagePath builds the on-disk path for a received instance and guarantees it
+// stays inside root.
+//
+// PatientID, StudyInstanceUID, SeriesInstanceUID and SOPInstanceUID all arrive
+// in the C-STORE payload from the remote peer. They were passed straight to
+// filepath.Join, which cleans a path but does not contain it: Join("/data",
+// "../../etc") is "/etc". A peer needed only to send PatientID "../../.." to
+// write a .dcm file anywhere this process could write, with no authentication.
+// PatientID is an LO, not a UID, so it carries arbitrary text by design.
+//
+// Each component is sanitised, and the assembled path is then re-checked
+// against root so that any future change to the sanitiser still cannot escape.
+func storagePath(root, patientID, studyUID, seriesUID, sopUID string) (string, error) {
+	parts := map[string]string{
+		"PatientID":         patientID,
+		"StudyInstanceUID":  studyUID,
+		"SeriesInstanceUID": seriesUID,
+		"SOPInstanceUID":    sopUID,
+	}
+	clean := make(map[string]string, len(parts))
+	for name, raw := range parts {
+		c := safeComponent(raw)
+		if c == "" {
+			return "", fmt.Errorf("unusable %s in received instance", name)
+		}
+		clean[name] = c
+	}
+
+	path := filepath.Join(root,
+		clean["PatientID"], clean["StudyInstanceUID"], clean["SeriesInstanceUID"],
+		clean["SOPInstanceUID"]+".dcm")
+
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("refusing to write outside the datastore")
+	}
+	return path, nil
+}
 
 var version string
 
@@ -126,14 +203,23 @@ func main() {
 
 		scp.OnCStoreRequest(func(ctx context.Context, request network.AssociationRequest, data media.DICOMObject) uint16 {
 			slog.Info("C-Store received", "sop_instance_uid", data.GetString(tags.SOPInstanceUID))
-			directory := filepath.Join(*datastore, data.GetString(tags.PatientID), data.GetString(tags.StudyInstanceUID), data.GetString(tags.SeriesInstanceUID))
-			os.MkdirAll(directory, 0755)
-
-			path := filepath.Join(directory, data.GetString(tags.SOPInstanceUID)+".dcm")
-
-			err := data.WriteToFile(path)
+			path, err := storagePath(*datastore,
+				data.GetString(tags.PatientID),
+				data.GetString(tags.StudyInstanceUID),
+				data.GetString(tags.SeriesInstanceUID),
+				data.GetString(tags.SOPInstanceUID))
 			if err != nil {
+				slog.Error("refusing to store instance", "error", err)
+				return dicomstatus.FailureProcessingFailure
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				slog.Error("failed to create storage directory", "path", filepath.Dir(path), "error", err)
+				return dicomstatus.FailureProcessingFailure
+			}
+
+			if err := data.WriteToFile(path); err != nil {
 				slog.Error("failed to save instance", "path", path, "error", err)
+				return dicomstatus.FailureProcessingFailure
 			}
 			return dicomstatus.Success
 		})
