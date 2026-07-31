@@ -141,6 +141,13 @@ func (c *wadoClient) RetrieveMetadata(ctx context.Context, studyUID, seriesUID, 
 // ── STOW-RS store ─────────────────────────────────────────────────────────────
 
 func (c *wadoClient) StoreInstances(ctx context.Context, studyUID string, objects []media.DICOMObject) error {
+	// Nothing to send: return without a request rather than POSTing an empty
+	// multipart body. A STOW-RS request that stores no instances is a failure
+	// per PS3.18 §10.5, so sending one to mean "no work" would now be rejected.
+	if len(objects) == 0 {
+		return nil
+	}
+
 	// Stream the multipart body through a pipe to avoid buffering all objects
 	// in memory at once.
 	pr, pw := io.Pipe()
