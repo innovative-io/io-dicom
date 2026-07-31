@@ -9,20 +9,47 @@ import (
 
 const rleMaxSegments = 15
 
-func encodeLiteralRuns(data []byte) []byte {
+// encodePackBits encodes data as PackBits (PS3.5 Annex G): a replicate run for
+// three or more identical bytes, literal runs otherwise.
+//
+// Only literal runs were emitted before, so "RLE Lossless" never compressed
+// anything -- output was always the input plus one byte per 128, meaning even a
+// uniform frame expanded. The decoder already handled replicate runs, so this
+// is encoder-only and needs no format change.
+func encodePackBits(data []byte) []byte {
 	if len(data) == 0 {
 		return nil
 	}
 
-	out := make([]byte, 0, len(data)+(len(data)/128)+1)
-	for i := 0; i < len(data); {
-		run := len(data) - i
-		if run > 128 {
-			run = 128
+	out := make([]byte, 0, len(data)/2+16)
+	i := 0
+	for i < len(data) {
+		// Measure the run of identical bytes starting at i.
+		runEnd := i + 1
+		for runEnd < len(data) && data[runEnd] == data[i] && runEnd-i < 128 {
+			runEnd++
 		}
-		out = append(out, byte(run-1))
-		out = append(out, data[i:i+run]...)
-		i += run
+		if runEnd-i >= 3 {
+			// Replicate run: count byte is 257-n for n in [2,128].
+			n := runEnd - i
+			out = append(out, byte(257-n), data[i])
+			i = runEnd
+			continue
+		}
+
+		// Literal run: accumulate until a run of three or more appears, or the
+		// 128-byte maximum is reached.
+		litStart := i
+		for i < len(data) && i-litStart < 128 {
+			// Look ahead for a replicate run worth breaking the literal for.
+			if i+2 < len(data) && data[i] == data[i+1] && data[i] == data[i+2] {
+				break
+			}
+			i++
+		}
+		n := i - litStart
+		out = append(out, byte(n-1))
+		out = append(out, data[litStart:i]...)
 	}
 	return out
 }
@@ -66,7 +93,7 @@ func RLEencode(in []byte, rows uint16, cols uint16, bitsAllocated uint16, sample
 
 	encodedSegments := make([][]byte, 0, totalSegments)
 	for _, segment := range rawSegments {
-		encodedSegments = append(encodedSegments, encodeLiteralRuns(segment))
+		encodedSegments = append(encodedSegments, encodePackBits(segment))
 	}
 
 	headerSize := 64
@@ -123,7 +150,12 @@ func readSegment(in []byte, out []byte, segmentOffset uint32, segmentSize uint32
 			inOffset += run
 			outOffset += run
 		case count >= -127:
-			if int(inOffset) >= len(in) || inOffset-segmentOffset > segmentSize {
+			// inOffset indexes the run's value byte, so it must lie strictly
+			// inside the segment: >= not >. With > a segment ending in a bare
+			// replicate-count byte was accepted and took its fill value from the
+			// first byte of the NEXT segment, decoding malformed input to
+			// plausible-looking garbage instead of erroring.
+			if int(inOffset) >= len(in) || inOffset-segmentOffset >= segmentSize {
 				return fmt.Errorf("ERROR, overflow decoding RLE")
 			}
 			run := uint32(-count) + 1
@@ -194,15 +226,9 @@ func RLEdecode(in []byte, out []byte, length uint32, size uint32, photoInt strin
 	}
 
 	offset := decodedPlaneSize
-	switch {
-	case strings.Contains(photoInt, "MONO") && segmentCount == 2:
-		for i := uint32(0); i < decodedPlaneSize; i++ {
-			out[2*i] = temp[i+offset]
-			out[2*i+1] = temp[i]
-		}
-	case strings.Contains(photoInt, "MONO") && segmentCount == 1:
-		copy(out[:size], temp)
-	case photoInt == "YBR_FULL" && segmentCount == 3:
+
+	// YBR_FULL keeps its dedicated path because it also colour-converts to RGB.
+	if photoInt == "YBR_FULL" && segmentCount == 3 {
 		for i := uint32(0); i < decodedPlaneSize; i++ {
 			y := float32(temp[i])
 			cb := float32(temp[i+offset])
@@ -211,15 +237,40 @@ func RLEdecode(in []byte, out []byte, length uint32, size uint32, photoInt strin
 			out[3*i+1] = clampByte(y - 0.344136*(cb-128.0) - 0.714136*(cr-128.0))
 			out[3*i+2] = clampByte(y + 1.772*(cb-128.0))
 		}
-	case photoInt == "RGB" && segmentCount == 3:
-		for i := uint32(0); i < decodedPlaneSize; i++ {
-			out[3*i] = temp[i]
-			out[3*i+1] = temp[i+offset]
-			out[3*i+2] = temp[i+2*offset]
-		}
-	default:
-		return fmt.Errorf("ERROR, format not supported")
+		return nil
 	}
 
+	// Everything else is a planar de-interleave. DICOM RLE (PS3.5 Annex G)
+	// stores samplesPerPixel * bytesPerSample segments, ordered per sample from
+	// the most significant byte down.
+	//
+	// This replaces a fixed set of (photometric, segmentCount) cases that
+	// covered only 1, 2 and 3 segments. 16-bit colour legitimately produces 6,
+	// so the encoder in this package emitted streams its own decoder rejected
+	// with "format not supported", and any conforming 6-segment stream from
+	// another vendor was refused on ingest. PALETTE COLOR was unreachable for
+	// the same reason.
+	samples := uint32(3)
+	if strings.Contains(photoInt, "MONO") || strings.Contains(photoInt, "PALETTE") {
+		samples = 1
+	}
+	if samples > segmentCount || segmentCount%samples != 0 {
+		return fmt.Errorf("ERROR, %d RLE segments is not a multiple of %d samples for %q",
+			segmentCount, samples, photoInt)
+	}
+	bytesPerSample := segmentCount / samples
+	if uint64(decodedPlaneSize)*uint64(segmentCount) > uint64(len(out)) {
+		return fmt.Errorf("ERROR, RLE output buffer too small")
+	}
+	for p := uint32(0); p < decodedPlaneSize; p++ {
+		for s := uint32(0); s < samples; s++ {
+			for b := uint32(0); b < bytesPerSample; b++ {
+				// Segments run most-significant byte first within each sample,
+				// while the output is little-endian.
+				seg := s*bytesPerSample + (bytesPerSample - 1 - b)
+				out[(p*samples+s)*bytesPerSample+b] = temp[seg*decodedPlaneSize+p]
+			}
+		}
+	}
 	return nil
 }
