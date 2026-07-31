@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -95,19 +96,63 @@ func NewClient(params ClientParams) Client {
 	}
 }
 
+// escapeUID validates a UID and returns it escaped for use in a URL path.
+//
+// UIDs were interpolated raw, so one arriving from an untrusted source -- a
+// QIDO result, a worklist entry, a user field -- could redirect the request:
+// DeleteStudy("1.2.3?evil=1") added a query string, and
+// DeleteStudy("1.2.3/../../../admin/shutdown") reached a different endpoint
+// entirely. On a destructive call that matters. Validation rejects anything
+// that is not a DICOM UID (PS3.5 §9.1); escaping is belt-and-braces for the
+// path context.
+func escapeUID(uid string) (string, error) {
+	if !validUID(uid) {
+		return "", fmt.Errorf("wado: %q is not a valid DICOM UID", uid)
+	}
+	return url.PathEscape(uid), nil
+}
+
+// escapeUIDs applies escapeUID to each argument in order.
+func escapeUIDs(uids ...string) ([]string, error) {
+	out := make([]string, len(uids))
+	for i, uid := range uids {
+		esc, err := escapeUID(uid)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = esc
+	}
+	return out, nil
+}
+
 // ── WADO-RS retrieve ──────────────────────────────────────────────────────────
 
 func (c *wadoClient) RetrieveStudy(ctx context.Context, studyUID string) ([]media.DICOMObject, error) {
+	esc, err := escapeUIDs(studyUID)
+	if err != nil {
+		return nil, err
+	}
+	studyUID = esc[0]
 	u := fmt.Sprintf("%s/wado/rs/studies/%s", c.params.BaseURL, studyUID)
 	return c.retrieveMultipart(ctx, u)
 }
 
 func (c *wadoClient) RetrieveSeries(ctx context.Context, studyUID, seriesUID string) ([]media.DICOMObject, error) {
+	esc, err := escapeUIDs(studyUID, seriesUID)
+	if err != nil {
+		return nil, err
+	}
+	studyUID, seriesUID = esc[0], esc[1]
 	u := fmt.Sprintf("%s/wado/rs/studies/%s/series/%s", c.params.BaseURL, studyUID, seriesUID)
 	return c.retrieveMultipart(ctx, u)
 }
 
 func (c *wadoClient) RetrieveInstance(ctx context.Context, studyUID, seriesUID, sopInstanceUID string) (media.DICOMObject, error) {
+	esc, err := escapeUIDs(studyUID, seriesUID, sopInstanceUID)
+	if err != nil {
+		return nil, err
+	}
+	studyUID, seriesUID, sopInstanceUID = esc[0], esc[1], esc[2]
 	u := fmt.Sprintf("%s/wado/rs/studies/%s/series/%s/instances/%s",
 		c.params.BaseURL, studyUID, seriesUID, sopInstanceUID)
 	objects, err := c.retrieveMultipart(ctx, u)
@@ -121,6 +166,11 @@ func (c *wadoClient) RetrieveInstance(ctx context.Context, studyUID, seriesUID, 
 }
 
 func (c *wadoClient) RetrieveMetadata(ctx context.Context, studyUID, seriesUID, sopInstanceUID string) (map[string]interface{}, error) {
+	esc, err := escapeUIDs(studyUID, seriesUID, sopInstanceUID)
+	if err != nil {
+		return nil, err
+	}
+	studyUID, seriesUID, sopInstanceUID = esc[0], esc[1], esc[2]
 	u := fmt.Sprintf("%s/wado/rs/studies/%s/series/%s/instances/%s/metadata",
 		c.params.BaseURL, studyUID, seriesUID, sopInstanceUID)
 	resp, err := c.doRequest(ctx, http.MethodGet, u, "", nil)
@@ -184,7 +234,11 @@ func (c *wadoClient) StoreInstances(ctx context.Context, studyUID string, object
 
 	var u string
 	if studyUID != "" {
-		u = fmt.Sprintf("%s/stow/rs/studies/%s", c.params.BaseURL, studyUID)
+		esc, err := escapeUID(studyUID)
+		if err != nil {
+			return err
+		}
+		u = fmt.Sprintf("%s/stow/rs/studies/%s", c.params.BaseURL, esc)
 	} else {
 		u = fmt.Sprintf("%s/stow/rs/studies", c.params.BaseURL)
 	}
@@ -204,11 +258,21 @@ func (c *wadoClient) SearchStudies(ctx context.Context, params url.Values) ([]ma
 }
 
 func (c *wadoClient) SearchSeries(ctx context.Context, studyUID string, params url.Values) ([]map[string]interface{}, error) {
+	esc, err := escapeUIDs(studyUID)
+	if err != nil {
+		return nil, err
+	}
+	studyUID = esc[0]
 	u := fmt.Sprintf("%s/qido/rs/studies/%s/series", c.params.BaseURL, studyUID)
 	return c.searchJSON(ctx, u, params)
 }
 
 func (c *wadoClient) SearchInstances(ctx context.Context, studyUID, seriesUID string, params url.Values) ([]map[string]interface{}, error) {
+	esc, err := escapeUIDs(studyUID, seriesUID)
+	if err != nil {
+		return nil, err
+	}
+	studyUID, seriesUID = esc[0], esc[1]
 	u := fmt.Sprintf("%s/qido/rs/studies/%s/series/%s/instances", c.params.BaseURL, studyUID, seriesUID)
 	return c.searchJSON(ctx, u, params)
 }
@@ -298,6 +362,11 @@ func jsonNumber(v interface{}) (int64, bool) {
 
 // RetrieveFrames fetches raw pixel data for the given 1-based frame numbers.
 func (c *wadoClient) RetrieveFrames(ctx context.Context, studyUID, seriesUID, sopInstanceUID string, frames []int) ([][]byte, error) {
+	esc, err := escapeUIDs(studyUID, seriesUID, sopInstanceUID)
+	if err != nil {
+		return nil, err
+	}
+	studyUID, seriesUID, sopInstanceUID = esc[0], esc[1], esc[2]
 	if len(frames) == 0 {
 		return nil, fmt.Errorf("wado: RetrieveFrames: frames list must not be empty")
 	}
@@ -316,6 +385,11 @@ func (c *wadoClient) RetrieveFrames(ctx context.Context, studyUID, seriesUID, so
 // ── WADO-RS delete ────────────────────────────────────────────────────────────
 
 func (c *wadoClient) DeleteStudy(ctx context.Context, studyUID string) error {
+	esc, err := escapeUIDs(studyUID)
+	if err != nil {
+		return err
+	}
+	studyUID = esc[0]
 	u := fmt.Sprintf("%s/wado/rs/studies/%s", c.params.BaseURL, studyUID)
 	resp, err := c.doRequest(ctx, http.MethodDelete, u, "", nil)
 	if err != nil {
@@ -326,6 +400,11 @@ func (c *wadoClient) DeleteStudy(ctx context.Context, studyUID string) error {
 }
 
 func (c *wadoClient) DeleteSeries(ctx context.Context, studyUID, seriesUID string) error {
+	esc, err := escapeUIDs(studyUID, seriesUID)
+	if err != nil {
+		return err
+	}
+	studyUID, seriesUID = esc[0], esc[1]
 	u := fmt.Sprintf("%s/wado/rs/studies/%s/series/%s", c.params.BaseURL, studyUID, seriesUID)
 	resp, err := c.doRequest(ctx, http.MethodDelete, u, "", nil)
 	if err != nil {
@@ -336,6 +415,11 @@ func (c *wadoClient) DeleteSeries(ctx context.Context, studyUID, seriesUID strin
 }
 
 func (c *wadoClient) DeleteInstance(ctx context.Context, studyUID, seriesUID, sopInstanceUID string) error {
+	esc, err := escapeUIDs(studyUID, seriesUID, sopInstanceUID)
+	if err != nil {
+		return err
+	}
+	studyUID, seriesUID, sopInstanceUID = esc[0], esc[1], esc[2]
 	u := fmt.Sprintf("%s/wado/rs/studies/%s/series/%s/instances/%s",
 		c.params.BaseURL, studyUID, seriesUID, sopInstanceUID)
 	resp, err := c.doRequest(ctx, http.MethodDelete, u, "", nil)
@@ -360,18 +444,32 @@ func (c *wadoClient) eachMultipartPart(ctx context.Context, rawURL string, fn fu
 	}
 
 	mr := multipart.NewReader(resp.Body, mparams["boundary"])
+	var partErrs []error
+	partIndex := 0
 	for {
 		part, partErr := mr.NextPart()
 		if partErr != nil {
+			if !errors.Is(partErr, io.EOF) {
+				partErrs = append(partErrs, fmt.Errorf("reading part %d: %w", partIndex, partErr))
+			}
 			break
 		}
-		data, readErr := io.ReadAll(part)
+		data, readErr := limitedReadAll(part)
 		if readErr != nil {
+			// Surface the failure rather than silently dropping the part: a
+			// caller previously could not tell "the study has 3 instances" from
+			// "the study has 40 and 37 were unreadable". The cap also stops a
+			// hostile or compromised peer from OOMing the client -- io.ReadAll
+			// had no ceiling at all here, so a single 300 MiB part allocated
+			// 775 MiB and a 10 GiB part was equally accepted.
+			partErrs = append(partErrs, fmt.Errorf("part %d: %w", partIndex, readErr))
+			partIndex++
 			continue
 		}
 		fn(data)
+		partIndex++
 	}
-	return nil
+	return errors.Join(partErrs...)
 }
 
 // retrieveMultipartBytes fetches a WADO-RS URL and returns each part as raw bytes.
@@ -387,12 +485,19 @@ func (c *wadoClient) retrieveMultipartBytes(ctx context.Context, rawURL string) 
 // retrieveMultipart fetches a WADO-RS URL and returns parsed DICOM objects.
 func (c *wadoClient) retrieveMultipart(ctx context.Context, rawURL string) ([]media.DICOMObject, error) {
 	var objects []media.DICOMObject
+	var parseErrs []error
 	err := c.eachMultipartPart(ctx, rawURL, func(data []byte) {
-		if obj, parseErr := media.NewDCMObjFromBytes(data); parseErr == nil {
-			objects = append(objects, obj)
+		obj, parseErr := media.NewDCMObjFromBytes(data)
+		if parseErr != nil {
+			// A part that does not parse is a real failure, not something to
+			// drop quietly; the caller cannot otherwise distinguish a short
+			// study from a corrupt one.
+			parseErrs = append(parseErrs, parseErr)
+			return
 		}
+		objects = append(objects, obj)
 	})
-	return objects, err
+	return objects, errors.Join(append(parseErrs, err)...)
 }
 
 // searchJSON performs a QIDO-RS GET and decodes the JSON response.

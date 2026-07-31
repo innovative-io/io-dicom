@@ -38,7 +38,7 @@ func TestClient_RetrieveStudy_NotFound(t *testing.T) {
 	srv, _ := newWADOTestServer(t)
 	defer srv.Close()
 	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
-	_, err := client.RetrieveStudy(context.Background(), "0.0.0.missing")
+	_, err := client.RetrieveStudy(context.Background(), "0.0.0.999")
 	if err == nil {
 		t.Fatal("want error for missing study")
 	}
@@ -200,7 +200,7 @@ func TestClient_RetrieveFrames_OK(t *testing.T) {
 	defer srv.Close()
 
 	client := wado.NewClient(wado.ClientParams{BaseURL: srv.URL})
-	frames, err := client.RetrieveFrames(context.Background(), "s", "se", "sop", []int{1, 2})
+	frames, err := client.RetrieveFrames(context.Background(), "1.2.3", "1.2.3.4", "1.2.3.4.5", []int{1, 2})
 	if err != nil {
 		t.Fatalf("RetrieveFrames() error: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestClient_RetrieveFrames_OK(t *testing.T) {
 
 func TestClient_RetrieveFrames_EmptyList(t *testing.T) {
 	client := wado.NewClient(wado.ClientParams{BaseURL: "http://127.0.0.1:1"})
-	_, err := client.RetrieveFrames(context.Background(), "s", "se", "sop", nil)
+	_, err := client.RetrieveFrames(context.Background(), "1.2.3", "1.2.3.4", "1.2.3.4.5", nil)
 	if err == nil {
 		t.Fatal("want error for empty frame list")
 	}
