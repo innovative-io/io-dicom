@@ -173,7 +173,11 @@ func decodeJPEGData(data []byte) (*jpegData, error) {
 	var blob []byte
 	if need > 0 {
 		var err error
-		blob, err = brotli.Decompress(data[consumed:], need)
+		// The exact output size is known here, so bound the decode to it rather
+		// than discovering an oversized stream after materialising it. Without a
+		// bound this was an OOM reachable from any received instance carrying a
+		// jbrd box.
+		blob, err = brotli.DecompressBounded(data[consumed:], need, need)
 		if err != nil {
 			return nil, err
 		}
