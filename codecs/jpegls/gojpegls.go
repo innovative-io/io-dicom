@@ -13,6 +13,7 @@ package jpegls
 
 import (
 	"errors"
+	"fmt"
 	"math/bits"
 )
 
@@ -69,6 +70,11 @@ type jlsBitReader struct {
 	acc       uint64 // valid bits live in the low nbits; next bit is bit (nbits-1)
 	nbits     int    // number of valid bits currently in acc (0..64)
 	lastWasFF bool   // the previously loaded byte was 0xFF
+	// padBits counts bits served from zero padding after the entropy-coded data
+	// ran out. Reading a few is normal (the final byte is bit-padded), but a
+	// truncated stream decodes whole samples from padding, which previously
+	// produced a full buffer of plausible pixels and a nil error.
+	padBits int
 }
 
 // fill loads bytes into acc until it holds at least 56 bits or the data is
@@ -92,7 +98,8 @@ func (br *jlsBitReader) readBit() int {
 	if br.nbits == 0 {
 		br.fill()
 		if br.nbits == 0 {
-			return 0 // pad with zeros past EOF
+			br.padBits++ // served from padding: the entropy data ran out
+			return 0
 		}
 	}
 	br.nbits--
@@ -108,6 +115,7 @@ func (br *jlsBitReader) readBits(n int) int {
 		br.fill()
 		if br.nbits == before {
 			// EOF: take what remains, pad the rest with zero bits (MSB-first).
+			br.padBits += n - br.nbits
 			v := int(br.acc&mask(br.nbits)) << (n - br.nbits)
 			br.nbits = 0
 			return v
@@ -127,7 +135,12 @@ func (br *jlsBitReader) readZeros(cap int) int {
 		if br.nbits == 0 {
 			br.fill()
 			if br.nbits == 0 {
-				return cap // past EOF: treat as an over-long (capped) run
+				// Past EOF: an entire capped run is manufactured from nothing.
+				// This is the dominant reader in Golomb run-mode decoding, so
+				// without recording it here a truncated stream showed only a
+				// handful of padded bits while most of the image was invented.
+				br.padBits += cap
+				return cap
 			}
 		}
 		// Left-align the nbits valid bits so the first unread bit is bit 63.
@@ -409,4 +422,22 @@ func predict(a, b, c int) int {
 		return max(a, b)
 	}
 	return a + b - c
+}
+
+// checkNotTruncated reports an error when the decoder had to manufacture a
+// meaningful number of bits from padding, which means the entropy-coded data
+// ended before the image did.
+//
+// A JPEG-LS scan is bit-padded to a byte boundary, so up to 7 padded bits are
+// legitimate at the end of the stream. Anything beyond that means whole samples
+// were reconstructed from zeros. Without this check a truncated stream returned
+// a completely filled output buffer and a nil error: an audit measured a 50%
+// truncation yielding 47.9% wrong pixels, and a header-only 25-byte stream
+// yielding a full buffer of 0xFFFF, both reported as success.
+func (br *jlsBitReader) checkNotTruncated() error {
+	const allowedPadBits = 7
+	if br.padBits > allowedPadBits {
+		return fmt.Errorf("gojpegls: truncated entropy data (%d bits read past end of stream)", br.padBits)
+	}
+	return nil
 }

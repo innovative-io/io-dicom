@@ -178,7 +178,7 @@ func decodeJLSInto(encoded, output []byte) error {
 			d.decodePlaneInto(output, c, nc, bps)
 		}
 	}
-	return nil
+	return d.br.checkNotTruncated()
 }
 
 // decodeScalarLine decodes one scan line of a single component into cur, using
