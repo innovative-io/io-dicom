@@ -2,8 +2,11 @@ package conformance
 
 import (
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // ConformanceValidator validates DICOM files for standards compliance
@@ -92,14 +95,30 @@ func (cv *ConformanceValidator) ValidateDICOMMetadata(metadata map[string]interf
 			Actual:      "missing",
 			Description: "SOP Class UID is mandatory and must be a valid DICOM UID",
 		})
-	} else if !strings.HasPrefix(sopClassUID, "1.2.840.10008") {
+	} else if !isValidUID(sopClassUID) {
+		// Syntax is what makes a UID valid or not (PS3.5 §9.1). The previous
+		// check tested only a "1.2.840.10008" prefix with no separating dot, so
+		// "1.2.840.100081.6.6.6" (a different arc entirely) and
+		// "1.2.840.10008/../../../etc/passwd" were both certified conformant.
 		findings = append(findings, Finding{
 			RuleID:      "DICOM-004",
 			Severity:    "error",
 			Element:     "SOP Class UID (0008,0016)",
-			Expected:    "1.2.840.10008.* UID",
+			Expected:    "dot-separated numeric components, at most 64 characters",
 			Actual:      sopClassUID,
-			Description: "SOP Class UID must be a valid DICOM UID starting with 1.2.840.10008",
+			Description: "SOP Class UID is not a syntactically valid DICOM UID (PS3.5 §9.1)",
+		})
+	} else if !strings.HasPrefix(sopClassUID, "1.2.840.10008.") {
+		// Private and vendor SOP Classes live outside the standard arc and are
+		// entirely legal, so this is informational rather than a failure — as an
+		// error it failed every archive holding vendor-private objects.
+		findings = append(findings, Finding{
+			RuleID:      "DICOM-004",
+			Severity:    "info",
+			Element:     "SOP Class UID (0008,0016)",
+			Expected:    "1.2.840.10008.* for standard SOP Classes",
+			Actual:      sopClassUID,
+			Description: "SOP Class UID is outside the DICOM standard arc (private or vendor-defined)",
 		})
 	}
 
@@ -109,11 +128,11 @@ func (cv *ConformanceValidator) ValidateDICOMMetadata(metadata map[string]interf
 			RuleID:      "DICOM-005",
 			Severity:    "error",
 			Element:     "Bits Allocated (0028,0100)",
-			Expected:    "8, 16, or 32",
+			Expected:    "1 or a multiple of 8",
 			Actual:      "missing or invalid type",
-			Description: "Bits Allocated is mandatory and must be 8, 16, or 32",
+			Description: "Bits Allocated is mandatory and must be 1 or a multiple of 8 (PS3.5 §8.1.1)",
 		})
-	} else if bitsAlloc != 8 && bitsAlloc != 16 && bitsAlloc != 32 {
+	} else if bitsAlloc != 1 && (bitsAlloc < 8 || bitsAlloc > 64 || math.Mod(bitsAlloc, 8) != 0) {
 		findings = append(findings, Finding{
 			RuleID:      "DICOM-005",
 			Severity:    "error",
@@ -210,10 +229,14 @@ func (cv *ConformanceValidator) ValidatePixelData(pixelData map[string]interface
 	findings := []Finding{}
 
 	// Rule P1: Rows present (warning — pixel data exists but attribute is unavailable)
-	if rows, ok := pixelData["Rows"].(float64); !ok || rows == 0 {
+	if rows, ok := pixelData["Rows"].(float64); !ok || rows <= 0 || rows > maxPlausibleDimension {
+		// Type 1 (PS3.3 C.7.6.3), so absence is an error, not a warning. The
+		// previous test was `rows == 0`, which passed negative values straight
+		// through: {Rows:-5, Columns:1e18} was certified compliant, and that is
+		// precisely the shape that overflows a downstream buffer computation.
 		findings = append(findings, Finding{
 			RuleID:      "DICOM-P001",
-			Severity:    "warning",
+			Severity:    "error",
 			Element:     "Rows (0028,0010)",
 			Expected:    "positive integer",
 			Actual:      "missing or zero",
@@ -221,10 +244,10 @@ func (cv *ConformanceValidator) ValidatePixelData(pixelData map[string]interface
 		})
 	}
 
-	if cols, ok := pixelData["Columns"].(float64); !ok || cols == 0 {
+	if cols, ok := pixelData["Columns"].(float64); !ok || cols <= 0 || cols > maxPlausibleDimension {
 		findings = append(findings, Finding{
 			RuleID:      "DICOM-P002",
-			Severity:    "warning",
+			Severity:    "error",
 			Element:     "Columns (0028,0011)",
 			Expected:    "positive integer",
 			Actual:      "missing or zero",
@@ -233,10 +256,12 @@ func (cv *ConformanceValidator) ValidatePixelData(pixelData map[string]interface
 	}
 
 	// Rule P3: SamplesPerPixel present
-	if samples, ok := pixelData["SamplesPerPixel"].(float64); !ok || samples == 0 {
+	if samples, ok := pixelData["SamplesPerPixel"].(float64); !ok || (samples != 1 && samples != 3) {
+		// The rule already advertised "1 (grayscale) or 3 (color)" but only ever
+		// checked presence, so SamplesPerPixel:7 passed.
 		findings = append(findings, Finding{
 			RuleID:      "DICOM-P003",
-			Severity:    "warning",
+			Severity:    "error",
 			Element:     "Samples Per Pixel (0028,0002)",
 			Expected:    "1 (grayscale) or 3 (color)",
 			Actual:      "missing or zero",
@@ -245,10 +270,11 @@ func (cv *ConformanceValidator) ValidatePixelData(pixelData map[string]interface
 	}
 
 	// Rule P4: BitsAllocated present
-	if bitsAlloc, ok := pixelData["BitsAllocated"].(float64); !ok || bitsAlloc == 0 {
+	if bitsAlloc, ok := pixelData["BitsAllocated"].(float64); !ok || bitsAlloc <= 0 ||
+		(bitsAlloc != 1 && (bitsAlloc < 8 || bitsAlloc > 64 || math.Mod(bitsAlloc, 8) != 0)) {
 		findings = append(findings, Finding{
 			RuleID:      "DICOM-P004",
-			Severity:    "warning",
+			Severity:    "error",
 			Element:     "Bits Allocated (0028,0100)",
 			Expected:    "8, 16, or 32",
 			Actual:      "missing or zero",
@@ -286,14 +312,21 @@ func (cv *ConformanceValidator) ValidatePixelData(pixelData map[string]interface
 
 	// Rule P7: Photometric Interpretation valid
 	if photoInterp, ok := pixelData["PhotometricInterpretation"].(string); ok {
+		// PS3.3 C.7.6.3.1.2. The previous map omitted PALETTE COLOR,
+		// YBR_FULL_422, YBR_PARTIAL_422 and YBR_PARTIAL_420 — flagging the
+		// common JPEG colour case as non-conformant — while accepting
+		// "YBR_PARTIAL", which is not an enumerated value.
 		validInterps := map[string]bool{
-			"MONOCHROME1": true,
-			"MONOCHROME2": true,
-			"RGB":         true,
-			"YBR_FULL":    true,
-			"YBR_PARTIAL": true,
-			"YBR_ICT":     true,
-			"YBR_RCT":     true,
+			"MONOCHROME1":     true,
+			"MONOCHROME2":     true,
+			"PALETTE COLOR":   true,
+			"RGB":             true,
+			"YBR_FULL":        true,
+			"YBR_FULL_422":    true,
+			"YBR_PARTIAL_422": true,
+			"YBR_PARTIAL_420": true,
+			"YBR_ICT":         true,
+			"YBR_RCT":         true,
 		}
 		if !validInterps[photoInterp] {
 			findings = append(findings, Finding{
@@ -324,6 +357,11 @@ func (cv *ConformanceValidator) GetConformanceReport(findings []Finding) map[str
 			warningCount++
 		case "info":
 			infoCount++
+		default:
+			// Fail closed: an unrecognised severity (a typo, or a new level added
+			// later) previously counted toward nothing and so could never fail a
+			// verdict while still appearing in total_findings.
+			errorCount++
 		}
 	}
 
@@ -356,19 +394,27 @@ func (cv *ConformanceValidator) GetConformanceReport(findings []Finding) map[str
 // Helper functions
 
 func isValidDate(dateStr string) bool {
-	if len(dateStr) != 8 {
-		return false
-	}
-	matched, _ := regexp.MatchString(`^\d{8}$`, dateStr)
-	return matched
+	// Parse rather than pattern-match: ^\d{8}$ accepted 99999999 and 20231345
+	// (month 13, day 45) as valid DICOM dates.
+	_, err := time.Parse("20060102", dateStr)
+	return err == nil
 }
 
+// dicomTimePattern is anchored at both ends: the previous `^\d{6}` matched any
+// 6..14 byte value that merely started with six digits, so "123456<script>" was
+// reported as a valid DICOM TM.
+var dicomTimePattern = regexp.MustCompile(`^(\d{2})(\d{2})(\d{2})(\.\d{1,6})?$`)
+
 func isValidTime(timeStr string) bool {
-	if len(timeStr) < 6 || len(timeStr) > 14 {
+	m := dicomTimePattern.FindStringSubmatch(timeStr)
+	if m == nil {
 		return false
 	}
-	matched, _ := regexp.MatchString(`^\d{6}`, timeStr)
-	return matched
+	hh, _ := strconv.Atoi(m[1])
+	mm, _ := strconv.Atoi(m[2])
+	ss, _ := strconv.Atoi(m[3])
+	// Seconds may reach 60 for a leap second (PS3.5 Table 6.2-1).
+	return hh < 24 && mm < 60 && ss <= 60
 }
 
 func isColorModality(photoInterp string) bool {
@@ -379,4 +425,18 @@ func isColorModality(photoInterp string) bool {
 		"YBR_RCT":  true,
 	}
 	return colorModes[photoInterp]
+}
+
+// maxPlausibleDimension bounds Rows/Columns. It is deliberately far above any
+// real modality output while still rejecting the absurd values that overflow a
+// downstream rows*cols*bits computation.
+const maxPlausibleDimension = 1 << 20
+
+// uidSyntax is the DICOM UI value representation: dot-separated numeric
+// components, at most 64 characters (PS3.5 §9.1).
+var uidSyntax = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`)
+
+// isValidUID reports whether s is a syntactically valid DICOM UID.
+func isValidUID(s string) bool {
+	return s != "" && len(s) <= 64 && uidSyntax.MatchString(s)
 }
