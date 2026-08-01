@@ -656,16 +656,14 @@ func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RG
 	case transfersyntax.HEVCM10P51.UID:
 		index = beginEncapsulatedPixelData(obj, index)
 		for j = 0; j < frames; j++ {
-			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if RGB {
-				offset = 3 * offset
-				if err := mpeg.MPEGencodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
-					return err
-				}
-			} else {
-				if err := mpeg.MPEGencodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
-					return err
-				}
+			// frameBounds gives this frame's [start,end). The previous code
+			// sliced img[offset:] open-ended to the end of the whole multi-frame
+			// buffer, so every frame but the last was handed too many bytes. The
+			// ffmpeg backend rejects that against an exact-size check; the
+			// passthrough backend silently copies the surplus frames in.
+			samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
+			if err := mpeg.MPEGencodeContext(ctx, img[start:end], cols, rows, samples, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+				return err
 			}
 			index = appendEncapsulatedFrame(obj, index, JPEGData)
 			JPEGData = nil
@@ -679,16 +677,9 @@ func compress(ctx context.Context, obj media.DICOMObject, i *int, img []byte, RG
 	case transfersyntax.SMPTEST211030PCMDigitalAudio.UID:
 		index = beginEncapsulatedPixelData(obj, index)
 		for j = 0; j < frames; j++ {
-			offset = j * uint32(cols) * uint32(rows) * uint32(bitsa) / 8
-			if RGB {
-				offset = 3 * offset
-				if err := smpte2110.SMPTE2110encodeContext(ctx, img[offset:], cols, rows, 3, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
-					return err
-				}
-			} else {
-				if err := smpte2110.SMPTE2110encodeContext(ctx, img[offset:], cols, rows, 1, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
-					return err
-				}
+			samples, start, end := frameBounds(j, cols, rows, bitsa, RGB)
+			if err := smpte2110.SMPTE2110encodeContext(ctx, img[start:end], cols, rows, samples, bitsa, &JPEGData, &JPEGBytes, outTS); err != nil {
+				return err
 			}
 			index = appendEncapsulatedFrame(obj, index, JPEGData)
 			JPEGData = nil
