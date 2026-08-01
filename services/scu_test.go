@@ -427,6 +427,7 @@ func (m *storeMockPDU) SetCalledAE(_ string)                          {}
 func (m *storeMockPDU) SetCallingAE(_ string)                         {}
 func (m *storeMockPDU) SetConn(_ *bufio.ReadWriter)                   {}
 func (m *storeMockPDU) SetNetConn(_ net.Conn)                         {}
+func (m *storeMockPDU) SetReadDeadline(_ time.Time) error             { return nil }
 func (m *storeMockPDU) NextPDU() (media.DICOMObject, error)           { return nil, nil }
 func (m *storeMockPDU) AddPresContexts(_ network.PresentationContext) {}
 func (m *storeMockPDU) GetAcceptedPresentationContexts() []network.PresentationContextAccept {

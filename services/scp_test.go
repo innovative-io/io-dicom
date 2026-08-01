@@ -951,6 +951,7 @@ func (m *cgetStoreSubopMockPDU) SetCalledAE(_ string)                           
 func (m *cgetStoreSubopMockPDU) SetCallingAE(_ string)                                           {}
 func (m *cgetStoreSubopMockPDU) SetConn(_ *bufio.ReadWriter)                                     {}
 func (m *cgetStoreSubopMockPDU) SetNetConn(_ net.Conn)                                           {}
+func (m *cgetStoreSubopMockPDU) SetReadDeadline(_ time.Time) error                               { return nil }
 func (m *cgetStoreSubopMockPDU) AddPresContexts(_ network.PresentationContext)                   {}
 func (m *cgetStoreSubopMockPDU) SetOnAssociationRequest(_ func(network.AssociationRequest) bool) {}
 func (m *cgetStoreSubopMockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))                         {}

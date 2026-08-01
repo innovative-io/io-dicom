@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/innovative-io/io-dicom/dictionary/tags"
 	"github.com/innovative-io/io-dicom/dictionary/transfersyntax"
@@ -70,6 +71,7 @@ func (m *mockPDU) SetCalledAE(_ string)                                         
 func (m *mockPDU) SetCallingAE(_ string)                                           {}
 func (m *mockPDU) SetConn(_ *bufio.ReadWriter)                                     {}
 func (m *mockPDU) SetNetConn(_ net.Conn)                                           {}
+func (m *mockPDU) SetReadDeadline(_ time.Time) error                               { return nil }
 func (m *mockPDU) AddPresContexts(_ network.PresentationContext)                   {}
 func (m *mockPDU) SetOnAssociationRequest(_ func(network.AssociationRequest) bool) {}
 func (m *mockPDU) SetOnRawPDU(_ func(network.RawPDUEvent))                         {}
