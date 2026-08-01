@@ -869,11 +869,9 @@ func (pdu *pduService) writeEncodedPDU(pduType byte, writer func(rw *bufio.ReadW
 }
 
 func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
-	if pdu.Pdata.Buffer != nil {
-		pdu.Pdata.Buffer.Clear()
-	} else {
-		pdu.Pdata.Buffer = media.NewDICOMBuffer()
-	}
+	// The send path no longer touches Pdata.Buffer: WriteObjTo streams the
+	// dataset directly into PDVs below. Pdata.Buffer is now owned solely by the
+	// receive path (NextPDU), which allocates it on demand.
 
 	if pcid, ok := selectPresentationContextIDForAbstractSyntax(pdu.AcceptedPresentationContexts, negotiatedAbstractSyntaxForObject(DCO)); ok {
 		pdu.Pdata.PresentationContextID = pcid
@@ -893,17 +891,21 @@ func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
 		return errors.New("pduservice::Write - PresentationContextID==0")
 	}
 
-	if !pdu.parseDCMIntoRaw(DCO) {
-		return errors.New("pduservice::Write - ParseDCMIntoRaw failed")
-	}
-
 	pdu.Pdata.MsgHeader = ItemType
 	if pdu.AssocAC.GetMaxSubLength() > maxPduLength {
 		pdu.AssocAC.SetMaxSubLength(maxPduLength)
 	}
 
-	// Fixed MaxLength - 6 20200811
-	pdu.Pdata.BlockSize = pdu.AssocAC.GetMaxSubLength() - 6
+	// Block size = negotiated max PDU length minus the 6-byte P-DATA-TF + PDV
+	// framing overhead. A peer that negotiated 0 ("unlimited") or an implausibly
+	// large value is treated as maxPduLength, matching Connect()'s handling and
+	// avoiding an underflow on the subtraction below.
+	maxSub := pdu.AssocAC.GetMaxSubLength()
+	if maxSub == 0 || maxSub > maxPduLength {
+		maxSub = maxPduLength
+	}
+	blockSize := int(maxSub) - 6
+	pdu.Pdata.BlockSize = uint32(blockSize) // kept for readers of Pdata state
 
 	if ItemType > 0x00 {
 		sopClassUID := DCO.GetString(tags.AffectedSOPClassUID)
@@ -915,8 +917,17 @@ func (pdu *pduService) Write(DCO media.DICOMObject, ItemType byte) error {
 		}
 	}
 
+	// Stream the dataset straight into P-DATA PDVs. The old path serialised the
+	// entire object into Pdata.Buffer first (a full second copy of the pixel
+	// data) and then chunked that buffer; WriteObjTo emits the identical byte
+	// stream through pdvChunkWriter, so peak send memory is one block, not the
+	// whole message.
 	return pdu.writeEncodedPDU(byte(pdutype.PDUDataTransfer), func(rw *bufio.ReadWriter) error {
-		return pdu.Pdata.Write(rw)
+		cw := newPDVChunkWriter(rw, blockSize, pdu.Pdata.PresentationContextID, ItemType)
+		if _, err := media.WriteObjTo(cw, DCO); err != nil {
+			return err
+		}
+		return cw.Close()
 	})
 }
 
@@ -1062,11 +1073,6 @@ func (pdu *pduService) interogateAAssociateRQ(rw *bufio.ReadWriter) error {
 	return pdu.writeEncodedPDU(byte(pdutype.AssociationReject), func(rw *bufio.ReadWriter) error {
 		return pdu.AssocRJ.Write(rw)
 	})
-}
-
-func (pdu *pduService) parseDCMIntoRaw(DCO media.DICOMObject) bool {
-	pdu.Pdata.Buffer.WriteObj(DCO)
-	return true
 }
 
 func (pdu *pduService) parseRawVRIntoDCM(DCO media.DICOMObject) bool {
