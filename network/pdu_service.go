@@ -176,7 +176,21 @@ type pduService struct {
 	// allocation per inbound PDU. One association is read by a single
 	// goroutine, so sharing it across calls is safe.
 	hdrScratch [10]byte
+	// recvScratch is reused as the raw byte buffer for inbound P-DATA-TF PDUs,
+	// which dominate received traffic (a multi-megabyte C-STORE arrives as
+	// hundreds of them). Reuse is safe because a P-DATA PDU's bytes are fully
+	// consumed before the next read: emitRawPDU copies, and ReadDynamic copies
+	// each PDV payload into Pdata.Buffer. Association/release/abort PDUs are not
+	// reused here — they are rare and their parsers may retain sub-slices. Reuse
+	// is capped so a single outsized PDU cannot pin a large buffer for the life
+	// of the association.
+	recvScratch []byte
 }
+
+// recvScratchReuseMax bounds the size of P-DATA PDU whose backing buffer is
+// retained for reuse. PDUs above it get a one-off allocation, so a peer sending
+// a single huge PDU cannot inflate the per-association scratch permanently.
+const recvScratchReuseMax = 1 << 20
 
 // NewPDUService creates a PDUService. Pass PDUServiceOption values to
 // configure non-default behaviour (e.g. WithImplementationClass).
@@ -815,7 +829,20 @@ func (pdu *pduService) readIncomingPDU() (byte, []byte, error) {
 	}
 
 	remaining := int(pduLength) - 4
-	data := make([]byte, 10+remaining)
+	total := 10 + remaining
+	// P-DATA is the bulk of inbound traffic and its raw bytes are fully consumed
+	// (copied out) before the next read, so reuse one buffer for it instead of
+	// allocating per PDU. Other PDU types, and any P-DATA larger than the reuse
+	// cap, get their own buffer.
+	var data []byte
+	if itemType == pdutype.PDUDataTransfer && total <= recvScratchReuseMax {
+		if cap(pdu.recvScratch) < total {
+			pdu.recvScratch = make([]byte, total)
+		}
+		data = pdu.recvScratch[:total]
+	} else {
+		data = make([]byte, total)
+	}
 	copy(data, header[:])
 	if remaining > 0 {
 		// Re-arm: the body is a separate read, and a peer that delivered a
