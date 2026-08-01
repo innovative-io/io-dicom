@@ -515,6 +515,11 @@ int io_ffmpeg_decode(const uint8_t* src, size_t src_size,
 	}
 	avio = avio_alloc_context(avio_buffer, 4096, 0, &reader, io_ffmpeg_read_packet, NULL, io_ffmpeg_seek);
 	if (!avio) {
+		// Ownership of avio_buffer transfers to avio only on success; on failure
+		// it is still ours, and cleanup frees only via avio->buffer (guarded by
+		// `if (avio)`), so free it here or it leaks.
+		av_free(avio_buffer);
+		avio_buffer = NULL;
 		io_ffmpeg_set_error(err, err_len, "avio_alloc_context failed");
 		ret = AVERROR(ENOMEM);
 		goto cleanup;
