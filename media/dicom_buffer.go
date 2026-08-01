@@ -24,6 +24,43 @@ type DICOMBuffer struct {
 	data      []byte
 	position  int
 	size      int
+
+	// tagSlab batches DICOMTag allocations for the read path. Parsed tags are
+	// retained by the DICOMObject and never freed individually, so the old
+	// sync.Pool was always empty on Get and never reclaimed anything — it added
+	// Get + zeroing overhead while still allocating one object per tag. Handing
+	// out &tagSlab[i] from a fixed-capacity chunk turns N per-tag allocations
+	// into N/tagSlabChunk. A full chunk is never grown (that would move earlier
+	// tags); a fresh chunk is allocated instead, and the old one stays alive
+	// through the tags that reference it — exactly the memory the object holds.
+	tagSlab []DICOMTag
+	tagIdx  int
+}
+
+// tagSlabChunk is the number of DICOMTags allocated per slab. A real DICOM
+// object carries dozens to hundreds of tags, so this keeps per-parse slab count
+// small while the wasted tail (unused slots in the final chunk) stays modest.
+const tagSlabChunk = 64
+
+// newTag returns the next zeroed DICOMTag from the buffer's slab.
+func (buf *DICOMBuffer) newTag() *DICOMTag {
+	if buf.tagIdx >= len(buf.tagSlab) {
+		buf.tagSlab = make([]DICOMTag, tagSlabChunk) // fresh backing array; never grow in place
+		buf.tagIdx = 0
+	}
+	t := &buf.tagSlab[buf.tagIdx]
+	buf.tagIdx++
+	return t // already zero from make
+}
+
+// releaseTag reclaims the slot for a tag that was allocated but not kept, which
+// only happens when ReadTag fails on the tag it just handed out. Since that tag
+// is always the most recent, releasing rewinds the slab index by one.
+func (buf *DICOMBuffer) releaseTag(t *DICOMTag) {
+	if buf.tagIdx > 0 && &buf.tagSlab[buf.tagIdx-1] == t {
+		buf.tagIdx--
+		*t = DICOMTag{} // clear so the slot is zero if handed out again
+	}
 }
 
 // NewDICOMBuffer creates an empty DICOMBuffer with a 4096-byte pre-allocated buffer.
@@ -143,7 +180,7 @@ func (buf *DICOMBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 	if err != nil {
 		return nil, err
 	}
-	tag := newTag()
+	tag := buf.newTag()
 	tag.Group = group
 	tag.Element = element
 
@@ -158,13 +195,13 @@ func (buf *DICOMBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 		if isLongExplicitVR(tag.VR) {
 			_, err := buf.ReadUint16(buf.bigEndian)
 			if err != nil {
-				releaseTag(tag)
+				buf.releaseTag(tag)
 				return nil, err
 			}
 
 			length, err := buf.ReadUint32(buf.bigEndian)
 			if err != nil {
-				releaseTag(tag)
+				buf.releaseTag(tag)
 				return nil, err
 			}
 
@@ -172,7 +209,7 @@ func (buf *DICOMBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 		} else {
 			length, err := buf.ReadUint16(buf.bigEndian)
 			if err != nil {
-				releaseTag(tag)
+				buf.releaseTag(tag)
 				return nil, err
 			}
 			tag.Length = uint32(length)
@@ -183,7 +220,7 @@ func (buf *DICOMBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 		}
 		length, err := buf.ReadUint32(buf.bigEndian)
 		if err != nil {
-			releaseTag(tag)
+			buf.releaseTag(tag)
 			return nil, err
 		}
 		tag.Length = length
@@ -197,7 +234,7 @@ func (buf *DICOMBuffer) ReadTag(explicitVR bool) (*DICOMTag, error) {
 		// fresh backing array is allocated rather than the old one being reused.
 		data, err := buf.ReadSlice(int(tag.Length))
 		if err != nil {
-			releaseTag(tag)
+			buf.releaseTag(tag)
 			return nil, err
 		}
 		tag.Data = data

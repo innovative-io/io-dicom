@@ -6,27 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"sync"
 )
-
-// tagPool recycles DICOMTag allocations in the read hot path.
-// Get returns a zeroed tag; Put resets and returns it to the pool.
-var tagPool = sync.Pool{
-	New: func() any { return &DICOMTag{} },
-}
-
-// newTag retrieves a zeroed DICOMTag from the pool.
-func newTag() *DICOMTag {
-	t := tagPool.Get().(*DICOMTag)
-	*t = DICOMTag{} // zero all fields
-	return t
-}
-
-// releaseTag returns a tag to the pool. Must not be called if the tag
-// has been added to a DICOMObject (the object owns its lifetime).
-func releaseTag(t *DICOMTag) {
-	tagPool.Put(t)
-}
 
 // DICOMTag DICOM tag structure
 type DICOMTag struct {
