@@ -103,6 +103,13 @@ func (pd *PresentationDataTransfer) ReadDynamic(buf *media.DICOMBuffer) (err err
 	pd.PresentationContextID = pd.pdv.PresentationContextID
 	return nil
 }
+
+// Write serialises the buffered dataset into P-DATA-TF PDVs on rw. Like every
+// other *.Write(rw) method in this package it does NOT flush: the sole caller,
+// writeEncodedPDU, flushes once after Write returns. Flushing per fragment (as
+// this used to) forced one underlying write per BlockSize chunk — typically one
+// syscall per ~16 KiB of a negotiated PDU — so a multi-megabyte C-STORE cost
+// thousands of tiny writes instead of letting bufio batch them.
 func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 	// Reused by every writePDVHeader call below; see that function's comment.
 	var hdr [12]byte
@@ -128,7 +135,6 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 		if err := writePDVHeader(rw, &hdr, pd.ItemType, pd.Reserved1, pd.Length, pd.pdv.Length, pd.pdv.PresentationContextID, pd.MsgHeader); err != nil {
 			return fmt.Errorf("pdata::Write: %w", err)
 		}
-		rw.Flush()
 		pd.Length = TLength
 		return nil
 	}
@@ -165,8 +171,6 @@ func (pd *PresentationDataTransfer) Write(rw *bufio.ReadWriter) error {
 		if err != nil {
 			return fmt.Errorf("pdata::Write: %w", err)
 		}
-
-		rw.Flush()
 
 		if n != int(pd.BlockSize) {
 			return fmt.Errorf("pdata::Write: wrote %d bytes, expected %d", n, pd.BlockSize)
