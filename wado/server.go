@@ -457,58 +457,6 @@ func writeMultipartDICOM(w http.ResponseWriter, objects []media.DICOMObject) {
 	_ = mw.Close()
 }
 
-// dicomJSONTag is a single tag entry in DICOMweb JSON format.
-type dicomJSONTag struct {
-	VR    string        `json:"vr"`
-	Value []interface{} `json:"Value,omitempty"`
-}
-
-// writeJSONMetadata serializes objects to DICOMweb JSON (application/dicom+json),
-// excluding pixel data.
-func writeJSONMetadata(w http.ResponseWriter, objects []media.DICOMObject) {
-	result := make([]map[string]dicomJSONTag, 0, len(objects))
-	for _, obj := range objects {
-		result = append(result, objectToJSONTags(obj))
-	}
-	w.Header().Set("Content-Type", "application/dicom+json")
-	_ = json.NewEncoder(w).Encode(result)
-}
-
-// objectToJSONTags converts a DICOMObject to the DICOMweb JSON tag map.
-// Pixel data (7FE0,0010) is omitted.
-func objectToJSONTags(obj media.DICOMObject) map[string]dicomJSONTag {
-	result := make(map[string]dicomJSONTag)
-	for _, tag := range obj.GetTags() {
-		// Omit pixel data from JSON representations.
-		if tag.Group == 0x7FE0 && tag.Element == 0x0010 {
-			continue
-		}
-		key := fmt.Sprintf("%04X%04X", tag.Group, tag.Element)
-		entry := dicomJSONTag{VR: tag.VR}
-		switch tag.VR {
-		case "US":
-			entry.Value = []interface{}{tag.GetUint16()}
-		case "UL":
-			entry.Value = []interface{}{tag.GetUint32()}
-		case "FL":
-			entry.Value = []interface{}{tag.GetFloat()}
-		case "FD":
-			entry.Value = []interface{}{tag.GetFloat64()}
-		case "OB", "OW", "OD", "OF", "UN":
-			// Inline small bulk data; larger values are omitted for JSON responses.
-			if len(tag.Data) > 0 && len(tag.Data) <= 4096 {
-				entry.Value = []interface{}{tag.Data}
-			}
-		default:
-			if s := tag.GetString(); s != "" {
-				entry.Value = []interface{}{s}
-			}
-		}
-		result[key] = entry
-	}
-	return result
-}
-
 // buildStowResponse constructs the STOW-RS JSON success response body.
 func buildStowResponse(objects []media.DICOMObject) map[string]interface{} {
 	items := make([]interface{}, 0, len(objects))
