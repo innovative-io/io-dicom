@@ -8,6 +8,12 @@ import (
 	"github.com/innovative-io/io-dicom/network/internal/pdutype"
 )
 
+// MaxPresentationContexts is the number of presentation contexts that fit in a
+// single association. DICOM PS3.8 §9.3.2.2 requires Presentation Context IDs to
+// be odd integers in the range 1-255, which yields exactly 128 usable IDs.
+// Proposing more than this cannot produce a conformant A-ASSOCIATE-RQ.
+const MaxPresentationContexts = 128
+
 // PresentationContext - PresentationContext
 type PresentationContext interface {
 	GetPresentationContextID() byte
