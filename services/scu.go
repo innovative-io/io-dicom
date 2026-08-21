@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/innovative-io/io-dicom/dictionary/sopclass"
 	"github.com/innovative-io/io-dicom/dictionary/tags"
@@ -50,6 +51,11 @@ type SCU interface {
 	// can be used to send multiple instances over that one connection. Call
 	// Close on the session when all instances have been sent.
 	BeginStoreSession(ctx context.Context) (StoreSession, error)
+	// BeginStoreSessionFor opens a store session proposing exactly the given
+	// storage SOP class UIDs. Prefer this over BeginStoreSession when the set of
+	// classes to be sent is known: it keeps the A-ASSOCIATE-RQ small and cannot
+	// hit the MaxPresentationContexts ceiling.
+	BeginStoreSessionFor(ctx context.Context, sopClassUIDs ...string) (StoreSession, error)
 	SetOnCFindResult(f func(result media.DICOMObject))
 	SetOnCMoveResult(f func(result media.DICOMObject))
 	// SetOnCGetStore registers a callback invoked for each C-STORE sub-operation
@@ -254,9 +260,11 @@ func (d *scu) GetSCU(ctx context.Context, Query media.DICOMObject) (uint16, erro
 		abstractSyntax: sopclass.StudyRootQueryRetrieveInformationModelGet.UID,
 	}}
 	storageTransferSyntaxes := transfersyntax.GetSupportedTransferSyntaxUIDs()
-	for _, storageClass := range sopclass.GetStorageSOPClasses() {
+	// contexts[0] is the C-GET information model, so the storage classes for the
+	// incoming sub-operations get the remaining budget.
+	for _, uid := range d.boundedStorageClassUIDs(network.MaxPresentationContexts-len(contexts), "GetSCU") {
 		contexts = append(contexts, associationPresentationContext{
-			abstractSyntax:   storageClass.UID,
+			abstractSyntax:   uid,
 			transferSyntaxes: storageTransferSyntaxes,
 		})
 	}
@@ -411,20 +419,76 @@ func (ss *storeSession) Close() error {
 	return ss.pdu.Close()
 }
 
-// BeginStoreSession opens a single DICOM association proposing all known
-// storage SOP classes and transfer syntaxes, and returns a StoreSession for
-// sending multiple instances over that one connection.
+// BeginStoreSession opens a single DICOM association proposing storage SOP
+// classes and transfer syntaxes, and returns a StoreSession for sending
+// multiple instances over that one connection.
+//
+// An association carries at most MaxPresentationContexts presentation contexts
+// (PS3.8 §9.3.2.2), and the storage SOP class dictionary is larger than that,
+// so only the first MaxPresentationContexts classes are proposed. The classes
+// are ordered by clinical frequency, so the common ones are covered, but the
+// omitted tail is logged at WARN rather than dropped silently. Callers that
+// know which SOP classes they will send should use BeginStoreSessionFor, which
+// proposes exactly those and keeps the A-ASSOCIATE-RQ small.
 func (d *scu) BeginStoreSession(ctx context.Context) (StoreSession, error) {
-	pdu := d.newPDUService()
+	return d.BeginStoreSessionFor(ctx, d.boundedStorageClassUIDs(network.MaxPresentationContexts, "BeginStoreSession")...)
+}
+
+// boundedStorageClassUIDs returns storage SOP class UIDs for proposal in an
+// A-ASSOCIATE-RQ, limited to budget entries. The storage dictionary is larger
+// than a single association can carry (PS3.8 §9.3.2.2 allows
+// MaxPresentationContexts contexts), and the classes are ordered by clinical
+// frequency, so truncating keeps the common ones. What was dropped is logged
+// rather than silently discarded: instances of an omitted class will fail on
+// the resulting association.
+func (d *scu) boundedStorageClassUIDs(budget int, caller string) []string {
+	classes := sopclass.GetStorageSOPClasses()
+	if len(classes) > budget {
+		omitted := classes[budget:]
+		names := make([]string, 0, len(omitted))
+		for _, c := range omitted {
+			names = append(names, c.Name)
+		}
+		d.logger.Warn(caller+": storage SOP classes exceed the presentation context limit; "+
+			"instances of the omitted classes will fail on this association",
+			"proposed", budget,
+			"omitted", len(omitted),
+		)
+		d.logger.Debug(caller+": omitted storage SOP classes", "classes", strings.Join(names, ","))
+		classes = classes[:budget]
+	}
+	uids := make([]string, 0, len(classes))
+	for _, c := range classes {
+		uids = append(uids, c.UID)
+	}
+	return uids
+}
+
+// BeginStoreSessionFor opens a single DICOM association proposing exactly the
+// given storage SOP class UIDs, and returns a StoreSession for sending multiple
+// instances over that one connection. Proposing only the classes that will
+// actually be sent keeps the A-ASSOCIATE-RQ small — every context carries the
+// full supported transfer syntax list — and avoids the
+// MaxPresentationContexts ceiling entirely.
+func (d *scu) BeginStoreSessionFor(ctx context.Context, sopClassUIDs ...string) (StoreSession, error) {
+	if len(sopClassUIDs) == 0 {
+		return nil, errors.New("scu: BeginStoreSessionFor: no SOP class UIDs given")
+	}
 	storageTransferSyntaxes := transfersyntax.GetSupportedTransferSyntaxUIDs()
-	storageClasses := sopclass.GetStorageSOPClasses()
-	contexts := make([]associationPresentationContext, 0, len(storageClasses))
-	for _, storageClass := range storageClasses {
+	contexts := make([]associationPresentationContext, 0, len(sopClassUIDs))
+	seen := make(map[string]bool, len(sopClassUIDs))
+	for _, uid := range sopClassUIDs {
+		if uid == "" || seen[uid] {
+			continue
+		}
+		seen[uid] = true
 		contexts = append(contexts, associationPresentationContext{
-			abstractSyntax:   storageClass.UID,
+			abstractSyntax:   uid,
 			transferSyntaxes: storageTransferSyntaxes,
 		})
 	}
+
+	pdu := d.newPDUService()
 	if err := d.openAssociationWithContexts(ctx, pdu, contexts); err != nil {
 		pdu.Close()
 		return nil, err
@@ -438,9 +502,19 @@ func (d *scu) openAssociationWithContexts(ctx context.Context, pdu network.PDUSe
 	pdu.SetCalledAE(d.destination.CalledAE)
 	pdu.SetOnRawPDU(d.onRawPDU)
 
-	network.Resetuniq()
-	for _, contextSpec := range contexts {
+	// Presentation Context IDs must be odd and unique within the association
+	// (PS3.8 §9.3.2.2), which allows exactly MaxPresentationContexts of them.
+	// Assign them deterministically from the slice index rather than from a
+	// package-global counter: the counter silently wrapped past 255, handing
+	// duplicate IDs to distinct abstract syntaxes, and being global it also
+	// interleaved between associations opened concurrently.
+	if len(contexts) > network.MaxPresentationContexts {
+		return fmt.Errorf("scu: cannot propose %d presentation contexts, the DICOM limit is %d (PS3.8 §9.3.2.2)",
+			len(contexts), network.MaxPresentationContexts)
+	}
+	for i, contextSpec := range contexts {
 		presContext := network.NewPresentationContext()
+		presContext.SetPresentationContextID(byte(2*i + 1))
 		presContext.SetAbstractSyntax(contextSpec.abstractSyntax)
 		hasEVLE := false
 		for _, ts := range contextSpec.transferSyntaxes {
