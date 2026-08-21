@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -66,7 +67,11 @@ func TestBeginStoreSessionFor_ProposesOnlyRequested(t *testing.T) {
 		return dicomstatus.Success
 	})
 
-	obj, err := media.NewDCMObjFromFile("../testdata/test2.dcm")
+	const samplePath = "../testdata/test2.dcm"
+	if _, err := os.Stat(samplePath); err != nil {
+		t.Skipf("sample fixture unavailable: %v", err)
+	}
+	obj, err := media.NewDCMObjFromFile(samplePath)
 	if err != nil {
 		t.Fatalf("load sample: %v", err)
 	}
